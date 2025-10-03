@@ -17,7 +17,7 @@ export class Review {
   @Column({ nullable: true })
   bookingId: number;
 
-  @Column({ type: 'int', check: 'rating >= 1 AND rating <= 5' })
+  @Column({ type: 'int' })
   rating: number;
 
   @Column({ type: 'text', nullable: true })

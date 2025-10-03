@@ -116,7 +116,7 @@ export class Business extends BaseEntity {
   @Column({ default: false })
   autoAcceptBookings: boolean;
 
-  @Column({ type: 'int', default: 2, check: 'maxBookingsPerUserPerDay >= 1' })
+  @Column({ type: 'int', default: 2 })
   maxBookingsPerUserPerDay: number;
 
   @Column({ default: false })

@@ -38,7 +38,7 @@ export class User extends BaseEntity {
   @Column({ default: true })
   isActive: boolean;
 
-  @Column({ type: 'int', default: 100, check: 'trustScore >= 0 AND trustScore <= 100' })
+  @Column({ type: 'int', default: 100 })
   trustScore: number;
 
   @Column({ nullable: true })
