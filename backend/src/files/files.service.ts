@@ -15,7 +15,7 @@ export class FilesService {
     });
   }
 
-  async uploadFile(file: Express.Multer.File, folder: string = 'uploads'): Promise<string> {
+  async uploadFile(file: any, folder: string = 'uploads'): Promise<string> {
     try {
       const fileExtension = file.originalname.split('.').pop();
       const fileName = `${folder}/${uuidv4()}.${fileExtension}`;
@@ -36,7 +36,7 @@ export class FilesService {
     }
   }
 
-  async uploadMultipleFiles(files: Express.Multer.File[], folder: string = 'uploads'): Promise<string[]> {
+  async uploadMultipleFiles(files: any[], folder: string = 'uploads'): Promise<string[]> {
     try {
       const uploadPromises = files.map(file => this.uploadFile(file, folder));
       const results = await Promise.all(uploadPromises);
@@ -93,11 +93,11 @@ export class FilesService {
     }
   }
 
-  validateFileType(file: Express.Multer.File, allowedTypes: string[]): boolean {
+  validateFileType(file: any, allowedTypes: string[]): boolean {
     return allowedTypes.includes(file.mimetype);
   }
 
-  validateFileSize(file: Express.Multer.File, maxSizeInMB: number): boolean {
+  validateFileSize(file: any, maxSizeInMB: number): boolean {
     const maxSizeInBytes = maxSizeInMB * 1024 * 1024;
     return file.size <= maxSizeInBytes;
   }

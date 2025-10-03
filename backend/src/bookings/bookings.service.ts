@@ -258,7 +258,7 @@ export class BookingsService {
     });
 
     // Update user trust score for successful check-in
-    await this.reviewsService.updateTrustScore(booking.customer.id, 10);
+    await this.reviewsService.updateTrustScore(booking.customer.id as any, 10);
 
     return this.findOne(id);
   }

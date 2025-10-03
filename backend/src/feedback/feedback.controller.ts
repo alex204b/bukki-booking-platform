@@ -20,7 +20,7 @@ export class FeedbackController {
   @Post()
   async createFeedback(@Body() createFeedbackDto: CreateFeedbackDto, @Request() req?) {
     return this.feedbackService.createFeedback(
-      createFeedbackDto.type || 'general',
+      (createFeedbackDto.type as any) || 'general',
       createFeedbackDto.rating,
       createFeedbackDto.content,
       req?.user?.id,

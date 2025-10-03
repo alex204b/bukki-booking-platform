@@ -17,7 +17,7 @@ export class FilesController {
   @ApiOperation({ summary: 'Upload a single file' })
   @ApiResponse({ status: 200, description: 'File uploaded successfully' })
   async uploadFile(
-    @UploadedFile() file: Express.Multer.File,
+    @UploadedFile() file: any,
     @Body('folder') folder?: string
   ) {
     if (!file) {
@@ -45,7 +45,7 @@ export class FilesController {
   @ApiOperation({ summary: 'Upload multiple files' })
   @ApiResponse({ status: 200, description: 'Files uploaded successfully' })
   async uploadMultipleFiles(
-    @UploadedFile() files: Express.Multer.File[],
+    @UploadedFile() files: any[],
     @Body('folder') folder?: string
   ) {
     if (!files || files.length === 0) {

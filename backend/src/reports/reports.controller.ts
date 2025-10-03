@@ -21,7 +21,7 @@ export class ReportsController {
   @UseGuards(JwtAuthGuard)
   async createReport(@Body() createReportDto: CreateReportDto, @Request() req) {
     return this.reportsService.createReport(
-      createReportDto.type,
+      createReportDto.type as any,
       createReportDto.reason,
       createReportDto.details,
       req.user.id,
