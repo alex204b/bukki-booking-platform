@@ -22,7 +22,7 @@ export class ReportsController {
   async createReport(@Body() createReportDto: CreateReportDto, @Request() req) {
     return this.reportsService.createReport(
       createReportDto.type as any,
-      createReportDto.reason,
+      createReportDto.reason as any,
       createReportDto.details,
       req.user.id,
       createReportDto.reportedUserId,
