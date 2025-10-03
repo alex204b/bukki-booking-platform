@@ -1,0 +1,78 @@
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Request } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { UsersService } from './users.service';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { UserRole } from './entities/user.entity';
+
+@ApiTags('Users')
+@Controller('users')
+@UseGuards(JwtAuthGuard)
+@ApiBearerAuth()
+export class UsersController {
+  constructor(private readonly usersService: UsersService) {}
+
+  @Get()
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Get all users (Super Admin only)' })
+  @ApiResponse({ status: 200, description: 'Users retrieved successfully' })
+  async findAll(@Request() req) {
+    if (req.user.role !== UserRole.SUPER_ADMIN) {
+      throw new Error('Unauthorized');
+    }
+    return this.usersService.findAll();
+  }
+
+  @Get('profile')
+  @ApiOperation({ summary: 'Get current user profile' })
+  @ApiResponse({ status: 200, description: 'Profile retrieved successfully' })
+  async getProfile(@Request() req) {
+    return this.usersService.findOne(req.user.id);
+  }
+
+  @Patch('profile')
+  @ApiOperation({ summary: 'Update current user profile' })
+  @ApiResponse({ status: 200, description: 'Profile updated successfully' })
+  async updateProfile(@Request() req, @Body() updateData: any) {
+    return this.usersService.update(req.user.id, updateData);
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Get user by ID' })
+  @ApiResponse({ status: 200, description: 'User retrieved successfully' })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  async findOne(@Param('id') id: string) {
+    return this.usersService.findOne(id);
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Update user (Super Admin only)' })
+  @ApiResponse({ status: 200, description: 'User updated successfully' })
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
+  async update(@Param('id') id: string, @Body() updateData: any, @Request() req) {
+    return this.usersService.update(id, updateData);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Deactivate user (Super Admin only)' })
+  @ApiResponse({ status: 200, description: 'User deactivated successfully' })
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
+  async deactivate(@Param('id') id: string, @Request() req) {
+    await this.usersService.deactivate(id);
+    return { message: 'User deactivated successfully' };
+  }
+
+  @Post(':id/activate')
+  @ApiOperation({ summary: 'Activate user (Super Admin only)' })
+  @ApiResponse({ status: 200, description: 'User activated successfully' })
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
+  async activate(@Param('id') id: string, @Request() req) {
+    await this.usersService.activate(id);
+    return { message: 'User activated successfully' };
+  }
+}

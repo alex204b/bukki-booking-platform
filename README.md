@@ -1,0 +1,132 @@
+# MultiBusiness Booking Platform
+
+A comprehensive booking platform that allows customers to reserve services across various industries including beauty salons, tailors, mechanics, restaurants, and more.
+
+## Features (Highlights)
+
+### Customer
+- Browse/search businesses by category and location
+- Real-time availability; nearby and distance ordering
+- Book services; receive QR code for check-in
+- Rate visits (1–5 stars) and leave reviews
+- Multi-language (EN/RO/RU)
+
+### Business Owner
+- Onboarding wizard; services, working hours, custom booking fields
+- Dashboard with upcoming bookings; optional revenue visibility
+- QR check-in flow (scan and complete)
+- Team members (staff) with operational access (no revenue)
+- Contacts list and email campaigns
+- Auto-accept bookings toggle
+
+### Admin (Super Admin)
+- Approve/reject/suspend businesses
+- Manage users (activate/deactivate)
+- Admin dashboard with secure role-based access
+
+## Tech Stack
+
+- Frontend: React + TypeScript, Tailwind CSS, React Router, React Query
+- Backend: NestJS + TypeScript, TypeORM, PostgreSQL
+- Email: Nodemailer (SMTP)
+- Geocoding: Nominatim (OpenStreetMap)
+- QR Codes: qrcode
+- Auth: JWT (roles: customer, business_owner, super_admin)
+
+## Security
+
+- Passwords hashed (bcrypt)
+- Sensitive fields encrypted (AES-256-GCM) via TypeORM transformers:
+  - `users.phone`, `users.address`, `bookings.notes`, `business_contacts.email` (+ blind index `emailHash`)
+- HTTPS required in production
+- Signed QR/check-in server-side verification
+
+## Repository Layout
+
+```
+backend/   # NestJS app (API, services, entities)
+frontend/  # React app (UI)
+```
+
+## Environment Variables
+
+Create `.env` files (never commit real secrets). Templates:
+
+- `backend/env.example` (copy to `backend/.env`):
+  - DATABASE_* (Postgres), JWT_SECRET, JWT_EXPIRES_IN
+  - SMTP_* (email), FRONTEND_URL, NOMINATIM_CONTACT_EMAIL
+  - ENCRYPTION_KEY, ENCRYPTION_SALT
+- `frontend/.env`:
+  - REACT_APP_API_URL=http://localhost:3000
+
+## Setup (local)
+
+1) Install deps
+```bash
+npm install
+cd backend && npm install && cd ..
+cd frontend && npm install && cd ..
+```
+(or use any workspace script you prefer)
+
+2) Configure env vars
+- backend: copy `backend/env.example` to `backend/.env` and fill values
+- frontend: create `frontend/.env` with `REACT_APP_API_URL`
+
+3) Run
+```bash
+# terminal A
+cd backend
+npm run start:dev
+
+# terminal B
+cd frontend
+npm start
+```
+Backend on http://localhost:3000, frontend on http://localhost:3001.
+
+## Deployment (overview)
+
+1) Push to GitHub (private recommended)
+2) Provision managed Postgres (Neon/Railway/Supabase)
+3) Backend (Render/Railway)
+   - Build: `npm ci && npm run build`
+   - Start: `node dist/main.js`
+   - Set env vars from `backend/env.example`
+4) Frontend (Vercel/Netlify)
+   - Build: `npm ci && npm run build`
+   - Set `REACT_APP_API_URL` to backend URL
+5) Domains/HTTPS: point your domain to frontend host; `api.your-domain.com` to backend host
+
+## Key Flows
+
+- Email verification: `/auth/verify-email`, `/auth/resend-verification`
+- Booking create → QR issued → business scans → check-in completes and trust score +10
+- No-show sweep: reduces trust score (-50)
+- Business geocoding: automatic via Nominatim on create/update
+- Team management: invite by email; member accepts; gains access (no revenue)
+- Contacts & campaigns: manage list; send HTML campaigns via SMTP
+- Admin routes: protected by JWT + RolesGuard (super_admin)
+
+## Contributing (for future developers)
+
+- Use feature branches; keep PRs small and focused
+- Maintain type-safety and add meaningful names (see code style)
+- Add translations for EN/RO/RU; avoid hard-coded strings in UI
+- Keep sensitive data out of logs; prefer masked output
+- For new PII fields, consider encryption with `encryptedTransformer`
+- Before merging:
+  - Run build and linters (`npm run build` in both apps)
+  - Verify translations compile
+  - Smoke test core flows (auth, booking, QR, admin)
+
+## Troubleshooting
+
+- Email not sending: verify SMTP_* and provider limits
+- Geocoding empty: set NOMINATIM_CONTACT_EMAIL; ensure valid address
+- CORS errors: set FRONTEND_URL in backend env and allow it in CORS config
+- 401 errors: ensure JWT_SECRET matches and token is set in frontend
+
+## License
+
+MIT License
