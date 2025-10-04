@@ -4,6 +4,10 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
+  console.log('🚀 Starting application...');
+  console.log('Environment:', process.env.NODE_ENV);
+  console.log('Port:', process.env.PORT);
+  
   const app = await NestFactory.create(AppModule);
 
   // Enable CORS
@@ -36,4 +40,7 @@ async function bootstrap() {
   console.log(`📚 API Documentation: http://0.0.0.0:${port}/api`);
 }
 
-bootstrap();
+bootstrap().catch((error) => {
+  console.error('Failed to start application:', error);
+  process.exit(1);
+});
