@@ -46,7 +46,7 @@ export const Profile: React.FC = () => {
         toast.success(t('inviteAccepted') || 'Invitation accepted');
         queryClient.invalidateQueries('my-invites');
       },
-      onError: (e: any) => toast.error(e.response?.data?.message || 'Failed to accept invitation')
+      onError: (e: any) => { toast.error(e.response?.data?.message || 'Failed to accept invitation'); }
     }
   );
 

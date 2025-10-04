@@ -203,7 +203,7 @@ const TeamSection: React.FC<{ businessId: string }> = ({ businessId }) => {
         setInviteEmail('');
         queryClient.invalidateQueries(['business-members', businessId]);
       },
-      onError: (e: any) => toast.error(e.response?.data?.message || 'Failed to invite')
+      onError: (e: any) => { toast.error(e.response?.data?.message || 'Failed to invite'); }
     }
   );
 
@@ -214,7 +214,7 @@ const TeamSection: React.FC<{ businessId: string }> = ({ businessId }) => {
         toast.success(t('memberRemoved') || 'Member removed');
         queryClient.invalidateQueries(['business-members', businessId]);
       },
-      onError: (e: any) => toast.error(e.response?.data?.message || 'Failed to remove member')
+      onError: (e: any) => { toast.error(e.response?.data?.message || 'Failed to remove member'); }
     }
   );
 
@@ -287,7 +287,7 @@ const ContactsSection: React.FC<{ businessId: string }> = ({ businessId }) => {
         setName('');
         queryClient.invalidateQueries(['business-contacts', businessId]);
       },
-      onError: (e: any) => toast.error(e.response?.data?.message || 'Failed to add contact')
+      onError: (e: any) => { toast.error(e.response?.data?.message || 'Failed to add contact'); }
     }
   );
 
@@ -307,7 +307,7 @@ const ContactsSection: React.FC<{ businessId: string }> = ({ businessId }) => {
       onSuccess: (res: any) => {
         toast.success((t('campaignQueued') || 'Campaign sent') + ` (${res.data.sent || 0}/${res.data.queued})`);
       },
-      onError: (e: any) => toast.error(e.response?.data?.message || 'Failed to send campaign')
+      onError: (e: any) => { toast.error(e.response?.data?.message || 'Failed to send campaign'); }
     }
   );
 

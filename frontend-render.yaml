@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: booking-platform-frontend
+    env: static
+    plan: free
+    buildCommand: cd frontend && npm ci && npm run build
+    staticPublishPath: ./frontend/build
+    envVars:
+      - key: REACT_APP_API_URL
+        value: https://your-backend-url.onrender.com
+      - key: REACT_APP_ENVIRONMENT
+        value: production
