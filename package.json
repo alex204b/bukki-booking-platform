@@ -10,7 +10,9 @@
     "build": "npm run build:backend && npm run build:frontend",
     "build:backend": "cd backend && npm run build",
     "build:frontend": "cd frontend && npm run build",
-    "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install"
+    "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install",
+    "start": "cd backend && node dist/main.js",
+    "start:prod": "cd backend && node dist/main.js"
   },
   "keywords": ["booking", "platform", "multibusiness", "react", "nestjs"],
   "author": "Your Name",

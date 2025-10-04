@@ -3,8 +3,8 @@ services:
     name: booking-platform-backend
     env: node
     plan: free
-    buildCommand: cd backend && npm ci --production && npm run build
-    startCommand: cd backend && node dist/main.js
+    buildCommand: npm run build:backend
+    startCommand: npm start
     envVars:
       - key: NODE_ENV
         value: production
