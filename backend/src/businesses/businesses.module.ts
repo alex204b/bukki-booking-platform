@@ -6,6 +6,7 @@ import { Business } from './entities/business.entity';
 import { BusinessMember } from './entities/business-member.entity';
 import { BusinessContact } from './entities/business-contact.entity';
 import { UsersModule } from '../users/users.module';
+import { EmailService } from '../common/services/email.service';
 
 @Module({
   imports: [
@@ -13,7 +14,7 @@ import { UsersModule } from '../users/users.module';
     UsersModule,
   ],
   controllers: [BusinessesController],
-  providers: [BusinessesService],
+  providers: [BusinessesService, EmailService],
   exports: [BusinessesService],
 })
 export class BusinessesModule {}
