@@ -16,7 +16,7 @@ export const BusinessList: React.FC = () => {
   const [radius, setRadius] = useState<number>(5);
   const [availableNow, setAvailableNow] = useState<boolean>(false);
 
-  const { data: businesses, isLoading, error } = useQuery(
+  const { data: businesses, isLoading, error, refetch } = useQuery(
     ['businesses', searchQuery, selectedCategory, selectedLocation, userLocation, radius, availableNow],
     () => {
       if (userLocation) {
@@ -49,9 +49,15 @@ export const BusinessList: React.FC = () => {
     ).join(' ');
   };
 
-  if (error) {
-    toast.error('Failed to load businesses');
-  }
+  useEffect(() => {
+    if (!error) return;
+    const anyErr: any = error as any;
+    const serverMessage = anyErr?.response?.data?.message;
+    const status = anyErr?.response?.status;
+    const detail = Array.isArray(serverMessage) ? serverMessage.join(', ') : (serverMessage || anyErr?.message || 'Unknown error');
+    const prefix = status ? `Error ${status}: ` : '';
+    toast.error(`${prefix}Failed to load businesses. ${detail}`);
+  }, [error]);
 
   // Fallback mock businesses (address-only) to help verify the UI even if API is empty
   const mockBusinesses = [
@@ -174,6 +180,17 @@ export const BusinessList: React.FC = () => {
         </div>
       ) : null}
 
+      {/* Error banner */}
+      {error ? (
+        <div className="p-4 rounded-md border border-red-200 bg-red-50 text-red-700 flex items-center justify-between">
+          <div className="mr-4">
+            <div className="font-medium">We couldn't load businesses.</div>
+            <div className="text-sm opacity-80">Please check your connection or try again.</div>
+          </div>
+          <button className="btn btn-sm btn-outline" onClick={() => refetch()}>Retry</button>
+        </div>
+      ) : null}
+
       {/* Results */}
       {isLoading ? (
         <div className="flex justify-center py-12">
@@ -278,5 +295,5 @@ const GeoResolvedMap: React.FC<{ businesses: any[]; center?: { lat: number; lng:
     return <div className="text-sm text-gray-500 px-2 py-1">Resolving map locations…</div>;
   }
 
-  return <MapView markers={markers} />;
+  return <MapView markers={markers} center={center ? { lat: center.lat, lng: center.lng } : undefined} />;
 };

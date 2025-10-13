@@ -1,5 +1,5 @@
 import React from 'react';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Circle, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 // Fix default marker icons path when bundling with CRA
@@ -27,9 +27,18 @@ type BusinessMarker = {
 
 interface MapViewProps {
   markers: BusinessMarker[];
+  center?: { lat: number; lng: number };
 }
 
-export const MapView: React.FC<MapViewProps> = ({ markers }) => {
+const SetView: React.FC<{ center: { lat: number; lng: number }; zoom?: number }> = ({ center, zoom = 12 }) => {
+  const map = useMap();
+  React.useEffect(() => {
+    map.setView([center.lat, center.lng] as any, zoom);
+  }, [center.lat, center.lng, zoom, map]);
+  return null;
+};
+
+export const MapView: React.FC<MapViewProps> = ({ markers, center }) => {
   const defaultCenter = markers.length
     ? [markers[0].latitude, markers[0].longitude]
     : [40.7128, -74.006];
@@ -37,6 +46,7 @@ export const MapView: React.FC<MapViewProps> = ({ markers }) => {
   return (
     <div style={{ height: 500 }} className="rounded-lg overflow-hidden border">
       <MapContainer center={defaultCenter as any} zoom={12} style={{ height: '100%', width: '100%' }}>
+        {center ? <SetView center={center} /> : null}
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -64,6 +74,14 @@ export const MapView: React.FC<MapViewProps> = ({ markers }) => {
             </Popup>
           </Marker>
         ))}
+        {center ? (
+          <>
+            <Marker position={[center.lat, center.lng] as any}>
+              <Popup>Your location</Popup>
+            </Marker>
+            <Circle center={[center.lat, center.lng] as any} radius={300} pathOptions={{ color: '#2563eb', fillOpacity: 0.15 }} />
+          </>
+        ) : null}
       </MapContainer>
     </div>
   );

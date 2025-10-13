@@ -43,11 +43,17 @@ export class BusinessesController {
   @ApiOperation({ summary: 'Find nearby businesses' })
   @ApiResponse({ status: 200, description: 'Nearby businesses' })
   async getNearby(
-    @Query('lat') latitude: number,
-    @Query('lng') longitude: number,
-    @Query('radius') radius?: number,
+    @Query('lat') lat: string,
+    @Query('lng') lng: string,
+    @Query('radius') radiusRaw?: string,
     @Query('availableNow') availableNow?: string,
   ) {
+    const latitude = parseFloat(lat as any);
+    const longitude = parseFloat(lng as any);
+    const radius = radiusRaw !== undefined ? parseFloat(radiusRaw as any) : undefined;
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      throw new Error('Invalid coordinates');
+    }
     const results = await this.businessesService.getNearbyBusinesses(latitude, longitude, radius);
     if (availableNow === 'true') {
       const now = new Date();
