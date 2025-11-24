@@ -53,10 +53,10 @@ export class Business extends BaseEntity {
   @Column()
   country: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'decimal', precision: 10, scale: 8, nullable: true })
   latitude: number;
 
-  @Column({ nullable: true })
+  @Column({ type: 'decimal', precision: 11, scale: 8, nullable: true })
   longitude: number;
 
   @Column()
@@ -81,7 +81,7 @@ export class Business extends BaseEntity {
   })
   status: BusinessStatus;
 
-  @Column({ type: 'json', nullable: true })
+  @Column({ type: 'jsonb', nullable: true })
   workingHours: {
     [key: string]: {
       isOpen: boolean;
@@ -90,7 +90,7 @@ export class Business extends BaseEntity {
     };
   };
 
-  @Column({ type: 'json', nullable: true })
+  @Column({ type: 'jsonb', nullable: true })
   customBookingFields: {
     fieldName: string;
     fieldType: 'text' | 'number' | 'select' | 'textarea' | 'checkbox';
@@ -127,6 +127,16 @@ export class Business extends BaseEntity {
 
   @Column({ nullable: true })
   subscriptionExpiresAt: Date;
+
+  // Business verification
+  @Column({ default: false })
+  isVerified: boolean;
+
+  @Column({ nullable: true })
+  verifiedAt?: Date;
+
+  @Column({ nullable: true })
+  verificationNotes?: string;
 
   // Relations
   @OneToOne(() => User, user => user.business)

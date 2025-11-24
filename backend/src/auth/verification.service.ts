@@ -35,9 +35,13 @@ export class VerificationService {
   }
 
   async verifyEmail(email: string, verificationCode: string): Promise<{ success: boolean; message: string }> {
+    console.log('Verifying email:', email, 'with code:', verificationCode);
+    
     const user = await this.userRepository.findOne({ 
       where: { email, emailVerificationToken: verificationCode } 
     });
+
+    console.log('User found:', user ? 'Yes' : 'No', user ? `ID: ${user.id}` : '');
 
     if (!user) {
       return {
@@ -59,7 +63,11 @@ export class VerificationService {
   }
 
   async resendVerificationCode(email: string): Promise<{ success: boolean; message: string }> {
+    console.log('Resending verification code for email:', email);
+    
     const user = await this.userRepository.findOne({ where: { email } });
+
+    console.log('User found for resend:', user ? 'Yes' : 'No', user ? `ID: ${user.id}, Verified: ${user.emailVerified}` : '');
 
     if (!user) {
       return {
@@ -87,5 +95,13 @@ export class VerificationService {
         message: 'Failed to send verification code',
       };
     }
+  }
+
+  async sendPasswordResetCode(user: User, resetCode: string): Promise<void> {
+    await this.emailService.sendPasswordResetCode(
+      user.email,
+      resetCode,
+      user.firstName,
+    );
   }
 }

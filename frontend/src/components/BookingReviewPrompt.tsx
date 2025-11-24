@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useQuery } from 'react-query';
 import { bookingService, reviewService } from '../services/api';
 import { ReviewPrompt } from './ReviewPrompt';
-import { useI18n } from '../contexts/I18nContext';
 
 interface BookingReviewPromptProps {
   bookingId: number;
@@ -13,7 +12,6 @@ export const BookingReviewPrompt: React.FC<BookingReviewPromptProps> = ({
   bookingId,
   onReviewSubmitted,
 }) => {
-  const { t } = useI18n();
   const [showPrompt, setShowPrompt] = useState(false);
 
   const { data: booking } = useQuery(
@@ -26,12 +24,14 @@ export const BookingReviewPrompt: React.FC<BookingReviewPromptProps> = ({
 
   const { data: existingReview } = useQuery(
     ['review', bookingId],
-    () => reviewService.getByBusiness(booking?.business?.id || 0, 1, 1),
+    () => reviewService.getByBusiness(booking?.business?.id || ''),
     {
       enabled: !!booking?.business?.id,
       select: (response) => {
-        const reviews = response.data.reviews;
-        return reviews.find((review: any) => review.bookingId === bookingId);
+        const reviews = response.data;
+        // For now, we'll check if user has any review for this business
+        // In a real implementation, you might want to link reviews to bookings
+        return reviews.find((review: any) => review.businessId === booking?.business?.id);
       },
     }
   );

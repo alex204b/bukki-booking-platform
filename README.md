@@ -1,6 +1,11 @@
-# MultiBusiness Booking Platform
+# BUKKi - MultiBusiness Booking Platform
 
 A comprehensive booking platform that allows customers to reserve services across various industries including beauty salons, tailors, mechanics, restaurants, and more.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.1-blue.svg)](https://www.typescriptlang.org/)
+[![React](https://img.shields.io/badge/React-18.2-blue.svg)](https://reactjs.org/)
+[![NestJS](https://img.shields.io/badge/NestJS-10.0-red.svg)](https://nestjs.com/)
 
 ## Features (Highlights)
 
@@ -44,9 +49,52 @@ A comprehensive booking platform that allows customers to reserve services acros
 ## Repository Layout
 
 ```
-backend/   # NestJS app (API, services, entities)
-frontend/  # React app (UI)
+├── backend/          # NestJS API server
+│   ├── src/         # Source code
+│   └── dist/        # Compiled output
+├── frontend/         # React web application
+│   ├── src/         # React source code
+│   ├── android/     # Android native project
+│   └── build/       # Production build
+├── docs/            # Documentation
+│   ├── setup/       # Setup guides
+│   ├── mobile/      # Mobile app guides
+│   ├── deployment/  # Deployment guides
+│   ├── database/    # Database documentation
+│   ├── troubleshooting/ # Troubleshooting guides
+│   └── development/ # Development docs
+├── scripts/         # Utility scripts
+└── README.md        # This file
 ```
+
+📚 **All documentation is organized in the [`docs/`](./docs/) folder.**
+
+## 📚 Documentation
+
+All documentation is organized in the [`docs/`](./docs/) folder:
+
+- **[Setup Guides](./docs/setup/)** - Getting started
+- **[Mobile App Development](./docs/mobile/)** - Android/iOS guides
+- **[Deployment](./docs/deployment/)** - Production deployment
+- **[Troubleshooting](./docs/troubleshooting/)** - Common issues and fixes
+- **[Database](./docs/database/)** - Database documentation
+- **[Development](./docs/development/)** - Technical documentation
+
+## 🚀 Quick Start
+
+```bash
+# Install dependencies
+npm run install:all
+
+# Set up environment variables
+cp backend/env.example backend/.env
+# Edit backend/.env with your configuration
+
+# Start development servers
+npm run dev
+```
+
+For detailed setup instructions, see the [Setup Guide](./docs/setup/SETUP.md).
 
 ## Environment Variables
 

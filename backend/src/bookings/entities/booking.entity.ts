@@ -14,12 +14,6 @@ export enum BookingStatus {
   NO_SHOW = 'no_show',
 }
 
-export enum PaymentStatus {
-  PENDING = 'pending',
-  PAID = 'paid',
-  FAILED = 'failed',
-  REFUNDED = 'refunded',
-}
 
 @Entity('bookings')
 export class Booking extends BaseEntity {
@@ -36,14 +30,7 @@ export class Booking extends BaseEntity {
   })
   status: BookingStatus;
 
-  @Column({
-    type: 'enum',
-    enum: PaymentStatus,
-    default: PaymentStatus.PENDING,
-  })
-  paymentStatus: PaymentStatus;
-
-  @Column({ type: 'decimal', precision: 10, scale: 2 })
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true, name: 'totalAmount' })
   totalAmount: number;
 
   @Column({ type: 'json', nullable: true })
@@ -70,12 +57,21 @@ export class Booking extends BaseEntity {
   @Column({ type: 'timestamp', nullable: true })
   reminderSentAt: Date;
 
-  @Column({ type: 'json', nullable: true })
-  paymentDetails: {
-    stripePaymentIntentId?: string;
-    paymentMethod?: string;
-    transactionId?: string;
-  };
+  // Recurring booking fields
+  @Column({ default: false })
+  isRecurring: boolean;
+
+  @Column({ nullable: true })
+  recurrencePattern?: 'weekly' | 'biweekly' | 'monthly';
+
+  @Column({ type: 'timestamp', nullable: true })
+  recurrenceEndDate?: Date;
+
+  @Column({ nullable: true })
+  parentBookingId?: string; // For recurring bookings - links to original booking
+
+  @Column({ nullable: true })
+  recurrenceSequence?: number; // Sequence number in the recurring series
 
   // Relations
   @ManyToOne(() => User, user => user.bookings)
@@ -90,6 +86,7 @@ export class Booking extends BaseEntity {
   @JoinColumn()
   service: Service;
 
-  @OneToMany(() => Review, review => review.booking)
-  reviews: Review[];
+  // Note: Reviews are now linked to businesses, not bookings
+  // @OneToMany(() => Review, review => review.booking)
+  // reviews: Review[];
 }

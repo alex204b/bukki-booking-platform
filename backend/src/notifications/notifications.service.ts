@@ -33,7 +33,7 @@ export class NotificationsService {
   }
 
   async sendBookingConfirmation(customerEmail: string, bookingData: any): Promise<void> {
-    const subject = 'Booking Confirmation - BookIt';
+    const subject = 'Booking Confirmation - BUKKi';
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <h2 style="color: #0ea5e9;">Booking Confirmed!</h2>
@@ -52,7 +52,7 @@ export class NotificationsService {
         <p>Please arrive 5 minutes before your appointment time.</p>
         <p>If you need to cancel or reschedule, please contact the business directly.</p>
         
-        <p>Thank you for using BookIt!</p>
+        <p>Thank you for using BUKKi!</p>
       </div>
     `;
 
@@ -60,7 +60,7 @@ export class NotificationsService {
   }
 
   async sendBookingReminder(customerEmail: string, bookingData: any): Promise<void> {
-    const subject = 'Appointment Reminder - BookIt';
+    const subject = 'Appointment Reminder - BUKKi';
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <h2 style="color: #0ea5e9;">Appointment Reminder</h2>
@@ -85,11 +85,11 @@ export class NotificationsService {
 
   async sendPasswordResetEmail(email: string, resetToken: string): Promise<void> {
     const resetUrl = `${this.configService.get('FRONTEND_URL')}/reset-password?token=${resetToken}`;
-    const subject = 'Password Reset - BookIt';
+    const subject = 'Password Reset - BUKKi';
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <h2 style="color: #0ea5e9;">Password Reset Request</h2>
-        <p>You requested a password reset for your BookIt account.</p>
+        <p>You requested a password reset for your BUKKi account.</p>
         <p>Click the button below to reset your password:</p>
         
         <div style="text-align: center; margin: 30px 0;">
@@ -107,7 +107,7 @@ export class NotificationsService {
   }
 
   async sendBusinessApprovalEmail(businessEmail: string, businessName: string, approved: boolean): Promise<void> {
-    const subject = approved ? 'Business Approved - BookIt' : 'Business Application Update - BookIt';
+    const subject = approved ? 'Business Approved - BUKKi' : 'Business Application Update - BUKKi';
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <h2 style="color: ${approved ? '#22c55e' : '#ef4444'};">
@@ -119,7 +119,7 @@ export class NotificationsService {
         ${approved ? `
           <div style="background: #f0fdf4; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #22c55e;">
             <h3 style="color: #15803d;">Congratulations!</h3>
-            <p>Your business is now live on BookIt. You can start accepting bookings immediately.</p>
+            <p>Your business is now live on BUKKi. You can start accepting bookings immediately.</p>
             <p>Log in to your dashboard to manage your services and bookings.</p>
           </div>
         ` : `
@@ -129,7 +129,7 @@ export class NotificationsService {
           </div>
         `}
         
-        <p>Thank you for choosing BookIt!</p>
+        <p>Thank you for choosing BUKKi!</p>
       </div>
     `;
 

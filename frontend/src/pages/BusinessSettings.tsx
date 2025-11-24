@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
-import { businessService } from '../services/api';
+import { businessService, serviceService } from '../services/api';
 import { useI18n } from '../contexts/I18nContext';
 import { GeometricSymbol } from '../components/GeometricSymbols';
+import { Gift, Send } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export const BusinessSettings: React.FC = () => {
@@ -11,18 +12,124 @@ export const BusinessSettings: React.FC = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [autoAccept, setAutoAccept] = useState(false);
   const queryClient = useQueryClient();
+  const [selectedServiceId, setSelectedServiceId] = useState<string>('');
+  const [serviceFields, setServiceFields] = useState<any[]>([]);
+  const [isEditingFields, setIsEditingFields] = useState<boolean>(false);
 
-  const { data: business, isLoading } = useQuery(
+  const { data: business, isLoading, error } = useQuery(
     'my-business',
     () => businessService.getMyBusiness(),
     {
       select: (response) => response.data,
       onSuccess: (data) => {
-        setMaxBookings(data.maxBookingsPerUserPerDay);
-        setAutoAccept(!!data.autoAcceptBookings);
+        if (data) {
+          setMaxBookings(data.maxBookingsPerUserPerDay || 2);
+          setAutoAccept(!!data.autoAcceptBookings);
+        }
+      },
+      onError: (err: any) => {
+        console.error('Error fetching business:', err);
+        if (err.response?.status === 404) {
+          // Business not found - this is expected if not created yet
+        } else {
+          toast.error(err.response?.data?.message || t('failedToLoadBusinesses'));
+        }
+      },
+      retry: false,
+    }
+  );
+
+  // Load services for this business
+  const { data: services, isLoading: servicesLoading, error: servicesError } = useQuery(
+    ['business-services', business?.id],
+    () => (business?.id ? serviceService.getByBusiness(String(business.id)) : Promise.resolve({ data: [] as any[] } as any)),
+    {
+      enabled: !!business?.id,
+      select: (res) => res.data,
+      onSuccess: (data: any[]) => {
+        if (data?.length && !selectedServiceId) {
+          setSelectedServiceId(data[0].id);
+          setServiceFields(data[0].customFields || []);
+        }
+      },
+      onError: (err: any) => {
+        console.error('Error loading services:', err);
+        toast.error(err?.response?.data?.message || t('errorLoadingServices'));
       },
     }
   );
+
+  // Keep fields in sync when switching service
+  const handleSelectService = (id: string) => {
+    setSelectedServiceId(id);
+    const svc = (services || []).find((s: any) => s.id === id);
+    setServiceFields(svc?.customFields || []);
+    setIsEditingFields(false);
+  };
+
+  // Field editors
+  const addField = (type: 'text' | 'number' | 'textarea' | 'select' | 'checkbox') => {
+    setServiceFields([
+      ...serviceFields,
+      { id: Date.now().toString(), fieldName: '', fieldType: type, isRequired: false, options: type === 'select' ? ['Option 1'] : undefined },
+    ]);
+    setIsEditingFields(true);
+  };
+
+  const updateField = (idx: number, patch: any) => {
+    setServiceFields(serviceFields.map((f, i) => (i === idx ? { ...f, ...patch } : f)));
+  };
+
+  const removeField = (idx: number) => {
+    setServiceFields(serviceFields.filter((_, i) => i !== idx));
+  };
+
+  const saveFields = async () => {
+    if (!selectedServiceId) {
+      toast.error('Please select a service');
+      return;
+    }
+
+    // Validate fields before saving
+    const invalidFields = serviceFields.filter(f => !f.fieldName || !f.fieldName.trim());
+    if (invalidFields.length > 0) {
+      toast.error('Please fill in all field names');
+      return;
+    }
+
+    // Prepare payload - remove local-only ids and clean up data
+    const payload = serviceFields
+      .filter(f => f.fieldName && f.fieldName.trim()) // Remove empty fields
+      .map(({ id, ...rest }) => {
+        // Ensure options is an array for select fields, undefined for others
+        const cleaned = { ...rest };
+        if (cleaned.fieldType === 'select') {
+          cleaned.options = Array.isArray(cleaned.options) ? cleaned.options : [];
+        } else {
+          // Remove options for non-select fields
+          delete cleaned.options;
+        }
+        // Ensure isRequired is boolean
+        cleaned.isRequired = !!cleaned.isRequired;
+        return cleaned;
+      });
+
+    try {
+      await serviceService.update(selectedServiceId, { customFields: payload });
+      toast.success(t('settingsUpdated') || 'Settings updated successfully');
+      setIsEditingFields(false);
+      queryClient.invalidateQueries(['business-services', business?.id]);
+      // Reload the service data to update the fields
+      const svc = (services || []).find((s: any) => s.id === selectedServiceId);
+      if (svc) {
+        setServiceFields(payload);
+      }
+    } catch (e: any) {
+      console.error('Error saving fields:', e);
+      const errorMessage = e?.response?.data?.message || e?.message || t('updateFailed') || 'Failed to update';
+      toast.error(errorMessage);
+    }
+  };
 
   const updateSettingsMutation = useMutation(
     (data: { maxBookingsPerUserPerDay: number; autoAcceptBookings: boolean }) =>
@@ -55,11 +162,29 @@ export const BusinessSettings: React.FC = () => {
   if (!business) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-center">
+        <div className="text-center max-w-md">
           <h2 className="text-xl font-semibold text-gray-900 mb-2">
             {t('noBusinessFound')}
           </h2>
-          <p className="text-gray-600">{t('createBusinessFirst')}</p>
+          <p className="text-gray-600 mb-4">{t('createBusinessFirst')}</p>
+          {error && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+              <p className="text-sm text-yellow-800">
+                <strong>Debug Info:</strong> {error instanceof Error ? error.message : t('unknownError')}
+              </p>
+            </div>
+          )}
+          <div className="space-y-2">
+            <p className="text-sm text-gray-500">
+              To create a business, please complete the onboarding process:
+            </p>
+            <a
+              href="/business-onboarding"
+              className="btn btn-primary inline-block"
+            >
+              Go to Business Onboarding
+            </a>
+          </div>
         </div>
       </div>
     );
@@ -174,8 +299,133 @@ export const BusinessSettings: React.FC = () => {
           </div>
         </div>
 
+        {/* Custom Booking Form (per service) */}
+        <div className="bg-white rounded-lg shadow-sm border p-6 mt-8">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-xl font-semibold text-gray-900">{t('bookingForm') || 'Booking Form'}</h2>
+            <div className="flex gap-2">
+              {!isEditingFields ? (
+                <button onClick={() => setIsEditingFields(true)} className="btn btn-outline btn-sm">{t('edit') || 'Edit'}</button>
+              ) : (
+                <>
+                  <button onClick={() => { const svc = (services||[]).find((s:any)=>s.id===selectedServiceId); setServiceFields(svc?.customFields||[]); setIsEditingFields(false); }} className="btn btn-ghost btn-sm">{t('cancel') || 'Cancel'}</button>
+                  <button onClick={saveFields} className="btn btn-primary btn-sm">{t('save') || 'Save'}</button>
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+            <label className="md:col-span-2 text-sm text-gray-700">{t('serviceName') || 'Service'}</label>
+            <select
+              value={selectedServiceId}
+              onChange={(e) => handleSelectService(e.target.value)}
+              className="input md:col-span-1"
+              disabled={servicesLoading || !services || services.length === 0}
+            >
+              {servicesLoading ? (
+                <option value="">Loading...</option>
+              ) : services && services.length > 0 ? (
+                services.map((s: any) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))
+              ) : (
+                <option value="">No services available</option>
+              )}
+            </select>
+          </div>
+
+          {servicesError && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
+              <p className="text-sm text-red-800">
+                {t('errorLoadingServices') || 'Error loading services'}: {servicesError instanceof Error ? servicesError.message : t('unknownError')}
+              </p>
+            </div>
+          )}
+
+          {!servicesLoading && services && services.length === 0 && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+              <p className="text-sm text-yellow-800">
+                No services found. Please add services first from your Business Dashboard.
+              </p>
+            </div>
+          )}
+
+          {/* Fields list */}
+          <div className="space-y-4">
+            {(serviceFields || []).map((field, idx) => (
+              <div key={idx} className="grid grid-cols-1 md:grid-cols-6 gap-3 items-start border rounded p-3">
+                <div className="md:col-span-2">
+                  <label className="label">{t('fieldLabel') || 'Field label'}</label>
+                  <input
+                    type="text"
+                    className="input"
+                    value={field.fieldName}
+                    onChange={(e) => updateField(idx, { fieldName: e.target.value })}
+                    disabled={!isEditingFields}
+                  />
+                </div>
+                <div>
+                  <label className="label">Type</label>
+                  <select
+                    className="input"
+                    value={field.fieldType}
+                    onChange={(e) => updateField(idx, { fieldType: e.target.value, options: e.target.value === 'select' ? (field.options || ['Option 1']) : undefined })}
+                    disabled={!isEditingFields}
+                  >
+                    <option value="text">Text</option>
+                    <option value="number">Number</option>
+                    <option value="textarea">Textarea</option>
+                    <option value="select">Select</option>
+                    <option value="checkbox">Checkbox</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="label">{t('requiredOnboarding') || 'Required'}</label>
+                  <input
+                    type="checkbox"
+                    checked={!!field.isRequired}
+                    onChange={(e) => updateField(idx, { isRequired: e.target.checked })}
+                    disabled={!isEditingFields}
+                  />
+                </div>
+                {field.fieldType === 'select' && (
+                  <div className="md:col-span-2">
+                    <label className="label">{t('options') || 'Options (comma separated)'}</label>
+                    <input
+                      type="text"
+                      className="input"
+                      value={(field.options || []).join(', ')}
+                      onChange={(e) => updateField(idx, { options: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })}
+                      disabled={!isEditingFields}
+                    />
+                  </div>
+                )}
+                {isEditingFields && (
+                  <div className="flex justify-end md:col-span-6">
+                    <button onClick={() => removeField(idx)} className="btn btn-ghost btn-sm">{t('removeOnboarding') || 'Remove'}</button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {isEditingFields && (
+            <div className="flex flex-wrap gap-2 mt-4">
+              <button className="btn btn-outline btn-sm" onClick={() => addField('text')}>{t('textField') || 'Text'}</button>
+              <button className="btn btn-outline btn-sm" onClick={() => addField('number')}>{t('numberField') || 'Number'}</button>
+              <button className="btn btn-outline btn-sm" onClick={() => addField('textarea')}>{t('textarea') || 'Textarea'}</button>
+              <button className="btn btn-outline btn-sm" onClick={() => addField('select')}>{t('selectOnboarding') || 'Select'}</button>
+              <button className="btn btn-outline btn-sm" onClick={() => addField('checkbox')}>{t('checkbox') || 'Checkbox'}</button>
+            </div>
+          )}
+        </div>
+
         {/* Team Management */}
         <TeamSection businessId={business.id} />
+
+        {/* Promotional Offers */}
+        <PromotionalOffersSection businessId={business.id} />
 
         {/* Contacts Management */}
         <ContactsSection businessId={business.id} />
@@ -260,6 +510,239 @@ const TeamSection: React.FC<{ businessId: string }> = ({ businessId }) => {
           <div className="p-4 text-gray-500">{t('noMembers') || 'No team members yet.'}</div>
         )}
       </div>
+    </div>
+  );
+};
+
+const PromotionalOffersSection: React.FC<{ businessId: string }> = ({ businessId }) => {
+  const queryClient = useQueryClient();
+  const [showForm, setShowForm] = useState(false);
+  const [selectedCustomers, setSelectedCustomers] = useState<string[]>([]);
+  const [subject, setSubject] = useState('');
+  const [content, setContent] = useState('');
+  const [offerCode, setOfferCode] = useState('');
+  const [discount, setDiscount] = useState<number | ''>('');
+  const [validUntil, setValidUntil] = useState('');
+
+  const { data: pastCustomers, isLoading: loadingCustomers } = useQuery(
+    ['past-customers', businessId],
+    () => businessService.getPastCustomers(businessId),
+    { select: (res) => res.data || [], enabled: !!businessId }
+  );
+
+  const sendOfferMutation = useMutation(
+    (data: {
+      customerIds: string[];
+      subject: string;
+      content: string;
+      offerCode?: string;
+      discount?: number;
+      validUntil?: string;
+    }) => businessService.sendPromotionalOffer(businessId, data),
+    {
+      onSuccess: () => {
+        toast.success('Promotional offers sent successfully!');
+        setShowForm(false);
+        setSelectedCustomers([]);
+        setSubject('');
+        setContent('');
+        setOfferCode('');
+        setDiscount('');
+        setValidUntil('');
+        queryClient.invalidateQueries('messages');
+      },
+      onError: (e: any) => {
+        toast.error(e.response?.data?.message || 'Failed to send promotional offers');
+      },
+    }
+  );
+
+  const toggleCustomer = (customerId: string) => {
+    setSelectedCustomers((prev) =>
+      prev.includes(customerId)
+        ? prev.filter((id) => id !== customerId)
+        : [...prev, customerId]
+    );
+  };
+
+  const selectAll = () => {
+    if (selectedCustomers.length === pastCustomers?.length) {
+      setSelectedCustomers([]);
+    } else {
+      setSelectedCustomers(pastCustomers?.map((c: any) => c.id) || []);
+    }
+  };
+
+  const handleSend = () => {
+    if (!subject || !content || selectedCustomers.length === 0) {
+      toast.error('Please fill in all required fields and select at least one customer');
+      return;
+    }
+    sendOfferMutation.mutate({
+      customerIds: selectedCustomers,
+      subject,
+      content,
+      offerCode: offerCode || undefined,
+      discount: discount ? Number(discount) : undefined,
+      validUntil: validUntil || undefined,
+    });
+  };
+
+  return (
+    <div className="bg-white rounded-lg shadow-sm border p-6 mt-8">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <Gift className="h-5 w-5 text-orange-600" />
+          <h2 className="text-xl font-semibold text-gray-900">Promotional Offers</h2>
+        </div>
+        <button
+          onClick={() => setShowForm(!showForm)}
+          className="btn btn-primary btn-sm"
+        >
+          {showForm ? 'Cancel' : 'Send Offer'}
+        </button>
+      </div>
+
+      {showForm ? (
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Select Customers ({selectedCustomers.length} selected)
+            </label>
+            {loadingCustomers ? (
+              <div className="text-center py-4">Loading customers...</div>
+            ) : pastCustomers && pastCustomers.length > 0 ? (
+              <div className="border rounded-lg p-4 max-h-64 overflow-y-auto">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm text-gray-600">
+                    {pastCustomers.length} past customer{pastCustomers.length !== 1 ? 's' : ''}
+                  </span>
+                  <button
+                    onClick={selectAll}
+                    className="text-sm text-primary-600 hover:text-primary-700"
+                  >
+                    {selectedCustomers.length === pastCustomers.length ? 'Deselect All' : 'Select All'}
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {pastCustomers.map((customer: any) => (
+                    <label
+                      key={customer.id}
+                      className="flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedCustomers.includes(customer.id)}
+                        onChange={() => toggleCustomer(customer.id)}
+                        className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      />
+                      <div>
+                        <div className="font-medium text-sm text-gray-900">
+                          {customer.firstName} {customer.lastName}
+                        </div>
+                        <div className="text-xs text-gray-500">{customer.email}</div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="border rounded-lg p-4 text-center text-gray-500">
+                No past customers found. Customers who have completed bookings will appear here.
+              </div>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Subject *
+            </label>
+            <input
+              type="text"
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              placeholder="e.g., Special 20% Off This Weekend!"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Message Content *
+            </label>
+            <textarea
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              rows={4}
+              placeholder="Write your promotional message here..."
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Offer Code (optional)
+              </label>
+              <input
+                type="text"
+                value={offerCode}
+                onChange={(e) => setOfferCode(e.target.value)}
+                placeholder="e.g., SAVE20"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Discount % (optional)
+              </label>
+              <input
+                type="number"
+                value={discount}
+                onChange={(e) => setDiscount(e.target.value ? Number(e.target.value) : '')}
+                placeholder="e.g., 20"
+                min="0"
+                max="100"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Valid Until (optional)
+              </label>
+              <input
+                type="date"
+                value={validUntil}
+                onChange={(e) => setValidUntil(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+            </div>
+          </div>
+
+          <button
+            onClick={handleSend}
+            disabled={sendOfferMutation.isLoading || !subject || !content || selectedCustomers.length === 0}
+            className="btn btn-primary w-full"
+          >
+            {sendOfferMutation.isLoading ? (
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+            ) : (
+              <>
+                <Send className="h-4 w-4 mr-2" />
+                Send to {selectedCustomers.length} Customer{selectedCustomers.length !== 1 ? 's' : ''}
+              </>
+            )}
+          </button>
+        </div>
+      ) : (
+        <div className="text-center py-8 text-gray-500">
+          <Gift className="h-12 w-12 mx-auto mb-3 text-gray-400" />
+          <p>Send special offers to customers who have visited your business.</p>
+          <p className="text-sm mt-1">
+            {pastCustomers?.length || 0} past customer{pastCustomers?.length !== 1 ? 's' : ''} available
+          </p>
+        </div>
+      )}
     </div>
   );
 };

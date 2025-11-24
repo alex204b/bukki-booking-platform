@@ -3,13 +3,51 @@
   "name": "BUKKi - MultiBusiness Booking Platform",
   "icons": [
     {
+      "src": "logo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    },
+    {
       "src": "favicon.ico",
       "sizes": "64x64 32x32 24x24 16x16",
       "type": "image/x-icon"
     }
   ],
-  "start_url": ".",
+  "start_url": "/",
+  "scope": "/",
   "display": "standalone",
-  "theme_color": "#0ea5e9",
-  "background_color": "#ffffff"
+  "orientation": "portrait",
+  "theme_color": "#f97316",
+  "background_color": "#ffffff",
+  "description": "Book services across various industries - Beauty salons, restaurants, mechanics, and more",
+  "categories": ["business", "lifestyle", "productivity"],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "My Bookings",
+      "short_name": "Bookings",
+      "description": "View your upcoming bookings",
+      "url": "/my-bookings",
+      "icons": [{ "src": "logo.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Businesses",
+      "short_name": "Businesses",
+      "description": "Browse available businesses",
+      "url": "/businesses",
+      "icons": [{ "src": "logo.png", "sizes": "192x192" }]
+    }
+  ]
 }

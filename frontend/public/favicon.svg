@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Tree motif in orange color -->
+  <path d="M32 60V36" stroke="#f97316" stroke-width="2.5" stroke-linejoin="round"/>
+  <path d="M32 36l-12 10m12-10l12 10" stroke="#f97316" stroke-width="2.5" stroke-linejoin="round"/>
+  <path d="M32 28l-10 8m10-8l10 8" stroke="#f97316" stroke-width="2.5" stroke-linejoin="round"/>
+  <path d="M32 20l-8 6m8-6l8 6" stroke="#f97316" stroke-width="2.5" stroke-linejoin="round"/>
+  <path d="M32 12l-6 4m6-4l6 4" stroke="#f97316" stroke-width="2.5" stroke-linejoin="round"/>
+  <rect x="28" y="60" width="8" height="2" fill="#f97316"/>
+</svg>
+
+

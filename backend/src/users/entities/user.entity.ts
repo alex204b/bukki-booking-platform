@@ -8,6 +8,7 @@ import { encryptedTransformer } from '../../common/utils/crypto.util';
 export enum UserRole {
   CUSTOMER = 'customer',
   BUSINESS_OWNER = 'business_owner',
+  EMPLOYEE = 'employee',
   SUPER_ADMIN = 'super_admin',
 }
 
@@ -16,7 +17,7 @@ export class User extends BaseEntity {
   @Column({ unique: true })
   email: string;
 
-  @Column()
+  @Column({ type: 'varchar', length: 255, nullable: true })
   password: string;
 
   @Column()

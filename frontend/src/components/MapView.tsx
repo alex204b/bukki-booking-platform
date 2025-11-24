@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker, Popup, Circle, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -28,6 +29,7 @@ type BusinessMarker = {
 interface MapViewProps {
   markers: BusinessMarker[];
   center?: { lat: number; lng: number };
+  selectedBusiness?: any;
 }
 
 const SetView: React.FC<{ center: { lat: number; lng: number }; zoom?: number }> = ({ center, zoom = 12 }) => {
@@ -38,10 +40,12 @@ const SetView: React.FC<{ center: { lat: number; lng: number }; zoom?: number }>
   return null;
 };
 
-export const MapView: React.FC<MapViewProps> = ({ markers, center }) => {
+export const MapView: React.FC<MapViewProps> = ({ markers, center, selectedBusiness }) => {
   const defaultCenter = markers.length
     ? [markers[0].latitude, markers[0].longitude]
     : [40.7128, -74.006];
+
+
 
   return (
     <div style={{ height: 500 }} className="rounded-lg overflow-hidden border">
@@ -51,29 +55,45 @@ export const MapView: React.FC<MapViewProps> = ({ markers, center }) => {
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
-        {markers.map((b) => (
-          <Marker key={b.id} position={[b.latitude, b.longitude] as any}>
-            <Popup>
-              <div className="space-y-1">
-                <div className="font-semibold">{b.name}</div>
-                {b.category && <div className="text-sm text-gray-600 capitalize">{b.category}</div>}
-                {b.address && (
-                  <div className="text-sm text-gray-600">{b.address}{b.city ? `, ${b.city}` : ''}</div>
-                )}
-                <a
-                  className="text-primary-600 text-sm underline"
-                  href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
-                    `${b.latitude},${b.longitude}`
-                  )}`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Get directions
-                </a>
-              </div>
-            </Popup>
-          </Marker>
-        ))}
+        {markers.map((b) => {
+          const isSelected = selectedBusiness && selectedBusiness.id === b.id;
+          return (
+            <Marker 
+              key={b.id} 
+              position={[b.latitude, b.longitude] as any}
+            >
+              <Popup>
+                <div className="space-y-2">
+                  <div className={`font-semibold ${isSelected ? 'text-orange-600' : ''}`}>
+                    {b.name} {isSelected && '📍'}
+                  </div>
+                  {b.category && <div className="text-sm text-gray-600 capitalize">{b.category}</div>}
+                  {b.address && (
+                    <div className="text-sm text-gray-600">{b.address}{b.city ? `, ${b.city}` : ''}</div>
+                  )}
+                  <div className="flex flex-col gap-1 pt-1">
+                    <Link
+                      to={`/businesses/${b.id}`}
+                      className="text-sm bg-primary-600 text-white px-3 py-1 rounded hover:bg-primary-700 transition-colors font-medium text-center"
+                    >
+                      Make a Booking
+                    </Link>
+                    <a
+                      className="text-primary-600 text-sm underline text-center"
+                      href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
+                        `${b.latitude},${b.longitude}`
+                      )}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Get directions
+                    </a>
+                  </div>
+                </div>
+              </Popup>
+            </Marker>
+          );
+        })}
         {center ? (
           <>
             <Marker position={[center.lat, center.lng] as any}>

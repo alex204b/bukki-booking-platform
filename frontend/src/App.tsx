@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from 'react-query';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider } from './contexts/AuthContext';
 import { I18nProvider } from './contexts/I18nContext';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import MotifBackground from './components/MotifBackground';
 import DecorativeBackground from './components/DecorativeBackground';
 import { ProtectedRoute } from './components/ProtectedRoute';
@@ -12,8 +13,11 @@ import { Home } from './pages/Home';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 import { EmailVerification } from './pages/EmailVerification';
+import { ForgotPassword } from './pages/ForgotPassword';
+import { VerifyResetCode } from './pages/VerifyResetCode';
+import { ResetPassword } from './pages/ResetPassword';
 import { BusinessList } from './pages/BusinessList';
-import { BusinessDetail } from './pages/BusinessDetail';
+import { BusinessDetails } from './pages/BusinessDetails';
 import { BookingForm } from './pages/BookingForm';
 import { MyBookings } from './pages/MyBookings';
 import { BusinessDashboard } from './pages/BusinessDashboard';
@@ -21,12 +25,27 @@ import { AdminDashboard } from './pages/AdminDashboard';
 import { Profile } from './pages/Profile';
 import BusinessOnboarding from './pages/BusinessOnboarding';
 import { BusinessSettings } from './pages/BusinessSettings';
+import { EmployeeInvitations } from './pages/EmployeeInvitations';
+import { Chat } from './pages/Chat';
+import { MyWaitlist } from './pages/MyWaitlist';
+import { QRScanner } from './pages/QRScanner';
+import { BookingConfirmation } from './pages/BookingConfirmation';
+import { Favorites } from './pages/Favorites';
 import InfoPage from './pages/InfoPage';
+import { TermsOfService } from './pages/TermsOfService';
+import { PrivacyPolicy } from './pages/PrivacyPolicy';
 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      retry: 1,
+      retry: (failureCount, error: any) => {
+        // Don't retry on 401 (authentication errors) - these won't be fixed by retrying
+        if (error?.response?.status === 401) {
+          return false;
+        }
+        // Retry other errors up to 1 time
+        return failureCount < 1;
+      },
       refetchOnWindowFocus: false,
     },
   },
@@ -34,10 +53,11 @@ const queryClient = new QueryClient({
 
 function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <I18nProvider>
-      <AuthProvider>
-        <Router>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <I18nProvider>
+          <AuthProvider>
+            <Router>
           <div className="min-h-screen bg-background">
             <MotifBackground density="low" />
             <DecorativeBackground 
@@ -53,7 +73,18 @@ function App() {
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
               <Route path="/verify-email" element={<EmailVerification />} />
-              <Route path="/info" element={<InfoPage />} />
+              <Route path="/forgot-password" element={<ForgotPassword />} />
+              <Route path="/verify-reset-code" element={<VerifyResetCode />} />
+              <Route path="/reset-password" element={<ResetPassword />} />
+              <Route path="/terms" element={<TermsOfService />} />
+              <Route path="/privacy" element={<PrivacyPolicy />} />
+              <Route path="/info" element={
+                <ProtectedRoute>
+                  <Layout>
+                    <InfoPage />
+                  </Layout>
+                </ProtectedRoute>
+              } />
               
               {/* Protected Routes */}
               <Route path="/" element={
@@ -75,7 +106,7 @@ function App() {
               <Route path="/businesses/:id" element={
                 <ProtectedRoute>
                   <Layout>
-                    <BusinessDetail />
+                    <BusinessDetails />
                   </Layout>
                 </ProtectedRoute>
               } />
@@ -84,6 +115,14 @@ function App() {
                 <ProtectedRoute>
                   <Layout>
                     <BookingForm />
+                  </Layout>
+                </ProtectedRoute>
+              } />
+              
+              <Route path="/booking-confirmation/:bookingId" element={
+                <ProtectedRoute>
+                  <Layout>
+                    <BookingConfirmation />
                   </Layout>
                 </ProtectedRoute>
               } />
@@ -97,7 +136,7 @@ function App() {
               } />
               
               <Route path="/business-dashboard" element={
-                <ProtectedRoute allowedRoles={['business_owner']}>
+                <ProtectedRoute allowedRoles={['business_owner', 'employee']}>
                   <Layout>
                     <BusinessDashboard />
                   </Layout>
@@ -135,6 +174,67 @@ function App() {
                   </Layout>
                 </ProtectedRoute>
               } />
+              
+              <Route path="/employee-invitations" element={
+                <ProtectedRoute>
+                  <Layout>
+                    <EmployeeInvitations />
+                  </Layout>
+                </ProtectedRoute>
+              } />
+              
+              <Route path="/chat-list" element={
+                <ProtectedRoute>
+                  <Layout>
+                    <Chat />
+                  </Layout>
+                </ProtectedRoute>
+              } />
+              
+              <Route path="/chat/:businessId?" element={
+                <ProtectedRoute>
+                  <Layout>
+                    <Chat />
+                  </Layout>
+                </ProtectedRoute>
+              } />
+              
+              <Route path="/messages" element={
+                <ProtectedRoute>
+                  <Layout>
+                    <Chat />
+                  </Layout>
+                </ProtectedRoute>
+              } />
+              <Route path="/chat-list" element={
+                <ProtectedRoute>
+                  <Layout>
+                    <Chat />
+                  </Layout>
+                </ProtectedRoute>
+              } />
+              
+              <Route path="/my-waitlist" element={
+                <ProtectedRoute>
+                  <Layout>
+                    <MyWaitlist />
+                  </Layout>
+                </ProtectedRoute>
+              } />
+              
+              <Route path="/favorites" element={
+                <ProtectedRoute>
+                  <Layout>
+                    <Favorites />
+                  </Layout>
+                </ProtectedRoute>
+              } />
+              
+              <Route path="/qr-scanner" element={
+                <ProtectedRoute allowedRoles={['business_owner', 'employee', 'super_admin']}>
+                  <QRScanner />
+                </ProtectedRoute>
+              } />
             </Routes>
             
             <Toaster
@@ -162,10 +262,11 @@ function App() {
               }}
             />
           </div>
-        </Router>
-      </AuthProvider>
-      </I18nProvider>
-    </QueryClientProvider>
+            </Router>
+          </AuthProvider>
+        </I18nProvider>
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 }
 

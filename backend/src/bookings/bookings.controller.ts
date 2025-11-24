@@ -23,8 +23,17 @@ export class BookingsController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get all bookings for current user' })
   @ApiResponse({ status: 200, description: 'Bookings retrieved successfully' })
-  async findAll(@Request() req) {
-    return this.bookingsService.findAll(req.user.id, req.user.role);
+  async findAll(@Request() req, @Query('businessId') businessId?: string) {
+    const bookings = await this.bookingsService.findAll(req.user.id, req.user.role);
+    
+    // If businessId is provided, filter bookings for that business
+    if (businessId) {
+      return bookings.filter((booking: any) => 
+        booking.business?.id === businessId || String(booking.business?.id) === String(businessId)
+      );
+    }
+    
+    return bookings;
   }
 
   @Get('business/:businessId/date/:date')
@@ -95,6 +104,32 @@ export class BookingsController {
     @Request() req,
   ) {
     return this.bookingsService.checkIn(id, body.businessId);
+  }
+
+  @Post('validate-qr')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Validate and check in a booking via QR code' })
+  @ApiResponse({ status: 200, description: 'QR code validated and customer checked in successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid QR code or booking' })
+  async validateQR(
+    @Body() body: { qrData: string },
+    @Request() req,
+  ) {
+    return this.bookingsService.validateAndCheckInQR(body.qrData, req.user.id, req.user.role);
+  }
+
+  @Patch(':id')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update booking (reschedule)' })
+  @ApiResponse({ status: 200, description: 'Booking updated successfully' })
+  async update(
+    @Param('id') id: string,
+    @Body() body: { appointmentDate?: string; appointmentEndDate?: string },
+    @Request() req,
+  ) {
+    return this.bookingsService.reschedule(id, body.appointmentDate, req.user.id);
   }
 
   @Delete(':id')

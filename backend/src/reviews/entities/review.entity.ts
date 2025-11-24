@@ -1,43 +1,40 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn, Index } from 'typeorm';
 import { Business } from '../../businesses/entities/business.entity';
 import { User } from '../../users/entities/user.entity';
-import { Booking } from '../../bookings/entities/booking.entity';
 
 @Entity('reviews')
+@Index(['businessId', 'userId'], { unique: true }) // Ensure one review per user per business
 export class Review {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
-  @Column()
-  businessId: number;
+  @Column({ name: 'businessId' })
+  businessId: string;
 
-  @Column()
-  userId: number;
-
-  @Column({ nullable: true })
-  bookingId: number;
+  @Column({ name: 'userId' })
+  userId: string;
 
   @Column({ type: 'int' })
   rating: number;
 
+  @Column({ type: 'varchar', length: 255 })
+  title: string;
+
   @Column({ type: 'text', nullable: true })
-  comment: string;
+  comment?: string;
 
-  @Column({ default: true })
-  isActive: boolean;
-
-  @CreateDateColumn()
+  @CreateDateColumn({ name: 'createdAt' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ name: 'updatedAt' })
   updatedAt: Date;
 
-  @ManyToOne(() => Business, business => business.reviews)
+  // Relations
+  @ManyToOne(() => Business, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'businessId' })
   business: Business;
 
-  @ManyToOne(() => User, user => user.reviews)
+  @ManyToOne(() => User, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'userId' })
   user: User;
-
-  @ManyToOne(() => Booking, booking => booking.reviews)
-  booking: Booking;
 }

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useI18n } from '../contexts/I18nContext';
+import { useAuth } from '../contexts/AuthContext';
 import { authApi } from '../services/api';
 import { Mail, ArrowLeft, RefreshCw } from 'lucide-react';
 import { GeometricSymbol } from '../components/GeometricSymbols';
@@ -11,13 +11,14 @@ export const EmailVerification: React.FC = () => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   const [resending, setResending] = useState(false);
+  const [emailInput, setEmailInput] = useState('');
   
-  const { t } = useI18n();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   
-  // Get email from location state or localStorage
-  const email = location.state?.email || localStorage.getItem('pendingVerificationEmail') || '';
+  // Get email from logged-in user
+  const email = user?.email || location.state?.email || localStorage.getItem('pendingVerificationEmail') || emailInput;
 
   const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -25,6 +26,7 @@ export const EmailVerification: React.FC = () => {
     setError('');
 
     try {
+      console.log('Verifying email:', email, 'with code:', verificationCode);
       const { data } = await authApi.post('/auth/verify-email', {
         email,
         verificationCode,
@@ -41,8 +43,13 @@ export const EmailVerification: React.FC = () => {
       } else {
         setError(data.message || 'Verification failed');
       }
-    } catch (error) {
-      setError('Network error. Please try again.');
+    } catch (error: any) {
+      console.error('Verification error:', error);
+      if (error.response?.data?.message) {
+        setError(error.response.data.message);
+      } else {
+        setError('Network error. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -62,8 +69,13 @@ export const EmailVerification: React.FC = () => {
       } else {
         setError(data.message || 'Failed to resend verification code');
       }
-    } catch (error) {
-      setError('Network error. Please try again.');
+    } catch (error: any) {
+      console.error('Resend error:', error);
+      if (error.response?.data?.message) {
+        setError(error.response.data.message);
+      } else {
+        setError('Failed to resend verification code');
+      }
     } finally {
       setResending(false);
     }
@@ -117,11 +129,33 @@ export const EmailVerification: React.FC = () => {
           <p className="text-gray-600 mb-6">
             We've sent a 6-digit verification code to:
             <br />
-            <span className="font-semibold text-primary-600">{email}</span>
+            <span className="font-semibold text-primary-600">{email || '(enter your email below)'}</span>
           </p>
         </div>
 
         <form className="space-y-6" onSubmit={handleVerify}>
+          {/* Show email input if no email is available */}
+          {!email && (
+            <div>
+              <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
+                Email Address
+              </label>
+              <input
+                id="email"
+                name="email"
+                type="email"
+                value={emailInput}
+                onChange={(e) => setEmailInput(e.target.value)}
+                placeholder="you@example.com"
+                className="input w-full"
+                required
+              />
+              <p className="mt-2 text-sm text-gray-500">
+                Enter the email address you used to register
+              </p>
+            </div>
+          )}
+
           <div>
             <label htmlFor="verificationCode" className="block text-sm font-medium text-gray-700 mb-2">
               Verification Code
@@ -151,7 +185,7 @@ export const EmailVerification: React.FC = () => {
           <div className="space-y-3">
             <button
               type="submit"
-              disabled={loading || verificationCode.length !== 6}
+              disabled={loading || verificationCode.length !== 6 || (!email && !emailInput)}
               className="w-full btn btn-primary btn-lg disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? (

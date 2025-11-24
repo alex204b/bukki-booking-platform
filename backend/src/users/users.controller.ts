@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Request } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { UsersService } from './users.service';
+import { TrustScoreService } from './trust-score.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -11,7 +12,10 @@ import { UserRole } from './entities/user.entity';
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly trustScoreService: TrustScoreService,
+  ) {}
 
   @Get()
   @UseGuards(RolesGuard)
@@ -74,5 +78,23 @@ export class UsersController {
   async activate(@Param('id') id: string, @Request() req) {
     await this.usersService.activate(id);
     return { message: 'User activated successfully' };
+  }
+
+  @Get('profile/trust-score')
+  @ApiOperation({ summary: 'Get current user trust score breakdown' })
+  @ApiResponse({ status: 200, description: 'Trust score retrieved successfully' })
+  async getTrustScore(@Request() req) {
+    return this.trustScoreService.getTrustScoreBreakdown(req.user.id);
+  }
+
+  @Get(':id/trust-score')
+  @ApiOperation({ summary: 'Get user trust score (for business owners viewing customers)' })
+  @ApiResponse({ status: 200, description: 'Trust score retrieved successfully' })
+  async getUserTrustScore(@Param('id') id: string, @Request() req) {
+    // Business owners can view customer trust scores
+    if (req.user.role !== 'business_owner' && req.user.role !== 'super_admin' && req.user.id !== id) {
+      throw new Error('Unauthorized');
+    }
+    return this.trustScoreService.getTrustScoreBreakdown(id);
   }
 }

@@ -32,8 +32,8 @@ export const BusinessDetail: React.FC = () => {
   );
 
   const { data: reviews, isLoading: reviewsLoading } = useQuery(
-    ['reviews', id, reviewsPage],
-    () => reviewService.getByBusiness(parseInt(id!), reviewsPage, 10),
+    ['reviews', id],
+    () => reviewService.getByBusiness(id!),
     {
       enabled: !!id,
       select: (response) => response.data,

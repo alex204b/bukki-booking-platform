@@ -13,31 +13,30 @@ import { UserRole } from '../users/entities/user.entity';
 export class AnalyticsController {
   constructor(private readonly analyticsService: AnalyticsService) {}
 
-  @Get('business')
-  @Roles(UserRole.BUSINESS_OWNER)
-  @ApiOperation({ summary: 'Get business analytics' })
-  @ApiResponse({ status: 200, description: 'Business analytics retrieved successfully' })
-  @ApiQuery({ name: 'startDate', required: true, type: Date })
-  @ApiQuery({ name: 'endDate', required: true, type: Date })
-  async getBusinessAnalytics(
-    @Query('startDate') startDate: string,
-    @Query('endDate') endDate: string,
+  @Get('business/revenue')
+  @Roles(UserRole.BUSINESS_OWNER, UserRole.EMPLOYEE)
+  @ApiOperation({ summary: 'Get revenue analytics for business' })
+  @ApiResponse({ status: 200, description: 'Revenue analytics retrieved successfully' })
+  @ApiQuery({ name: 'period', required: false, enum: ['day', 'week', 'month', 'year'], description: 'Time period (default: month)' })
+  async getRevenueAnalytics(
+    @Query('period') period: 'day' | 'week' | 'month' | 'year' = 'month',
     @Request() req
   ) {
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    
-    // Get business ID from user's business
-    const businessId = req.user.business?.id;
+    // Get business ID from user's business or employee membership
+    let businessId = req.user.business?.id;
+    if (!businessId && req.user.role === UserRole.EMPLOYEE) {
+      // For employees, get their business membership
+      // This would need to be implemented based on your business member logic
+    }
     if (!businessId) {
       throw new Error('User does not have an associated business');
     }
 
-    return this.analyticsService.getBusinessAnalytics(businessId, start, end);
+    return this.analyticsService.getRevenueAnalytics(businessId, period);
   }
 
   @Get('business/trends')
-  @Roles(UserRole.BUSINESS_OWNER)
+  @Roles(UserRole.BUSINESS_OWNER, UserRole.EMPLOYEE)
   @ApiOperation({ summary: 'Get booking trends for business' })
   @ApiResponse({ status: 200, description: 'Booking trends retrieved successfully' })
   @ApiQuery({ name: 'days', required: false, type: Number, description: 'Number of days (default: 30)' })
@@ -45,7 +44,10 @@ export class AnalyticsController {
     @Query('days') days: number = 30,
     @Request() req
   ) {
-    const businessId = req.user.business?.id;
+    let businessId = req.user.business?.id;
+    if (!businessId && req.user.role === UserRole.EMPLOYEE) {
+      // Get from employee membership
+    }
     if (!businessId) {
       throw new Error('User does not have an associated business');
     }
@@ -53,36 +55,14 @@ export class AnalyticsController {
     return this.analyticsService.getBookingTrends(businessId, days);
   }
 
-  @Get('business/top-services')
-  @Roles(UserRole.BUSINESS_OWNER)
-  @ApiOperation({ summary: 'Get top services by booking count' })
-  @ApiResponse({ status: 200, description: 'Top services retrieved successfully' })
-  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Number of services (default: 5)' })
-  async getTopServices(
-    @Query('limit') limit: number = 5,
-    @Request() req
-  ) {
-    const businessId = req.user.business?.id;
-    if (!businessId) {
-      throw new Error('User does not have an associated business');
-    }
-
-    return this.analyticsService.getTopServices(businessId, limit);
-  }
-
   @Get('platform')
   @Roles(UserRole.SUPER_ADMIN)
   @ApiOperation({ summary: 'Get platform-wide analytics' })
   @ApiResponse({ status: 200, description: 'Platform analytics retrieved successfully' })
-  @ApiQuery({ name: 'startDate', required: true, type: Date })
-  @ApiQuery({ name: 'endDate', required: true, type: Date })
+  @ApiQuery({ name: 'period', required: false, enum: ['day', 'week', 'month', 'year'], description: 'Time period (default: month)' })
   async getPlatformAnalytics(
-    @Query('startDate') startDate: string,
-    @Query('endDate') endDate: string
+    @Query('period') period: 'day' | 'week' | 'month' | 'year' = 'month'
   ) {
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    
-    return this.analyticsService.getPlatformAnalytics(start, end);
+    return this.analyticsService.getPlatformAnalytics(period);
   }
 }

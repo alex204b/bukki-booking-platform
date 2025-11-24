@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useI18n } from '../contexts/I18nContext';
 import { Eye, EyeOff, Mail, Lock, User, Phone } from 'lucide-react';
+import { Logo } from '../components/Logo';
 
 export const Register: React.FC = () => {
   const [formData, setFormData] = useState({
@@ -136,7 +137,9 @@ export const Register: React.FC = () => {
       </div>
       <div className="max-w-md w-full space-y-8">
         <div>
-          <h1 className="text-center text-3xl font-bold text-primary-600">{t('appName')}</h1>
+          <div className="flex justify-center mb-6">
+            <Logo size="lg" />
+          </div>
           <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
             {t('signUpTitle')}
           </h2>

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">BUKKi</string>
+    <string name="title_activity_main">BUKKi</string>
+    <string name="package_name">com.bukki.app</string>
+    <string name="custom_url_scheme">com.bukki.app</string>
+</resources>

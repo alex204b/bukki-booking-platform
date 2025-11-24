@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Request, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Request, Query, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { BusinessesService } from './businesses.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -29,14 +29,28 @@ export class BusinessesController {
   }
 
   @Get('search')
-  @ApiOperation({ summary: 'Search businesses' })
+  @ApiOperation({ summary: 'Search businesses with advanced filters' })
   @ApiResponse({ status: 200, description: 'Search results' })
   async search(
     @Query('q') query?: string,
     @Query('category') category?: string,
     @Query('location') location?: string,
+    @Query('minRating') minRating?: string,
+    @Query('maxPrice') maxPrice?: string,
+    @Query('minPrice') minPrice?: string,
+    @Query('sortBy') sortBy?: 'rating' | 'distance' | 'price' | 'name',
+    @Query('verified') verified?: string,
   ) {
-    return this.businessesService.searchBusinesses(query, category, location);
+    return this.businessesService.searchBusinesses(
+      query,
+      category,
+      location,
+      minRating ? parseFloat(minRating) : undefined,
+      minPrice ? parseFloat(minPrice) : undefined,
+      maxPrice ? parseFloat(maxPrice) : undefined,
+      sortBy,
+      verified === 'true',
+    );
   }
 
   @Get('nearby')
@@ -60,7 +74,18 @@ export class BusinessesController {
       const day = now.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
       const minutes = now.getHours() * 60 + now.getMinutes();
       return results.filter((b: any) => {
-        const wh = b.workingHours?.[day];
+        // Parse working hours if it's a JSON string
+        let workingHoursData = b.workingHours;
+        if (typeof workingHoursData === 'string') {
+          try {
+            workingHoursData = JSON.parse(workingHoursData);
+          } catch (error) {
+            console.error('Error parsing working hours:', error);
+            return false;
+          }
+        }
+        
+        const wh = workingHoursData?.[day];
         if (!wh || !wh.isOpen || !wh.openTime || !wh.closeTime) return false;
         const [oh, om] = wh.openTime.split(':').map(Number);
         const [ch, cm] = wh.closeTime.split(':').map(Number);
@@ -77,8 +102,28 @@ export class BusinessesController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get current user business' })
   @ApiResponse({ status: 200, description: 'Business retrieved successfully' })
+  @ApiResponse({ status: 404, description: 'Business not found' })
   async getMyBusiness(@Request() req) {
-    return this.businessesService.findByOwner(req.user.id);
+    // For business owners, get their owned business
+    if (req.user.role === 'business_owner') {
+      const business = await this.businessesService.findByOwner(req.user.id);
+      if (!business) {
+        throw new NotFoundException('Business not found. Please complete the onboarding process.');
+      }
+      return business;
+    }
+    
+    // For employees, get the first business they're a member of
+    if (req.user.role === 'employee') {
+      const businesses = await this.businessesService.getMyBusinesses(req.user.id);
+      if (businesses.length === 0) {
+        throw new NotFoundException('No business found. You are not a member of any business.');
+      }
+      // Return the first business (employees typically work for one business)
+      return businesses[0];
+    }
+    
+    throw new NotFoundException('Business not found');
   }
 
   @Get(':id')
@@ -109,8 +154,8 @@ export class BusinessesController {
   @ApiOperation({ summary: 'Approve business (Super Admin only)' })
   @ApiResponse({ status: 200, description: 'Business approved successfully' })
   async approve(@Param('id') id: string, @Request() req) {
-    if (req.user.role !== UserRole.SUPER_ADMIN) {
-      throw new Error('Unauthorized');
+    if (!req.user || req.user.role !== UserRole.SUPER_ADMIN) {
+      throw new UnauthorizedException('Only super admins can approve businesses');
     }
     return this.businessesService.approve(id);
   }
@@ -122,8 +167,8 @@ export class BusinessesController {
   @ApiOperation({ summary: 'Reject business (Super Admin only)' })
   @ApiResponse({ status: 200, description: 'Business rejected successfully' })
   async reject(@Param('id') id: string, @Body() body: { reason?: string }, @Request() req) {
-    if (req.user.role !== UserRole.SUPER_ADMIN) {
-      throw new Error('Unauthorized');
+    if (!req.user || req.user.role !== UserRole.SUPER_ADMIN) {
+      throw new UnauthorizedException('Only super admins can reject businesses');
     }
     return this.businessesService.reject(id, body.reason);
   }
@@ -135,8 +180,8 @@ export class BusinessesController {
   @ApiOperation({ summary: 'Suspend business (Super Admin only)' })
   @ApiResponse({ status: 200, description: 'Business suspended successfully' })
   async suspend(@Param('id') id: string, @Request() req) {
-    if (req.user.role !== UserRole.SUPER_ADMIN) {
-      throw new Error('Unauthorized');
+    if (!req.user || req.user.role !== UserRole.SUPER_ADMIN) {
+      throw new UnauthorizedException('Only super admins can suspend businesses');
     }
     return this.businessesService.suspend(id);
   }
@@ -147,11 +192,25 @@ export class BusinessesController {
   @ApiOperation({ summary: 'Get business statistics' })
   @ApiResponse({ status: 200, description: 'Business stats retrieved' })
   async getStats(@Param('id') id: string, @Request() req) {
+    // Ensure user is authenticated
+    if (!req.user) {
+      throw new UnauthorizedException('User not authenticated');
+    }
+    
     // Check if user owns the business or is super admin
     const business = await this.businessesService.findOne(id);
-    if (business.owner.id !== req.user.id && req.user.role !== UserRole.SUPER_ADMIN) {
-      throw new Error('Unauthorized');
+    if (!business) {
+      throw new NotFoundException('Business not found');
     }
+    
+    // Convert IDs to strings for comparison to handle type mismatches
+    const ownerId = String(business.owner?.id || '');
+    const userId = String(req.user.id);
+    
+    if (ownerId !== userId && req.user.role !== UserRole.SUPER_ADMIN) {
+      throw new UnauthorizedException('You do not have permission to view these statistics');
+    }
+    
     return this.businessesService.getBusinessStats(id);
   }
 
@@ -195,13 +254,25 @@ export class BusinessesController {
     return this.businessesService.listInvitesByEmail(req.user.email);
   }
 
+  @Get('categories/counts')
+  @ApiOperation({ summary: 'Get business counts by category' })
+  @ApiResponse({ status: 200, description: 'Category counts retrieved successfully' })
+  async getCategoryCounts() {
+    return this.businessesService.getCategoryCounts();
+  }
+
   // Contacts CRUD
   @Post(':id/contacts')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Add contact to business mailing list' })
   async addContact(@Param('id') id: string, @Body() body: { email: string; name?: string }, @Request() req) {
-    if (!(await this.businessesService.isOwnerOrMember(id, req.user.id))) throw new Error('Unauthorized');
+    if (!req.user) {
+      throw new UnauthorizedException('User not authenticated');
+    }
+    if (!(await this.businessesService.isOwnerOrMember(id, req.user.id))) {
+      throw new UnauthorizedException('You do not have permission to manage contacts for this business');
+    }
     return this.businessesService.addContact(id, body.email, body.name);
   }
 
@@ -210,7 +281,12 @@ export class BusinessesController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'List business contacts' })
   async listContacts(@Param('id') id: string, @Request() req) {
-    if (!(await this.businessesService.isOwnerOrMember(id, req.user.id))) throw new Error('Unauthorized');
+    if (!req.user) {
+      throw new UnauthorizedException('User not authenticated');
+    }
+    if (!(await this.businessesService.isOwnerOrMember(id, req.user.id))) {
+      throw new UnauthorizedException('You do not have permission to view contacts for this business');
+    }
     return this.businessesService.listContacts(id);
   }
 
@@ -219,7 +295,12 @@ export class BusinessesController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Remove a contact' })
   async removeContact(@Param('id') id: string, @Param('contactId') contactId: string, @Request() req) {
-    if (!(await this.businessesService.isOwnerOrMember(id, req.user.id))) throw new Error('Unauthorized');
+    if (!req.user) {
+      throw new UnauthorizedException('User not authenticated');
+    }
+    if (!(await this.businessesService.isOwnerOrMember(id, req.user.id))) {
+      throw new UnauthorizedException('You do not have permission to remove contacts for this business');
+    }
     return this.businessesService.removeContact(id, contactId);
   }
 
@@ -228,7 +309,12 @@ export class BusinessesController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Send email campaign to contacts' })
   async sendCampaign(@Param('id') id: string, @Body() body: { subject: string; html: string }, @Request() req) {
-    if (!(await this.businessesService.isOwnerOrMember(id, req.user.id))) throw new Error('Unauthorized');
+    if (!req.user) {
+      throw new UnauthorizedException('User not authenticated');
+    }
+    if (!(await this.businessesService.isOwnerOrMember(id, req.user.id))) {
+      throw new UnauthorizedException('You do not have permission to send campaigns for this business');
+    }
     return this.businessesService.sendCampaign(id, body.subject, body.html);
   }
 }

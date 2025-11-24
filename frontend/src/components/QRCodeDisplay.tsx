@@ -1,56 +1,57 @@
 import React from 'react';
-import QRCode from 'qrcode.react';
+import { QRCodeSVG } from 'qrcode.react';
 import { X } from 'lucide-react';
+import { useI18n } from '../contexts/I18nContext';
 
 interface QRCodeDisplayProps {
-  value: string;
-  isOpen: boolean;
+  bookingId: string;
   onClose: () => void;
-  title?: string;
 }
 
-export const QRCodeDisplay: React.FC<QRCodeDisplayProps> = ({
-  value,
-  isOpen,
-  onClose,
-  title = 'QR Code'
-}) => {
-  if (!isOpen) return null;
+export const QRCodeDisplay: React.FC<QRCodeDisplayProps> = ({ bookingId, onClose }) => {
+  const { t } = useI18n();
+  
+  // Generate QR code data (same format as backend)
+  const qrData = JSON.stringify({
+    bookingId,
+    type: 'booking_checkin',
+    timestamp: new Date().toISOString(),
+  });
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 max-w-sm w-full mx-4">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg p-6 max-w-md w-full">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
+          <h3 className="text-xl font-bold text-gray-900">{t('bookingQRCode')}</h3>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600"
+            className="text-gray-400 hover:text-gray-600 transition-colors"
           >
             <X className="h-6 w-6" />
           </button>
         </div>
         
-        <div className="flex justify-center mb-4">
-          <QRCode
-            value={value}
-            size={200}
-            level="M"
-            includeMargin={true}
-          />
+        <div className="flex flex-col items-center space-y-4">
+          <div className="bg-white p-4 rounded-lg border-2 border-gray-200">
+            <QRCodeSVG
+              value={qrData}
+              size={256}
+              level="H"
+              includeMargin={true}
+            />
+          </div>
+          
+          <p className="text-sm text-gray-600 text-center">
+            {t('showQRCodeToBusiness')}
+          </p>
         </div>
         
-        <p className="text-sm text-gray-600 text-center">
-          Show this QR code at the business for check-in
-        </p>
-        
-        <div className="mt-4 flex justify-center">
-          <button
-            onClick={onClose}
-            className="btn btn-primary"
-          >
-            Close
-          </button>
-        </div>
+        <button
+          onClick={onClose}
+          className="mt-6 w-full btn btn-primary"
+        >
+          {t('close')}
+        </button>
       </div>
     </div>
   );

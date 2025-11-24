@@ -11,11 +11,13 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { LocalStrategy } from './strategies/local.strategy';
 import { UsersModule } from '../users/users.module';
 import { User } from '../users/entities/user.entity';
+import { TwoFactorAuth } from './entities/two-factor-auth.entity';
+import { TwoFactorService } from './two-factor.service';
 
 @Module({
   imports: [
     UsersModule,
-    TypeOrmModule.forFeature([User]),
+    TypeOrmModule.forFeature([User, TwoFactorAuth]),
     PassportModule,
     JwtModule.registerAsync({
       inject: [ConfigService],
@@ -28,7 +30,7 @@ import { User } from '../users/entities/user.entity';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, VerificationService, EmailService, JwtStrategy, LocalStrategy],
-  exports: [AuthService, VerificationService],
+  providers: [AuthService, VerificationService, EmailService, JwtStrategy, LocalStrategy, TwoFactorService],
+  exports: [AuthService, VerificationService, TwoFactorService],
 })
 export class AuthModule {}

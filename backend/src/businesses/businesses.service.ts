@@ -7,6 +7,7 @@ import { Business, BusinessStatus } from './entities/business.entity';
 import { BusinessMember, BusinessMemberStatus } from './entities/business-member.entity';
 import { BusinessContact } from './entities/business-contact.entity';
 import { User } from '../users/entities/user.entity';
+import { MessagesService } from '../messages/messages.service';
 
 @Injectable()
 export class BusinessesService {
@@ -17,7 +18,10 @@ export class BusinessesService {
     private businessMemberRepository: Repository<BusinessMember>,
     @InjectRepository(BusinessContact)
     private businessContactRepository: Repository<BusinessContact>,
+    @InjectRepository(User)
+    private userRepository: Repository<User>,
     private emailService: EmailService,
+    private messagesService: MessagesService,
   ) {}
 
   async isOwnerOrMember(businessId: string, userId: string): Promise<boolean> {
@@ -35,7 +39,15 @@ export class BusinessesService {
     const existing = await this.businessMemberRepository.findOne({ where: { business: { id: businessId }, email, status: BusinessMemberStatus.ACTIVE } as any });
     if (existing) throw new BadRequestException('Member already exists');
     const invite = this.businessMemberRepository.create({ business: { id: businessId } as any, email, status: BusinessMemberStatus.INVITED });
-    return this.businessMemberRepository.save(invite);
+    const savedInvite = await this.businessMemberRepository.save(invite);
+    
+    // Create message for team invitation if user exists
+    const user = await this.userRepository.findOne({ where: { email } });
+    if (user) {
+      await this.messagesService.createTeamInvitationMessage(user.id, businessId, savedInvite.id);
+    }
+    
+    return savedInvite;
   }
 
   async listMembers(businessId: string, requesterId: string) {
@@ -92,6 +104,14 @@ export class BusinessesService {
   }
 
   private async geocodeAddress(createBusinessDto: any): Promise<{ latitude?: number; longitude?: number }> {
+    // If coordinates are already provided, use them
+    if (createBusinessDto.latitude && createBusinessDto.longitude) {
+      return {
+        latitude: createBusinessDto.latitude,
+        longitude: createBusinessDto.longitude
+      };
+    }
+
     try {
       const parts = [
         createBusinessDto.address,
@@ -130,19 +150,69 @@ export class BusinessesService {
   }
 
   async create(createBusinessDto: any, ownerId: string): Promise<Business> {
+    // Prevent duplicate businesses per owner
+    const existing = await this.businessRepository.findOne({ where: { owner: { id: ownerId } } as any });
+    if (existing) {
+      throw new BadRequestException('You already have a business');
+    }
+
     const coords = await this.geocodeAddress(createBusinessDto);
     const business = this.businessRepository.create({
       ...createBusinessDto,
       ...coords,
       owner: { id: ownerId },
+      status: BusinessStatus.PENDING,
       onboardingCompleted: true,
     });
 
-    const savedBusiness = await (this.businessRepository.save(business as any) as unknown as Business);
+    let savedBusiness: Business;
+    try {
+      savedBusiness = await (this.businessRepository.save(business as any) as unknown as Business);
+    } catch (error: any) {
+      // Surface DB errors clearly
+      if (error?.code === '23505') {
+        // unique_violation in Postgres
+        throw new BadRequestException('Business with provided details already exists');
+      }
+      throw error;
+    }
     
     // Generate QR code
     const qrCodeData = await this.generateQRCode(savedBusiness.id);
     await this.businessRepository.update(savedBusiness.id, { qrCode: qrCodeData });
+
+    // Send confirmation email to owner
+    try {
+      // Load owner to get email/name
+      const owner = await (this.businessRepository
+        .createQueryBuilder('b')
+        .leftJoinAndSelect('b.owner', 'owner')
+        .where('b.id = :id', { id: savedBusiness.id })
+        .select(['owner.email', 'owner.firstName'])
+        .getOne());
+
+      const to = owner?.owner?.email;
+      const firstName = owner?.owner?.firstName || 'there';
+      if (to) {
+        const html = `
+          <div style="font-family: Arial, sans-serif; max-width:600px; margin:0 auto; padding:20px;">
+            <div style="background: linear-gradient(135deg,#f97316,#ea580c); padding:24px; color:#fff; border-radius:8px 8px 0 0;">
+              <h2 style="margin:0;">Your business was submitted</h2>
+            </div>
+            <div style="border:1px solid #e5e7eb; border-top:0; padding:24px; border-radius:0 0 8px 8px;">
+              <p>Hi ${firstName},</p>
+              <p>Thanks for submitting <strong>${savedBusiness.name || 'your business'}</strong> to BUKKi. Your business is now <strong>PENDING REVIEW</strong>.</p>
+              <p>Validation typically takes between <strong>30 minutes and 1 hour</strong>. Once approved, your business will appear in the app and on the admin page for management.</p>
+              <p style="color:#6b7280; font-size:13px;">You will receive a notification once the review is complete.</p>
+            </div>
+          </div>
+        `;
+        await this.emailService.sendEmail(to, 'BUKKi — Business submitted for review', html);
+      }
+    } catch (e) {
+      // Non-fatal: log and continue
+      console.error('Failed to send business submission email:', e?.message || e);
+    }
 
     return this.findOne(savedBusiness.id);
   }
@@ -151,8 +221,39 @@ export class BusinessesService {
     const where = status ? { status } : {};
     return this.businessRepository.find({
       where,
-      relations: ['owner', 'services'],
+      relations: ['owner'],
       select: {
+        id: true,
+        name: true,
+        description: true,
+        category: true,
+        address: true,
+        city: true,
+        state: true,
+        zipCode: true,
+        country: true,
+        latitude: true,
+        longitude: true,
+        phone: true,
+        email: true,
+        website: true,
+        logo: true,
+        images: true,
+        status: true,
+        workingHours: true,
+        customBookingFields: true,
+        qrCode: true,
+        rating: true,
+        reviewCount: true,
+        isActive: true,
+        showRevenue: true,
+        autoAcceptBookings: true,
+        maxBookingsPerUserPerDay: true,
+        onboardingCompleted: true,
+        subscriptionPlan: true,
+        subscriptionExpiresAt: true,
+        createdAt: true,
+        updatedAt: true,
         owner: {
           id: true,
           firstName: true,
@@ -166,8 +267,39 @@ export class BusinessesService {
   async findOne(id: string): Promise<Business> {
     const business = await this.businessRepository.findOne({
       where: { id },
-      relations: ['owner', 'services'],
+      relations: ['owner'],
       select: {
+        id: true,
+        name: true,
+        description: true,
+        category: true,
+        address: true,
+        city: true,
+        state: true,
+        zipCode: true,
+        country: true,
+        latitude: true,
+        longitude: true,
+        phone: true,
+        email: true,
+        website: true,
+        logo: true,
+        images: true,
+        status: true,
+        workingHours: true,
+        customBookingFields: true,
+        qrCode: true,
+        rating: true,
+        reviewCount: true,
+        isActive: true,
+        showRevenue: true,
+        autoAcceptBookings: true,
+        maxBookingsPerUserPerDay: true,
+        onboardingCompleted: true,
+        subscriptionPlan: true,
+        subscriptionExpiresAt: true,
+        createdAt: true,
+        updatedAt: true,
         owner: {
           id: true,
           firstName: true,
@@ -188,7 +320,7 @@ export class BusinessesService {
   async findByOwner(ownerId: string): Promise<Business | null> {
     return this.businessRepository.findOne({
       where: { owner: { id: ownerId } },
-      relations: ['services'],
+      relations: ['owner'],
     });
   }
 
@@ -238,10 +370,20 @@ export class BusinessesService {
     return this.businessRepository.save(business);
   }
 
-  async searchBusinesses(query: string, category?: string, location?: string): Promise<Business[]> {
-    const qb = this.businessRepository.createQueryBuilder('business')
+  async searchBusinesses(
+    query?: string,
+    category?: string,
+    location?: string,
+    minRating?: number,
+    minPrice?: number,
+    maxPrice?: number,
+    sortBy?: 'rating' | 'distance' | 'price' | 'name',
+    verified?: boolean,
+  ): Promise<Business[]> {
+    const qb = this.businessRepository
+      .createQueryBuilder('business')
       .leftJoinAndSelect('business.owner', 'owner')
-      .leftJoinAndSelect('business.services', 'services')
+      .leftJoin('business.services', 'service')
       .where('business.status = :status', { status: BusinessStatus.APPROVED })
       .andWhere('business.isActive = :isActive', { isActive: true });
 
@@ -261,6 +403,37 @@ export class BusinessesService {
       });
     }
 
+    if (minRating !== undefined) {
+      qb.andWhere('business.rating >= :minRating', { minRating });
+    }
+
+    if (verified !== undefined) {
+      qb.andWhere('business.isVerified = :verified', { verified });
+    }
+
+    // Price filtering based on service prices
+    if (minPrice !== undefined || maxPrice !== undefined) {
+      if (minPrice !== undefined && maxPrice !== undefined) {
+        qb.andWhere('service.price BETWEEN :minPrice AND :maxPrice', { minPrice, maxPrice });
+      } else if (minPrice !== undefined) {
+        qb.andWhere('service.price >= :minPrice', { minPrice });
+      } else if (maxPrice !== undefined) {
+        qb.andWhere('service.price <= :maxPrice', { maxPrice });
+      }
+    }
+
+    // Sorting
+    if (sortBy === 'rating') {
+      qb.orderBy('business.rating', 'DESC');
+    } else if (sortBy === 'name') {
+      qb.orderBy('business.name', 'ASC');
+    } else {
+      qb.orderBy('business.rating', 'DESC'); // Default: by rating
+    }
+
+    // Group by business to avoid duplicates from service joins
+    qb.groupBy('business.id').addGroupBy('owner.id');
+
     return qb.getMany();
   }
 
@@ -273,7 +446,6 @@ export class BusinessesService {
     return this.businessRepository
       .createQueryBuilder('business')
       .leftJoinAndSelect('business.owner', 'owner')
-      .leftJoinAndSelect('business.services', 'services')
       .where('business.status = :status', { status: BusinessStatus.APPROVED })
       .andWhere('business.isActive = :isActive', { isActive: true })
       .andWhere('business.latitude BETWEEN :minLat AND :maxLat', {
@@ -318,10 +490,91 @@ export class BusinessesService {
   }
 
   async acceptInvite(businessId: string, userId: string, email: string) {
-    const invite = await this.businessMemberRepository.findOne({ where: { business: { id: businessId }, email } as any });
+    const invite = await this.businessMemberRepository.findOne({ 
+      where: { business: { id: businessId }, email } as any,
+      relations: ['business']
+    });
     if (!invite) throw new NotFoundException('Invitation not found');
+    
+    // Update user role to EMPLOYEE
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (user && user.role !== 'employee') {
+      user.role = 'employee' as any;
+      await this.userRepository.save(user);
+    }
+    
     invite.user = { id: userId } as any;
     invite.status = BusinessMemberStatus.ACTIVE;
-    return this.businessMemberRepository.save(invite);
+    const savedInvite = await this.businessMemberRepository.save(invite);
+    
+    // Return the business ID so frontend can redirect
+    return {
+      ...savedInvite,
+      businessId: invite.business.id,
+      businessName: invite.business.name,
+    };
+  }
+
+  async getMyBusinesses(userId: string): Promise<Business[]> {
+    // Get businesses where user is an employee
+    const memberships = await this.businessMemberRepository.find({
+      where: { 
+        user: { id: userId },
+        status: BusinessMemberStatus.ACTIVE 
+      } as any,
+      relations: ['business', 'business.owner'],
+    });
+    
+    return memberships.map(m => m.business);
+  }
+
+  async getCategoryCounts(): Promise<Record<string, number>> {
+    // Use raw SQL query to get accurate counts directly from database
+    // This ensures we get the exact category values as stored in the database
+    const result = await this.businessRepository.query(`
+      SELECT 
+        category,
+        COUNT(*) as count
+      FROM businesses
+      WHERE "deletedAt" IS NULL
+      GROUP BY category
+    `);
+
+    const counts: Record<string, number> = {};
+    
+    // Initialize all categories with 0
+    const allCategories = [
+      'beauty_salon',
+      'restaurant',
+      'mechanic',
+      'tailor',
+      'fitness',
+      'healthcare',
+      'education',
+      'consulting',
+      'other',
+    ];
+
+    allCategories.forEach(category => {
+      counts[category] = 0;
+    });
+
+    // Map database results to counts
+    result.forEach((row: any) => {
+      if (row.category) {
+        const categoryValue = String(row.category).toLowerCase().trim();
+        const count = parseInt(row.count, 10) || 0;
+        
+        // Direct match
+        if (allCategories.includes(categoryValue)) {
+          counts[categoryValue] = count;
+        } else {
+          // If category doesn't match, add to 'other'
+          counts['other'] = (counts['other'] || 0) + count;
+        }
+      }
+    });
+
+    return counts;
   }
 }

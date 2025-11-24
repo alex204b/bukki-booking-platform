@@ -1,172 +1,158 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Review } from './entities/review.entity';
-import { User } from '../users/entities/user.entity';
-import { Business } from '../businesses/entities/business.entity';
-import { Booking } from '../bookings/entities/booking.entity';
+import { CreateReviewDto, UpdateReviewDto, ReviewResponseDto } from './dto/review.dto';
 
 @Injectable()
 export class ReviewsService {
   constructor(
     @InjectRepository(Review)
     private reviewRepository: Repository<Review>,
-    @InjectRepository(User)
-    private userRepository: Repository<User>,
-    @InjectRepository(Business)
-    private businessRepository: Repository<Business>,
-    @InjectRepository(Booking)
-    private bookingRepository: Repository<Booking>,
   ) {}
 
-  async createReview(
-    userId: number,
-    businessId: number,
-    bookingId: number,
-    rating: number,
-    comment?: string,
-  ): Promise<Review> {
-    // Validate rating
-    if (rating < 1 || rating > 5) {
-      throw new BadRequestException('Rating must be between 1 and 5');
-    }
-
-    // Check if user exists
-    const user = await this.userRepository.findOne({ where: { id: userId as any } });
-    if (!user) {
-      throw new NotFoundException('User not found');
-    }
-
-    // Check if business exists
-    const business = await this.businessRepository.findOne({ where: { id: businessId as any } });
-    if (!business) {
-      throw new NotFoundException('Business not found');
-    }
-
-    // Check if booking exists and belongs to user and business
-    const booking = await this.bookingRepository.findOne({
-      where: { id: bookingId as any, customer: { id: userId as any }, business: { id: businessId as any } },
-    });
-    if (!booking) {
-      throw new NotFoundException('Booking not found or does not belong to user');
-    }
-
-    // Check if booking is completed (checked in)
-    if (!booking.checkedIn) {
-      throw new BadRequestException('Cannot review a booking that has not been completed');
-    }
-
-    // Check if review already exists for this booking
+  async create(createReviewDto: CreateReviewDto, userId: string): Promise<ReviewResponseDto> {
+    // Check if user already reviewed this business
     const existingReview = await this.reviewRepository.findOne({
-      where: { bookingId, userId },
+      where: { businessId: createReviewDto.businessId, userId },
     });
+
     if (existingReview) {
-      throw new BadRequestException('Review already exists for this booking');
+      throw new ConflictException('You have already reviewed this business');
     }
 
-    // Create review
     const review = this.reviewRepository.create({
+      ...createReviewDto,
       userId,
-      businessId,
-      bookingId,
-      rating,
-      comment,
     });
 
     const savedReview = await this.reviewRepository.save(review);
-
-    // Update business average rating
-    await this.updateBusinessRating(businessId);
-
-    return savedReview;
+    return this.formatReviewResponse(savedReview);
   }
 
-  async getReviewsByBusiness(businessId: number, page: number = 1, limit: number = 10): Promise<{
-    reviews: Review[];
-    total: number;
-    averageRating: number;
-  }> {
-    const [reviews, total] = await this.reviewRepository.findAndCount({
-      where: { businessId, isActive: true },
-      relations: ['user', 'booking'],
+  async findAllByBusiness(businessId: string): Promise<ReviewResponseDto[]> {
+    const reviews = await this.reviewRepository.find({
+      where: { businessId },
+      relations: ['user'],
       order: { createdAt: 'DESC' },
-      skip: (page - 1) * limit,
-      take: limit,
     });
 
-    // Calculate average rating
-    const averageRating = await this.reviewRepository
-      .createQueryBuilder('review')
-      .select('AVG(review.rating)', 'average')
-      .where('review.businessId = :businessId', { businessId })
-      .andWhere('review.isActive = :isActive', { isActive: true })
-      .getRawOne();
+    return reviews.map(review => this.formatReviewResponse(review));
+  }
+
+  async findAllByUser(userId: string): Promise<ReviewResponseDto[]> {
+    const reviews = await this.reviewRepository.find({
+      where: { userId },
+      relations: ['business'],
+      order: { createdAt: 'DESC' },
+    });
+
+    return reviews.map(review => this.formatReviewResponse(review));
+  }
+
+  async findOne(id: string): Promise<ReviewResponseDto> {
+    const review = await this.reviewRepository.findOne({
+      where: { id },
+      relations: ['user', 'business'],
+    });
+
+    if (!review) {
+      throw new NotFoundException('Review not found');
+    }
+
+    return this.formatReviewResponse(review);
+  }
+
+  async update(id: string, updateReviewDto: UpdateReviewDto, userId: string): Promise<ReviewResponseDto> {
+    const review = await this.reviewRepository.findOne({
+      where: { id },
+    });
+
+    if (!review) {
+      throw new NotFoundException('Review not found');
+    }
+
+    if (review.userId !== userId) {
+      throw new ForbiddenException('You can only update your own reviews');
+    }
+
+    Object.assign(review, updateReviewDto);
+    const updatedReview = await this.reviewRepository.save(review);
+    return this.formatReviewResponse(updatedReview);
+  }
+
+  async remove(id: string, userId: string): Promise<void> {
+    const review = await this.reviewRepository.findOne({
+      where: { id },
+    });
+
+    if (!review) {
+      throw new NotFoundException('Review not found');
+    }
+
+    if (review.userId !== userId) {
+      throw new ForbiddenException('You can only delete your own reviews');
+    }
+
+    await this.reviewRepository.remove(review);
+  }
+
+  async getBusinessRatingStats(businessId: string): Promise<{
+    averageRating: number;
+    totalReviews: number;
+    ratingDistribution: { [key: number]: number };
+  }> {
+    const reviews = await this.reviewRepository.find({
+      where: { businessId },
+      select: ['rating'],
+    });
+
+    if (reviews.length === 0) {
+      return {
+        averageRating: 0,
+        totalReviews: 0,
+        ratingDistribution: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+      };
+    }
+
+    const totalRating = reviews.reduce((sum, review) => sum + review.rating, 0);
+    const averageRating = Math.round((totalRating / reviews.length) * 10) / 10;
+
+    const ratingDistribution = reviews.reduce((dist, review) => {
+      dist[review.rating] = (dist[review.rating] || 0) + 1;
+      return dist;
+    }, {} as { [key: number]: number });
+
+    // Fill missing ratings with 0
+    for (let i = 1; i <= 5; i++) {
+      if (!ratingDistribution[i]) {
+        ratingDistribution[i] = 0;
+      }
+    }
 
     return {
-      reviews,
-      total,
-      averageRating: parseFloat(averageRating.average) || 0,
+      averageRating,
+      totalReviews: reviews.length,
+      ratingDistribution,
     };
   }
 
-  async updateTrustScore(userId: number, points: number): Promise<void> {
-    const user = await this.userRepository.findOne({ where: { id: userId as any } });
-    if (!user) {
-      throw new NotFoundException('User not found');
-    }
-
-    // Update trust score with bounds
-    const newScore = Math.max(0, Math.min(100, user.trustScore + points));
-    await this.userRepository.update(userId, { trustScore: newScore });
-  }
-
-  async getTrustScore(userId: number): Promise<number> {
-    const user = await this.userRepository.findOne({ where: { id: userId as any } });
-    if (!user) {
-      throw new NotFoundException('User not found');
-    }
-    return user.trustScore;
-  }
-
-  private async updateBusinessRating(businessId: number): Promise<void> {
-    const result = await this.reviewRepository
-      .createQueryBuilder('review')
-      .select('AVG(review.rating)', 'average')
-      .addSelect('COUNT(review.id)', 'count')
-      .where('review.businessId = :businessId', { businessId })
-      .andWhere('review.isActive = :isActive', { isActive: true })
-      .getRawOne();
-
-    const averageRating = parseFloat(result.average) || 0;
-    const reviewCount = parseInt(result.count) || 0;
-
-    await this.businessRepository.update(businessId, {
-      // averageRating,
-      reviewCount,
-    });
-  }
-
-  async checkForNoShows(): Promise<void> {
-    // Find bookings that are past their appointment time and haven't been checked in
-    const now = new Date();
-    const noShowBookings = await this.bookingRepository
-      .createQueryBuilder('booking')
-      .leftJoinAndSelect('booking.customer', 'customer')
-      .where('booking.appointmentDate < :now', { now })
-      .andWhere('booking.checkedIn = :checkedIn', { checkedIn: false })
-      .andWhere('booking.status IN (:...statuses)', { 
-        statuses: ['confirmed', 'pending'] 
-      })
-      .getMany();
-
-    // Update trust scores for no-shows
-    for (const booking of noShowBookings) {
-      await this.updateTrustScore(booking.customer.id as any, -50);
-      
-      // Mark booking as no-show
-      await this.bookingRepository.update(booking.id, { 
-        status: 'no_show' as any 
-      });
-    }
+  private formatReviewResponse(review: Review): ReviewResponseDto {
+    return {
+      id: review.id,
+      businessId: review.businessId,
+      userId: review.userId,
+      rating: review.rating,
+      title: review.title,
+      comment: review.comment,
+      createdAt: review.createdAt,
+      updatedAt: review.updatedAt,
+      user: review.user ? {
+        id: review.user.id,
+        firstName: review.user.firstName,
+        lastName: review.user.lastName,
+        email: review.user.email,
+      } : undefined,
+    };
   }
 }

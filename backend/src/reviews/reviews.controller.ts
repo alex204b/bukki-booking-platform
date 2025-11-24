@@ -1,43 +1,58 @@
-import { Controller, Post, Get, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Request } from '@nestjs/common';
 import { ReviewsService } from './reviews.service';
+import { CreateReviewDto, UpdateReviewDto } from './dto/review.dto';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @Controller('reviews')
-@UseGuards(JwtAuthGuard)
 export class ReviewsController {
   constructor(private readonly reviewsService: ReviewsService) {}
 
   @Post()
-  async createReview(
-    @Request() req,
-    @Body() createReviewDto: {
-      businessId: number;
-      bookingId: number;
-      rating: number;
-      comment?: string;
-    },
-  ) {
-    return this.reviewsService.createReview(
-      req.user.id,
-      createReviewDto.businessId,
-      createReviewDto.bookingId,
-      createReviewDto.rating,
-      createReviewDto.comment,
-    );
+  @UseGuards(JwtAuthGuard)
+  create(@Body() createReviewDto: CreateReviewDto, @Request() req) {
+    return this.reviewsService.create(createReviewDto, req.user.id);
   }
 
   @Get('business/:businessId')
-  async getReviewsByBusiness(
-    @Param('businessId') businessId: number,
-    @Query('page') page: number = 1,
-    @Query('limit') limit: number = 10,
-  ) {
-    return this.reviewsService.getReviewsByBusiness(businessId, page, limit);
+  findAllByBusiness(@Param('businessId') businessId: string) {
+    return this.reviewsService.findAllByBusiness(businessId);
   }
 
-  @Get('trust-score')
-  async getTrustScore(@Request() req) {
-    const score = await this.reviewsService.getTrustScore(req.user.id);
-    return { trustScore: score };
+  @Get('user/:userId')
+  @UseGuards(JwtAuthGuard)
+  findAllByUser(@Param('userId') userId: string, @Request() req) {
+    // Users can only see their own reviews
+    if (req.user.id !== userId) {
+      throw new Error('Forbidden');
+    }
+    return this.reviewsService.findAllByUser(userId);
+  }
+
+  @Get('my-reviews')
+  @UseGuards(JwtAuthGuard)
+  findMyReviews(@Request() req) {
+    return this.reviewsService.findAllByUser(req.user.id);
+  }
+
+  @Get('business/:businessId/stats')
+  getBusinessRatingStats(@Param('businessId') businessId: string) {
+    return this.reviewsService.getBusinessRatingStats(businessId);
+  }
+
+  @Get(':id')
+  findOne(@Param('id') id: string) {
+    return this.reviewsService.findOne(id);
+  }
+
+  @Patch(':id')
+  @UseGuards(JwtAuthGuard)
+  update(@Param('id') id: string, @Body() updateReviewDto: UpdateReviewDto, @Request() req) {
+    return this.reviewsService.update(id, updateReviewDto, req.user.id);
+  }
+
+  @Delete(':id')
+  @UseGuards(JwtAuthGuard)
+  remove(@Param('id') id: string, @Request() req) {
+    return this.reviewsService.remove(id, req.user.id);
   }
 }

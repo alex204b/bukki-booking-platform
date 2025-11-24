@@ -1,16 +1,18 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { authApi } from '../services/api';
+import { authApi, api } from '../services/api';
 import toast from 'react-hot-toast';
+import { pushNotificationService } from '../services/pushNotificationService';
 
 interface User {
   id: string;
   email: string;
   firstName: string;
   lastName: string;
-  role: 'customer' | 'business_owner' | 'super_admin';
+  role: 'customer' | 'business_owner' | 'employee' | 'super_admin';
   phone?: string;
   avatar?: string;
   emailVerified?: boolean;
+  trustScore?: number;
   // Optional profile fields used by Profile page
   address?: string;
   city?: string;
@@ -59,20 +61,60 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const storedToken = localStorage.getItem('token');
-    const storedUser = localStorage.getItem('user');
+    try {
+      if (typeof localStorage === 'undefined') {
+        setLoading(false);
+        return;
+      }
 
-    if (storedToken && storedUser) {
-      setToken(storedToken);
-      setUser(JSON.parse(storedUser));
-      authApi.defaults.headers.common['Authorization'] = `Bearer ${storedToken}`;
+      const storedToken = localStorage.getItem('token');
+      const storedUser = localStorage.getItem('user');
+
+      if (storedToken && storedUser) {
+        try {
+          const parsedUser = JSON.parse(storedUser);
+          setToken(storedToken);
+          setUser(parsedUser);
+          authApi.defaults.headers.common['Authorization'] = `Bearer ${storedToken}`;
+          api.defaults.headers.common['Authorization'] = `Bearer ${storedToken}`;
+          
+          // Initialize push notifications asynchronously (don't block)
+          // Only try if we're on native platform and Firebase might be available
+          if (pushNotificationService.isSupported()) {
+            // Delay to ensure app is fully loaded
+            setTimeout(() => {
+              pushNotificationService.initialize().catch((error) => {
+                // Silently fail - push notifications are optional
+                // Firebase might not be configured, which is fine
+                console.warn('Push notifications not available (optional feature)');
+              });
+            }, 1000); // Increased delay to ensure Firebase initialization completes
+          }
+        } catch (parseError) {
+          // Clear corrupted data
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+        }
+      }
+    } catch (error) {
+      // Silently handle errors during initialization
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
   const login = async (email: string, password: string) => {
     try {
-      const response = await authApi.post('/auth/login', { email, password });
+      // Normalize email (lowercase and trim)
+      const normalizedEmail = email.toLowerCase().trim();
+      // Don't trim password - passwords are stored as-is during registration
+      
+      console.log('[FRONTEND LOGIN] Attempting login:', { email: normalizedEmail, passwordLength: password.length });
+      
+      const response = await authApi.post('/auth/login', { 
+        email: normalizedEmail, 
+        password: password // Send password as-is, no trimming
+      });
       const { user: userData, token: userToken, requiresVerification } = response.data;
 
       setUser(userData);
@@ -80,6 +122,30 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       localStorage.setItem('token', userToken);
       localStorage.setItem('user', JSON.stringify(userData));
       authApi.defaults.headers.common['Authorization'] = `Bearer ${userToken}`;
+      
+      // Also set token in the main api instance for authenticated requests
+      api.defaults.headers.common['Authorization'] = `Bearer ${userToken}`;
+
+      // Initialize push notifications after successful login (with timeout)
+      try {
+        if (pushNotificationService.isSupported()) {
+          // Set timeout for push notification initialization (3 seconds)
+          await Promise.race([
+            pushNotificationService.initialize(),
+            new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('Push notification init timeout')), 3000)
+            )
+          ]).catch((error) => {
+            if (error.message !== 'Push notification init timeout') {
+              throw error;
+            }
+            console.warn('[AUTH] Push notification initialization timed out, continuing...');
+          });
+        }
+      } catch (error) {
+        console.error('Failed to initialize push notifications:', error);
+        // Don't show error to user - push notifications are optional
+      }
 
       if (requiresVerification) {
         toast('Login successful — please verify your email', { icon: '✉️' });
@@ -90,8 +156,35 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       // Return user data for navigation logic
       return { user: userData, token: userToken, requiresVerification };
     } catch (error: any) {
-      const message = error.response?.data?.message || 'Login failed';
-      toast.error(message);
+      console.error('[FRONTEND LOGIN] Error details:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+        url: error.config?.url,
+        baseURL: error.config?.baseURL,
+        code: error.code,
+        isNetworkError: !error.response,
+      });
+      
+      let message = 'Login failed';
+      
+      // Network error (no response from server)
+      if (!error.response) {
+        const baseURL = error.config?.baseURL || 'unknown';
+        const isMobile = window.location.protocol === 'capacitor:' || (window as any).Capacitor;
+        
+        if (isMobile) {
+          message = `Cannot connect to server at ${baseURL}. Make sure:\n1. Backend is running on port 3000\n2. ADB reverse is set: adb reverse tcp:3000 tcp:3000\n3. Phone is connected via USB`;
+        } else {
+          message = `Cannot connect to server at ${baseURL}. Please check:\n1. Backend is running (npm start in backend folder)\n2. Backend is accessible at ${baseURL}\n3. No firewall is blocking the connection`;
+        }
+      } else if (error.response?.data?.message) {
+        message = error.response.data.message;
+      } else if (error.message) {
+        message = error.message;
+      }
+      
+      toast.error(message, { duration: 5000 });
       throw error;
     }
   };
@@ -115,6 +208,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         localStorage.setItem('token', userToken);
         localStorage.setItem('user', JSON.stringify(newUser));
         authApi.defaults.headers.common['Authorization'] = `Bearer ${userToken}`;
+        api.defaults.headers.common['Authorization'] = `Bearer ${userToken}`;
         toast.success('Registration successful!');
       }
       return data;
@@ -125,12 +219,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  const logout = () => {
+  const logout = async () => {
+    // Unregister push notifications
+    try {
+      await pushNotificationService.unregister();
+    } catch (error) {
+      console.error('Failed to unregister push notifications:', error);
+    }
+
     setUser(null);
     setToken(null);
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     delete authApi.defaults.headers.common['Authorization'];
+    delete api.defaults.headers.common['Authorization'];
     toast.success('Logged out successfully');
   };
 

@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Plus, Trash2, GripVertical, Save, Clock, DollarSign, Settings, CheckCircle } from 'lucide-react';
+import { Plus, Trash2, Save, Clock, DollarSign, Settings, CheckCircle } from 'lucide-react';
 import { api } from '../services/api';
 import toast from 'react-hot-toast';
 import { useI18n } from '../contexts/I18nContext';
 import { GeometricSymbol } from '../components/GeometricSymbols';
+import { MapAddressSelector } from '../components/MapAddressSelector';
 
 type FieldType = 'text' | 'number' | 'textarea' | 'select' | 'checkbox';
 
@@ -46,6 +47,8 @@ export const BusinessOnboarding: React.FC = () => {
   const [email, setEmail] = useState('');
   const [website, setWebsite] = useState('');
   const [description, setDescription] = useState('');
+  const [latitude, setLatitude] = useState<number | null>(null);
+  const [longitude, setLongitude] = useState<number | null>(null);
   
   const [workingHours, setWorkingHours] = useState<WorkingHours>({
     monday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
@@ -73,6 +76,15 @@ export const BusinessOnboarding: React.FC = () => {
     { id: crypto.randomUUID(), label: 'Notes', type: 'textarea', required: false },
   ]);
   const [saving, setSaving] = useState(false);
+
+  // Clear default text on first focus for better UX
+  const [clearedOnce, setClearedOnce] = useState<Set<string>>(new Set());
+  const clearOnFirstFocus = (key: string, clear: () => void) => () => {
+    if (!clearedOnce.has(key)) {
+      clear();
+      setClearedOnce(prev => new Set(prev).add(key));
+    }
+  };
 
   const addField = (type: FieldType) => {
     const base: FormField = { id: crypto.randomUUID(), label: 'New Field', type, required: false };
@@ -109,32 +121,6 @@ export const BusinessOnboarding: React.FC = () => {
     setServices(prev => prev.filter(s => s.id !== id));
   };
 
-  const addServiceField = (serviceId: string, type: FieldType) => {
-    const base: FormField = { id: crypto.randomUUID(), label: 'New Field', type, required: false };
-    if (type === 'select') base.options = ['Option 1', 'Option 2'];
-    updateService(serviceId, {
-      customFields: [...services.find(s => s.id === serviceId)?.customFields || [], base]
-    });
-  };
-
-  const updateServiceField = (serviceId: string, fieldId: string, patch: Partial<FormField>) => {
-    const service = services.find(s => s.id === serviceId);
-    if (!service) return;
-    
-    const updatedFields = service.customFields.map(f => 
-      f.id === fieldId ? { ...f, ...patch } : f
-    );
-    updateService(serviceId, { customFields: updatedFields });
-  };
-
-  const removeServiceField = (serviceId: string, fieldId: string) => {
-    const service = services.find(s => s.id === serviceId);
-    if (!service) return;
-    
-    const updatedFields = service.customFields.filter(f => f.id !== fieldId);
-    updateService(serviceId, { customFields: updatedFields });
-  };
-
   const updateWorkingHours = (day: string, patch: Partial<WorkingHours[string]>) => {
     setWorkingHours(prev => ({
       ...prev,
@@ -142,9 +128,78 @@ export const BusinessOnboarding: React.FC = () => {
     }));
   };
 
+  const handleLocationSelect = (lat: number, lng: number, fullAddress: string) => {
+    setLatitude(lat);
+    setLongitude(lng);
+    setAddress(fullAddress);
+    
+    // Try to extract city, state, and zip from the full address
+    const addressParts = fullAddress.split(',');
+    if (addressParts.length >= 2) {
+      setCity(addressParts[addressParts.length - 2]?.trim() || '');
+      setState(addressParts[addressParts.length - 1]?.trim() || '');
+    }
+  };
+
+  const validateForm = () => {
+    const errors: string[] = [];
+    
+    // Required field validation
+    if (!businessName.trim()) errors.push('Business name is required');
+    if (!address.trim()) errors.push('Address is required');
+    if (!city.trim()) errors.push('City is required');
+    if (!state.trim()) errors.push('State is required');
+    if (!phone.trim()) errors.push('Phone number is required');
+    if (!latitude || !longitude) errors.push('Please select your location on the map');
+    
+    // Phone number validation
+    if (phone.trim()) {
+      const phoneRegex = /^[+]?[1-9][\d]{0,15}$/;
+      if (!phoneRegex.test(phone.replace(/[\s\-()]/g, ''))) {
+        errors.push('Please enter a valid phone number');
+      }
+    }
+    
+    // Email validation (if provided)
+    if (email.trim()) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        errors.push('Please enter a valid email address');
+      }
+    }
+    
+    // Website validation (if provided)
+    if (website.trim()) {
+      const urlRegex = /^https?:\/\/.+/;
+      if (!urlRegex.test(website)) {
+        errors.push('Website must start with http:// or https://');
+      }
+    }
+    
+    // Service validation
+    if (services.length === 0) {
+      errors.push('At least one service is required');
+    } else {
+      services.forEach((service, index) => {
+        if (!service.name.trim()) {
+          errors.push(`Service ${index + 1}: Name is required`);
+        }
+        if (service.price <= 0) {
+          errors.push(`Service ${index + 1}: Price must be greater than 0`);
+        }
+        if (service.duration <= 0) {
+          errors.push(`Service ${index + 1}: Duration must be greater than 0`);
+        }
+      });
+    }
+    
+    return errors;
+  };
+
   const handleSave = async () => {
-    if (!businessName || !address || !city || !state || !phone) {
-      toast.error('Please complete the business details');
+    const validationErrors = validateForm();
+    if (validationErrors.length > 0) {
+      toast.error(validationErrors[0]); // Show first error
       return;
     }
     setSaving(true);
@@ -162,6 +217,8 @@ export const BusinessOnboarding: React.FC = () => {
         phone,
         email,
         website,
+        latitude,
+        longitude,
         workingHours,
         customBookingFields: fields.map(({ id, ...rest }) => rest),
       };
@@ -179,9 +236,10 @@ export const BusinessOnboarding: React.FC = () => {
         }
       }
       
-      toast.success('Business setup completed successfully!');
-      // 3) Redirect to business dashboard
-      window.location.href = '/business-dashboard';
+      // Show pending review notice
+      toast.success('Business submitted! Review usually takes 30–60 minutes. You\'ll receive an email when it\'s approved.');
+      // Show success screen instead of redirecting immediately
+      setCurrentStep(5); // Add a success step
     } catch (e: any) {
       toast.error(e.response?.data?.message || 'Failed to save');
     } finally {
@@ -200,9 +258,9 @@ export const BusinessOnboarding: React.FC = () => {
   const isStepValid = (step: number) => {
     switch (step) {
       case 1:
-        return businessName && address && city && state && phone;
+        return businessName.trim() && address.trim() && city.trim() && state.trim() && phone.trim() && latitude && longitude;
       case 2:
-        return services.length > 0 && services.every(s => s.name && s.price > 0);
+        return services.length > 0 && services.every(s => s.name.trim() && s.price > 0 && s.duration > 0);
       case 3:
         return true; // Working hours are optional
       case 4:
@@ -228,7 +286,6 @@ export const BusinessOnboarding: React.FC = () => {
             const Icon = step.icon;
             const isActive = currentStep === step.id;
             const isCompleted = currentStep > step.id;
-            const isValid = isStepValid(step.id);
             
             return (
               <div key={step.id} className="flex items-center">
@@ -273,6 +330,7 @@ export const BusinessOnboarding: React.FC = () => {
                   placeholder={t('businessNameOnboarding')} 
                   value={businessName} 
                   onChange={e => setBusinessName(e.target.value)} 
+                  onFocus={clearOnFirstFocus('businessName', () => setBusinessName(''))}
                 />
               </div>
               <div>
@@ -290,15 +348,15 @@ export const BusinessOnboarding: React.FC = () => {
                   placeholder={t('descriptionOnboarding')} 
                   value={description} 
                   onChange={e => setDescription(e.target.value)} 
+                  onFocus={clearOnFirstFocus('description', () => setDescription(''))}
                 />
               </div>
-              <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-2">{t('addressOnboarding')} *</label>
-                <input 
-                  className="input w-full" 
-                  placeholder={t('addressOnboarding')} 
-                  value={address} 
-                  onChange={e => setAddress(e.target.value)} 
+              <div className="col-span-full">
+                <MapAddressSelector
+                  onLocationSelect={handleLocationSelect}
+                  initialLat={latitude || undefined}
+                  initialLng={longitude || undefined}
+                  initialAddress={address}
                 />
               </div>
               <div>
@@ -308,6 +366,7 @@ export const BusinessOnboarding: React.FC = () => {
                   placeholder={t('cityOnboarding')} 
                   value={city} 
                   onChange={e => setCity(e.target.value)} 
+                  onFocus={clearOnFirstFocus('city', () => setCity(''))}
                 />
               </div>
               <div>
@@ -317,6 +376,7 @@ export const BusinessOnboarding: React.FC = () => {
                   placeholder={t('stateOnboarding')} 
                   value={state} 
                   onChange={e => setState(e.target.value)} 
+                  onFocus={clearOnFirstFocus('state', () => setState(''))}
                 />
               </div>
               <div>
@@ -326,6 +386,7 @@ export const BusinessOnboarding: React.FC = () => {
                   placeholder={t('zipCodeOnboarding')} 
                   value={zipCode} 
                   onChange={e => setZipCode(e.target.value)} 
+                  onFocus={clearOnFirstFocus('zipCode', () => setZipCode(''))}
                 />
               </div>
               <div>
@@ -335,6 +396,7 @@ export const BusinessOnboarding: React.FC = () => {
                   placeholder={t('phoneOnboarding')} 
                   value={phone} 
                   onChange={e => setPhone(e.target.value)} 
+                  onFocus={clearOnFirstFocus('phone', () => setPhone(''))}
                 />
               </div>
               <div>
@@ -344,6 +406,7 @@ export const BusinessOnboarding: React.FC = () => {
                   placeholder={t('emailOnboarding')} 
                   value={email} 
                   onChange={e => setEmail(e.target.value)} 
+                  onFocus={clearOnFirstFocus('email', () => setEmail(''))}
                 />
               </div>
               <div>
@@ -353,6 +416,7 @@ export const BusinessOnboarding: React.FC = () => {
                   placeholder={t('websiteOnboarding')} 
                   value={website} 
                   onChange={e => setWebsite(e.target.value)} 
+                  onFocus={clearOnFirstFocus('website', () => setWebsite(''))}
                 />
               </div>
             </div>
@@ -390,6 +454,7 @@ export const BusinessOnboarding: React.FC = () => {
                         placeholder={t('serviceNameOnboarding')} 
                         value={service.name} 
                         onChange={e => updateService(service.id, { name: e.target.value })} 
+                        onFocus={clearOnFirstFocus(`service-name-${service.id}`, () => updateService(service.id, { name: '' }))}
                       />
                     </div>
                     <div>
@@ -400,6 +465,7 @@ export const BusinessOnboarding: React.FC = () => {
                         placeholder="0.00" 
                         value={service.price} 
                         onChange={e => updateService(service.id, { price: parseFloat(e.target.value) || 0 })} 
+                        onFocus={clearOnFirstFocus(`service-price-${service.id}`, () => updateService(service.id, { price: 0 }))}
                       />
                     </div>
                     <div>
@@ -410,6 +476,7 @@ export const BusinessOnboarding: React.FC = () => {
                         placeholder="30" 
                         value={service.duration} 
                         onChange={e => updateService(service.id, { duration: parseInt(e.target.value) || 30 })} 
+                        onFocus={clearOnFirstFocus(`service-duration-${service.id}`, () => updateService(service.id, { duration: 0 }))}
                       />
                     </div>
                     <div className="flex items-center">
@@ -431,6 +498,7 @@ export const BusinessOnboarding: React.FC = () => {
                       placeholder={t('descriptionOnboarding')} 
                       value={service.description} 
                       onChange={e => updateService(service.id, { description: e.target.value })} 
+                      onFocus={clearOnFirstFocus(`service-description-${service.id}`, () => updateService(service.id, { description: '' }))}
                     />
                   </div>
                 </div>
@@ -563,41 +631,82 @@ export const BusinessOnboarding: React.FC = () => {
           </div>
         )}
 
-        {/* Navigation */}
-        <div className="flex justify-between mt-8 pt-6 border-t">
-          <button 
-            className="btn btn-outline" 
-            onClick={prevStep} 
-            disabled={currentStep === 1}
-          >
-            {t('previous')}
-          </button>
-          
-          <div className="flex gap-3">
-            {currentStep < 4 ? (
+        {currentStep === 5 && (
+          <div className="space-y-6 text-center">
+            <div className="mb-8">
+              <GeometricSymbol variant="check" size={80} strokeWidth={4} color="#10b981" className="mx-auto mb-6" />
+              <h2 className="text-3xl font-bold text-gray-900 mb-4">Business Submitted Successfully!</h2>
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 max-w-2xl mx-auto">
+                <div className="flex items-center justify-center mb-4">
+                  <Clock className="h-8 w-8 text-yellow-600 mr-3" />
+                  <h3 className="text-xl font-semibold text-yellow-800">Pending Review</h3>
+                </div>
+                <p className="text-yellow-700 mb-4">
+                  Your business <strong>{businessName}</strong> has been submitted for review.
+                </p>
+                <div className="text-sm text-yellow-600 space-y-2">
+                  <p>• Review typically takes <strong>30-60 minutes</strong></p>
+                  <p>• You'll receive an email notification when approved</p>
+                  <p>• Your business will appear on the map once approved</p>
+                  <p>• You can start accepting bookings after approval</p>
+                </div>
+              </div>
+            </div>
+            
+            <div className="flex justify-center gap-4">
               <button 
-                className="btn btn-primary" 
-                onClick={nextStep}
-                disabled={!isStepValid(currentStep)}
+                className="btn btn-primary"
+                onClick={() => window.location.href = '/business-dashboard'}
               >
-                {t('nextStep')}
+                Go to Dashboard
               </button>
-            ) : (
               <button 
-                className="btn btn-primary" 
-                onClick={handleSave} 
-                disabled={saving}
+                className="btn btn-outline"
+                onClick={() => window.location.href = '/businesses'}
               >
-                {saving ? t('saving') : (
-                  <>
-                    <Save className="h-4 w-4 mr-2" />
-                    {t('completeSetup')}
-                  </>
-                )}
+                Browse Other Businesses
               </button>
-            )}
+            </div>
           </div>
-        </div>
+        )}
+
+        {/* Navigation */}
+        {currentStep < 5 && (
+          <div className="flex justify-between mt-8 pt-6 border-t">
+            <button 
+              className="btn btn-outline" 
+              onClick={prevStep} 
+              disabled={currentStep === 1}
+            >
+              {t('previous')}
+            </button>
+            
+            <div className="flex gap-3">
+              {currentStep < 4 ? (
+                <button 
+                  className="btn btn-primary" 
+                  onClick={nextStep}
+                  disabled={!isStepValid(currentStep)}
+                >
+                  {t('nextStep')}
+                </button>
+              ) : (
+                <button 
+                  className="btn btn-primary" 
+                  onClick={handleSave} 
+                  disabled={saving}
+                >
+                  {saving ? t('saving') : (
+                    <>
+                      <Save className="h-4 w-4 mr-2" />
+                      {t('completeSetup')}
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

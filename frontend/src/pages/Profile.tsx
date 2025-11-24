@@ -1,14 +1,16 @@
 import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { userService, reviewService, businessService } from '../services/api';
+import { userService, businessService } from '../services/api';
 import { User, Mail, Phone, MapPin, Save, Edit3 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { TrustScore } from '../components/TrustScore';
+import { TrustScoreBreakdown } from '../components/TrustScoreBreakdown';
+import { NotificationSettings } from '../components/NotificationSettings';
 import { useI18n } from '../contexts/I18nContext';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 
 export const Profile: React.FC = () => {
-  const { user, login } = useAuth();
+  const { user } = useAuth();
   const { t } = useI18n();
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -24,13 +26,14 @@ export const Profile: React.FC = () => {
     country: user?.country || '',
   });
 
-  const { data: trustScore } = useQuery(
-    'trustScore',
-    () => reviewService.getTrustScore(),
-    {
-      select: (response) => response.data.trustScore,
-    }
-  );
+  // Note: Trust score functionality removed as it's not implemented in the new review system
+  // const { data: trustScore } = useQuery(
+  //   'trustScore',
+  //   () => reviewService.getTrustScore(),
+  //   {
+  //     select: (response) => response.data.trustScore,
+  //   }
+  // );
 
   const queryClient = useQueryClient();
   const { data: invites } = useQuery(
@@ -43,10 +46,10 @@ export const Profile: React.FC = () => {
     (businessId: string) => businessService.acceptInvite(businessId, user?.email || ''),
     {
       onSuccess: () => {
-        toast.success(t('inviteAccepted') || 'Invitation accepted');
+        toast.success(t('invitationAcceptedYouAreNowEmployee'));
         queryClient.invalidateQueries('my-invites');
       },
-      onError: (e: any) => { toast.error(e.response?.data?.message || 'Failed to accept invitation'); }
+      onError: (e: any) => { toast.error(e.response?.data?.message || t('failedToAcceptInvitation')); }
     }
   );
 
@@ -117,11 +120,18 @@ export const Profile: React.FC = () => {
             <p className="text-gray-600 capitalize">{user?.role}</p>
             <p className="text-sm text-gray-500">Member since {new Date(user?.createdAt || '').toLocaleDateString()}</p>
           </div>
-          {trustScore !== undefined && (
-            <TrustScore score={trustScore} size="lg" />
+          {user?.trustScore !== undefined && (
+            <div className="ml-auto">
+              <TrustScore score={user.trustScore} size="lg" />
+            </div>
           )}
         </div>
       </div>
+
+      {/* Trust Score Breakdown */}
+      {user?.role === 'customer' && (
+        <TrustScoreBreakdown />
+      )}
 
       {/* Profile Form */}
       <form onSubmit={handleSubmit} className="card p-6">
@@ -355,16 +365,12 @@ export const Profile: React.FC = () => {
             </button>
           </div>
           
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="font-medium text-gray-900">Email Notifications</p>
-              <p className="text-sm text-gray-600">Manage your notification preferences</p>
-            </div>
-            <button className="btn btn-outline btn-sm">
-              Manage
-            </button>
-          </div>
         </div>
+      </div>
+
+      {/* Push Notification Settings */}
+      <div className="card p-6">
+        <NotificationSettings />
       </div>
     </div>
   );

@@ -1,5 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 
@@ -10,9 +12,60 @@ async function bootstrap() {
   
   const app = await NestFactory.create(AppModule);
 
-  // Enable CORS
+  // Trust proxy (needed when behind Render/NGINX/Cloudflare) so rate-limit sees real IP
+  const httpAdapter = app.getHttpAdapter();
+  const expressApp = httpAdapter.getInstance?.();
+  if (expressApp && typeof expressApp.set === 'function') {
+    expressApp.set('trust proxy', 1);
+  }
+
+  // Secure headers
+  app.use(helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  }) as any);
+
+  // Rate limiting
+  const globalLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: parseInt(process.env.RATE_LIMIT_GLOBAL_MAX || '300'),
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
+  const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: parseInt(process.env.RATE_LIMIT_AUTH_MAX || '20'), // tighter for auth endpoints
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
+  const verifyLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 hour
+    max: parseInt(process.env.RATE_LIMIT_VERIFY_MAX || '10'),
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
+
+  // Apply global limiter
+  app.use(globalLimiter);
+
+  // Apply route-specific limiters (helps protect against credential stuffing / OTP abuse)
+  app.use('/auth/login', authLimiter);
+  app.use('/auth/register', authLimiter);
+  app.use('/auth/verify', verifyLimiter);
+  app.use('/auth/forgot-password', verifyLimiter);
+  app.use('/auth/reset-password', verifyLimiter);
+
+  // Enable CORS with support for multiple allowed origins via env
+  const corsEnv = process.env.FRONTEND_URL || process.env.CORS_ALLOWED_ORIGINS;
+  const allowedOrigins = (corsEnv ? corsEnv.split(',') : ['http://localhost:3001'])
+    .map(o => o.trim())
+    .filter(Boolean);
+
+  // For mobile app development, allow requests from any origin (Capacitor apps don't have a traditional origin)
+  // In production, you should restrict this to your actual frontend URLs
+  const isDevelopment = process.env.NODE_ENV !== 'production';
+  
   app.enableCors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:3001',
+    origin: isDevelopment ? true : allowedOrigins, // Allow all origins in development for mobile testing
     credentials: true,
   });
 

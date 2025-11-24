@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, Get, Request } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Get, Request, UnauthorizedException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { VerificationService } from './verification.service';
@@ -27,7 +27,31 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'Login successful' })
   @ApiResponse({ status: 401, description: 'Invalid credentials' })
   async login(@Body() loginDto: LoginDto) {
-    return this.authService.login(loginDto);
+    try {
+      console.log('[LOGIN CONTROLLER] Received login request:', { 
+        email: loginDto.email,
+        hasPassword: !!loginDto.password,
+        passwordLength: loginDto.password?.length || 0
+      });
+      
+      if (!loginDto.email || !loginDto.password) {
+        console.error('[LOGIN CONTROLLER] Missing email or password');
+        throw new UnauthorizedException('Email and password are required');
+      }
+      
+      const result = await this.authService.login(loginDto);
+      console.log('[LOGIN CONTROLLER] Login successful for:', loginDto.email);
+      return result;
+    } catch (error) {
+      console.error('[LOGIN CONTROLLER] Error:', error.message);
+      console.error('[LOGIN CONTROLLER] Error type:', error.constructor.name);
+      if (error.stack) {
+        console.error('[LOGIN CONTROLLER] Stack:', error.stack);
+      }
+      
+      // Re-throw the error to let NestJS handle it properly
+      throw error;
+    }
   }
 
   @Get('profile')
@@ -55,19 +79,26 @@ export class AuthController {
   }
 
   @Post('forgot-password')
-  @ApiOperation({ summary: 'Request password reset' })
-  @ApiResponse({ status: 200, description: 'Password reset email sent' })
+  @ApiOperation({ summary: 'Request password reset code' })
+  @ApiResponse({ status: 200, description: 'Password reset code sent' })
   async forgotPassword(@Body() body: { email: string }) {
-    await this.authService.requestPasswordReset(body.email);
-    return { message: 'If the email exists, a password reset link has been sent' };
+    return this.authService.requestPasswordReset(body.email);
+  }
+
+  @Post('verify-reset-code')
+  @ApiOperation({ summary: 'Verify password reset code' })
+  @ApiResponse({ status: 200, description: 'Reset code verified successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid or expired code' })
+  async verifyResetCode(@Body() body: { email: string; code: string }) {
+    return this.authService.verifyPasswordResetCode(body.email, body.code);
   }
 
   @Post('reset-password')
-  @ApiOperation({ summary: 'Reset password with token' })
+  @ApiOperation({ summary: 'Reset password with verified code' })
   @ApiResponse({ status: 200, description: 'Password reset successfully' })
-  @ApiResponse({ status: 401, description: 'Invalid or expired token' })
-  async resetPassword(@Body() body: { token: string; newPassword: string }) {
-    await this.authService.resetPassword(body.token, body.newPassword);
+  @ApiResponse({ status: 401, description: 'Invalid or expired code' })
+  async resetPassword(@Body() body: { email: string; code: string; newPassword: string }) {
+    await this.authService.resetPassword(body.email, body.code, body.newPassword);
     return { message: 'Password reset successfully' };
   }
 
@@ -85,5 +116,20 @@ export class AuthController {
   @ApiResponse({ status: 400, description: 'User not found or already verified' })
   async resendVerification(@Body() body: { email: string }) {
     return this.verificationService.resendVerificationCode(body.email);
+  }
+
+  @Post('debug-login')
+  @ApiOperation({ summary: 'Debug login - shows detailed info without authenticating' })
+  async debugLogin(@Body() body: { email: string; password: string }) {
+    // This is a debug endpoint - remove in production
+    return this.authService.debugLogin(body.email, body.password);
+  }
+
+  @Post('oauth')
+  @ApiOperation({ summary: 'OAuth login (Google/Facebook)' })
+  @ApiResponse({ status: 200, description: 'OAuth login successful' })
+  @ApiResponse({ status: 401, description: 'Invalid OAuth token' })
+  async oauthLogin(@Body() body: { provider: string; idToken: string; accessToken?: string }) {
+    return this.authService.oauthLogin(body.provider, body.idToken, body.accessToken);
   }
 }

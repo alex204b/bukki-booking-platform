@@ -7,14 +7,21 @@ import MapView from '../components/MapView';
 import { geocodeAddress } from '../utils/geocode';
 import { GeometricSymbol } from '../components/GeometricSymbols';
 import toast from 'react-hot-toast';
+import { useI18n } from '../contexts/I18nContext';
+import { SearchAutocomplete } from '../components/SearchAutocomplete';
+import { ListSkeleton } from '../components/LoadingSkeleton';
+import { FavoriteButton } from '../components/FavoriteButton';
+import { EmptyBusinesses } from '../components/EmptyState';
 
 export const BusinessList: React.FC = () => {
+  const { t } = useI18n();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
-  const [selectedLocation, setSelectedLocation] = useState('');
+  const [selectedLocation, setSelectedLocation] = useState(''); // Location filter
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [radius, setRadius] = useState<number>(5);
   const [availableNow, setAvailableNow] = useState<boolean>(false);
+  const [selectedBusiness, setSelectedBusiness] = useState<any>(null);
 
   const { data: businesses, isLoading, error, refetch } = useQuery(
     ['businesses', searchQuery, selectedCategory, selectedLocation, userLocation, radius, availableNow],
@@ -25,10 +32,40 @@ export const BusinessList: React.FC = () => {
       if (searchQuery || selectedCategory || selectedLocation) {
         return businessService.search(searchQuery, selectedCategory, selectedLocation);
       }
-      return businessService.getAll();
+      return businessService.getAll(); // This should return all businesses regardless of status
     },
     {
-      select: (response) => response.data,
+      select: (response) => {
+        // Handle different response structures
+        const businesses = Array.isArray(response.data) ? response.data : (Array.isArray(response) ? response : []);
+        
+        // Filter out pending businesses - only show approved businesses to customers
+        const approvedBusinesses = businesses.filter((business: any) => 
+          business && business.status === 'approved' && business.isActive !== false
+        );
+        return approvedBusinesses;
+      },
+      retry: (failureCount, error: any) => {
+        // Don't retry on 401 (authentication errors)
+        if (error?.response?.status === 401) {
+          return false;
+        }
+        // Don't retry on network errors (backend not running)
+        if (!error?.response && error?.code === 'ERR_NETWORK') {
+          return false;
+        }
+        // Retry other errors up to 1 time
+        return failureCount < 1;
+      },
+      onError: (error: any) => {
+        console.error('[BusinessList] Error fetching businesses:', {
+          message: error.message,
+          response: error.response?.data,
+          status: error.response?.status,
+          url: error.config?.url,
+          baseURL: error.config?.baseURL,
+        });
+      },
     }
   );
 
@@ -49,15 +86,49 @@ export const BusinessList: React.FC = () => {
     ).join(' ');
   };
 
+  const handleViewOnMap = (business: any) => {
+    if (business.latitude && business.longitude) {
+      setSelectedBusiness(business);
+      // Scroll to map section
+      const mapElement = document.getElementById('business-map');
+      if (mapElement) {
+        mapElement.scrollIntoView({ behavior: 'smooth' });
+      }
+    } else {
+      toast.error('This business does not have location data');
+    }
+  };
+
   useEffect(() => {
     if (!error) return;
     const anyErr: any = error as any;
     const serverMessage = anyErr?.response?.data?.message;
     const status = anyErr?.response?.status;
-    const detail = Array.isArray(serverMessage) ? serverMessage.join(', ') : (serverMessage || anyErr?.message || 'Unknown error');
+    const errorMessage = anyErr?.message;
+    
+    // Log detailed error for debugging
+    console.error('[BusinessList] Error loading businesses:', {
+      message: errorMessage,
+      status: status,
+      serverMessage: serverMessage,
+      response: anyErr?.response?.data,
+      url: anyErr?.config?.url,
+      baseURL: anyErr?.config?.baseURL,
+      code: anyErr?.code,
+      isNetworkError: !anyErr?.response,
+    });
+    
+    const detail = Array.isArray(serverMessage) ? serverMessage.join(', ') : (serverMessage || errorMessage || t('unknownError'));
     const prefix = status ? `Error ${status}: ` : '';
-    toast.error(`${prefix}Failed to load businesses. ${detail}`);
-  }, [error]);
+    
+    // Show more helpful error message
+    if (!anyErr?.response) {
+      // Network error - no response from server
+      toast.error(`${t('failedToLoadBusinesses') || 'Failed to load businesses'}. Network error - please check your connection.`);
+    } else {
+      toast.error(`${prefix}${t('failedToLoadBusinesses') || 'Failed to load businesses'}. ${detail}`);
+    }
+  }, [error, t]);
 
   // Fallback mock businesses (address-only) to help verify the UI even if API is empty
   const mockBusinesses = [
@@ -117,16 +188,11 @@ export const BusinessList: React.FC = () => {
       {/* Search and Filters */}
       <div className="card p-6">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-center">
-          <div className="relative">
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-              <Search className="h-5 w-5 text-gray-400" />
-            </div>
-            <input
-              type="text"
-              placeholder="Search businesses..."
+          <div className="md:col-span-2">
+            <SearchAutocomplete
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="input pl-10"
+              onChange={setSearchQuery}
+              placeholder="Search businesses..."
             />
           </div>
           
@@ -175,8 +241,12 @@ export const BusinessList: React.FC = () => {
 
       {/* Map */}
       {listData.length ? (
-        <div className="card p-4">
-          <GeoResolvedMap businesses={listData} center={userLocation || undefined} />
+        <div id="business-map" className="card p-4">
+          <GeoResolvedMap 
+            businesses={listData} 
+            center={userLocation || undefined} 
+            selectedBusiness={selectedBusiness}
+          />
         </div>
       ) : null}
 
@@ -193,9 +263,7 @@ export const BusinessList: React.FC = () => {
 
       {/* Results */}
       {isLoading ? (
-        <div className="flex justify-center py-12">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
-        </div>
+        <ListSkeleton count={6} />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {listData.map((business: any) => (
@@ -206,9 +274,12 @@ export const BusinessList: React.FC = () => {
             >
               <div className="flex items-start justify-between mb-4">
                 <div className="flex-1">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-1">
-                    {business.name}
-                  </h3>
+                  <div className="flex items-center gap-2 mb-1">
+                    <h3 className="text-lg font-semibold text-gray-900">
+                      {business.name}
+                    </h3>
+                    <FavoriteButton businessId={business.id} size="sm" />
+                  </div>
                   <p className="text-sm text-gray-600 mb-2">
                     {formatCategory(business.category)}
                   </p>
@@ -237,30 +308,42 @@ export const BusinessList: React.FC = () => {
                   <Clock className="h-4 w-4 mr-1" />
                   <span>{business.services?.length || 0} services</span>
                 </div>
-                <span className="text-sm font-medium text-primary-600">
-                  View Details →
-                </span>
+                <div className="flex gap-2">
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleViewOnMap(business);
+                    }}
+                    className="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded hover:bg-blue-200 transition-colors"
+                  >
+                    View on Map
+                  </button>
+                  <span className="text-sm font-medium text-primary-600">
+                    View Details →
+                  </span>
+                </div>
               </div>
             </Link>
           ))}
         </div>
       )}
 
-      {businesses?.length === 0 && !isLoading && (
-        <div className="text-center py-12">
-          <div className="text-gray-400 mb-4">
-            <Search className="h-12 w-12 mx-auto" />
-          </div>
-          <h3 className="text-lg font-medium text-gray-900 mb-2">No businesses found</h3>
-          <p className="text-gray-600">Try adjusting your search criteria</p>
-        </div>
+      {listData.length === 0 && !isLoading && (
+        <EmptyBusinesses onSearch={() => {
+          setSearchQuery('');
+          setSelectedCategory('');
+          setSelectedLocation('');
+          setUserLocation(null);
+          setAvailableNow(false);
+        }} />
       )}
     </div>
   );
 };
 
-// Resolve addresses to coordinates on the fly via OSM Nominatim (no API key)
-const GeoResolvedMap: React.FC<{ businesses: any[]; center?: { lat: number; lng: number } }> = ({ businesses, center }) => {
+// Use stored coordinates or fallback to geocoding
+const GeoResolvedMap: React.FC<{ businesses: any[]; center?: { lat: number; lng: number }; selectedBusiness?: any }> = ({ businesses, center, selectedBusiness }) => {
   const [markers, setMarkers] = React.useState<any[]>([]);
 
   useEffect(() => {
@@ -268,10 +351,8 @@ const GeoResolvedMap: React.FC<{ businesses: any[]; center?: { lat: number; lng:
     (async () => {
       const items: any[] = [];
       for (const b of businesses) {
-        const address = `${b.address || ''}, ${b.city || ''}, ${b.state || ''} ${b.zipCode || ''}`.trim();
-        if (!address || address === ', ,') continue;
-        const point = await geocodeAddress(address);
-        if (point) {
+        // Use stored coordinates if available
+        if (b.latitude && b.longitude) {
           items.push({
             id: b.id,
             name: b.name,
@@ -279,9 +360,26 @@ const GeoResolvedMap: React.FC<{ businesses: any[]; center?: { lat: number; lng:
             address: b.address,
             city: b.city,
             state: b.state,
-            latitude: point.lat,
-            longitude: point.lon,
+            latitude: parseFloat(b.latitude), // Ensure it's a decimal number
+            longitude: parseFloat(b.longitude), // Ensure it's a decimal number
           });
+        } else {
+          // Fallback to geocoding for businesses without coordinates
+          const address = `${b.address || ''}, ${b.city || ''}, ${b.state || ''} ${b.zipCode || ''}`.trim();
+          if (!address || address === ', ,') continue;
+          const point = await geocodeAddress(address);
+          if (point) {
+            items.push({
+              id: b.id,
+              name: b.name,
+              category: b.category,
+              address: b.address,
+              city: b.city,
+              state: b.state,
+              latitude: point.lat,
+              longitude: point.lon,
+            });
+          }
         }
       }
       if (mounted) setMarkers(items);
@@ -292,8 +390,13 @@ const GeoResolvedMap: React.FC<{ businesses: any[]; center?: { lat: number; lng:
   }, [businesses]);
 
   if (markers.length === 0) {
-    return <div className="text-sm text-gray-500 px-2 py-1">Resolving map locations…</div>;
+    return <div className="text-sm text-gray-500 px-2 py-1">Loading map locations…</div>;
   }
 
-  return <MapView markers={markers} center={center ? { lat: center.lat, lng: center.lng } : undefined} />;
+  // If a business is selected, center the map on that business
+  const mapCenter = selectedBusiness && selectedBusiness.latitude && selectedBusiness.longitude 
+    ? { lat: selectedBusiness.latitude, lng: selectedBusiness.longitude }
+    : center ? { lat: center.lat, lng: center.lng } : undefined;
+
+  return <MapView markers={markers} center={mapCenter} selectedBusiness={selectedBusiness} />;
 };

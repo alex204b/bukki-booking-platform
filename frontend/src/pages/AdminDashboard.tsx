@@ -1,21 +1,9 @@
 import React, { useState, useMemo } from 'react';
-import { useAuth } from '../contexts/AuthContext';
 import { useI18n } from '../contexts/I18nContext';
 import { Building2, Users, Calendar, DollarSign, CheckCircle, XCircle, Eye, Settings, TrendingUp, AlertTriangle } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { userService, businessService } from '../services/api';
 import toast from 'react-hot-toast';
-
-interface Business {
-  id: string;
-  name: string;
-  category: string;
-  ownerName: string;
-  status: 'pending' | 'approved' | 'rejected';
-  createdAt: string;
-  city: string;
-  state: string;
-}
 
 interface User {
   id: string;
@@ -37,15 +25,14 @@ interface PlatformStats {
 }
 
 export const AdminDashboard: React.FC = () => {
-  const { user } = useAuth();
   const { t } = useI18n();
   const capitalizeWords = (s: string) => s.replace(/\b\w/g, (letter: string): string => letter.toUpperCase());
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
-  const { data: usersData, isLoading: usersLoading } = useQuery(['admin-users'], () => userService.getAllUsers(), { select: (r) => r.data });
-  const { data: businessesData, isLoading: businessesLoading } = useQuery(['admin-businesses', statusFilter], () => businessService.getAll(statusFilter === 'all' ? undefined : statusFilter), { select: (r) => r.data });
-  const users: User[] = usersData || [];
-  const businesses: any[] = businessesData || [];
+  const { data: usersData } = useQuery(['admin-users'], () => userService.getAllUsers(), { select: (r) => r.data });
+  const { data: businessesData } = useQuery(['admin-businesses', statusFilter], () => businessService.getAll(statusFilter === 'all' ? undefined : statusFilter), { select: (r) => r.data });
+  const users: User[] = useMemo(() => usersData || [], [usersData]);
+  const businesses: any[] = useMemo(() => businessesData || [], [businessesData]);
   const stats: PlatformStats = useMemo(() => ({
     totalUsers: users.length,
     totalBusinesses: businesses.length,
@@ -67,13 +54,13 @@ export const AdminDashboard: React.FC = () => {
   });
   const suspendMutation = useMutation<any, any, string>({
     mutationFn: (id: string) => businessService.suspend(id),
-    onSuccess: () => { toast.success('Suspended'); queryClient.invalidateQueries(['admin-businesses']); },
-    onError: (e: any) => { toast.error(e?.response?.data?.message || 'Failed to suspend'); },
+    onSuccess: () => { toast.success(t('suspended')); queryClient.invalidateQueries(['admin-businesses']); },
+    onError: (e: any) => { toast.error(e?.response?.data?.message || t('failedToSuspend')); },
   });
   const toggleUserStatusMutation = useMutation<any, any, User>({
     mutationFn: (u: User) => (u.isActive ? userService.deactivateUser(u.id) : userService.activateUser(u.id)),
-    onSuccess: () => { toast.success('Updated user'); queryClient.invalidateQueries(['admin-users']); },
-    onError: (e: any) => { toast.error(e?.response?.data?.message || 'Failed to update user'); },
+    onSuccess: () => { toast.success(t('updatedUser')); queryClient.invalidateQueries(['admin-users']); },
+    onError: (e: any) => { toast.error(e?.response?.data?.message || t('failedToUpdateUser')); },
   });
 
   const getStatusColor = (status: string) => {
@@ -98,13 +85,13 @@ export const AdminDashboard: React.FC = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Super Admin Dashboard</h1>
-          <p className="text-gray-600 mt-2">Platform overview and management</p>
+          <h1 className="text-3xl font-bold text-gray-900">{t('superAdminDashboard')}</h1>
+          <p className="text-gray-600 mt-2">{t('platformOverviewAndManagement')}</p>
         </div>
         <div className="flex space-x-3">
           <button className="btn btn-outline">
             <Settings className="h-4 w-4 mr-2" />
-            Platform Settings
+            {t('platformSettings')}
           </button>
         </div>
       </div>
@@ -113,9 +100,9 @@ export const AdminDashboard: React.FC = () => {
       <div className="border-b border-gray-200">
         <nav className="-mb-px flex space-x-8">
           {[
-            { id: 'overview', label: 'Overview', icon: TrendingUp },
-            { id: 'businesses', label: 'Businesses', icon: Building2 },
-            { id: 'users', label: 'Users', icon: Users },
+            { id: 'overview', label: t('overview'), icon: TrendingUp },
+            { id: 'businesses', label: t('businesses'), icon: Building2 },
+            { id: 'users', label: t('users'), icon: Users },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -155,7 +142,7 @@ export const AdminDashboard: React.FC = () => {
                     <p className="text-sm font-medium text-gray-600">{stat.name}</p>
                     <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
                     <p className={`text-sm ${stat.changeType === 'positive' ? 'text-green-600' : stat.changeType === 'negative' ? 'text-red-600' : 'text-gray-600'}`}>
-                      {stat.change} from last month
+                      {stat.change} {t('fromLastMonth')}
                     </p>
                   </div>
                 </div>
