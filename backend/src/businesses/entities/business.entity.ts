@@ -128,6 +128,14 @@ export class Business extends BaseEntity {
   @Column({ nullable: true })
   subscriptionExpiresAt: Date;
 
+  // Amenities/Features offered by the business
+  @Column({ type: 'jsonb', nullable: true, default: '[]' })
+  amenities: string[];
+
+  // Price range indicator (cheap, moderate, expensive)
+  @Column({ nullable: true })
+  priceRange: string;
+
   // Business verification
   @Column({ default: false })
   isVerified: boolean;

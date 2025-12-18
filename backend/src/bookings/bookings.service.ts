@@ -12,6 +12,7 @@ import { EmailService } from '../common/services/email.service';
 import { TrustScoreService } from '../users/trust-score.service';
 import { PushNotificationService } from '../notifications/push-notification.service';
 import { MessagesService } from '../messages/messages.service';
+import { PaginationDto, PaginatedResult, createPaginatedResponse } from '../common/dto/pagination.dto';
 
 @Injectable()
 export class BookingsService {
@@ -358,6 +359,83 @@ export class BookingsService {
         },
       },
     });
+  }
+
+  async findAllPaginated(
+    userId?: string,
+    userRole?: string,
+    paginationDto?: PaginationDto,
+    businessId?: string,
+    status?: BookingStatus,
+  ): Promise<PaginatedResult<Booking>> {
+    const { limit = 20, offset = 0, sortBy = 'appointmentDate', sortOrder = 'DESC' } = paginationDto || {};
+
+    // Build base query
+    const queryBuilder = this.bookingRepository
+      .createQueryBuilder('booking')
+      .leftJoinAndSelect('booking.customer', 'customer')
+      .leftJoinAndSelect('booking.business', 'business')
+      .leftJoinAndSelect('booking.service', 'service');
+
+    // Apply role-based filtering
+    if (userRole === 'customer') {
+      queryBuilder.where('customer.id = :userId', { userId });
+    } else if (userRole === 'business_owner') {
+      // Get business IDs owned by user
+      const ownedBusiness = await this.businessRepository.findOne({
+        where: { owner: { id: userId } },
+      });
+
+      if (ownedBusiness) {
+        queryBuilder.where(
+          '(customer.id = :userId OR business.id = :businessId)',
+          { userId, businessId: ownedBusiness.id }
+        );
+      } else {
+        queryBuilder.where('customer.id = :userId', { userId });
+      }
+    } else if (userRole === 'employee') {
+      // Get business IDs where user is an active member
+      const employeeMemberships = await this.businessMemberRepository.find({
+        where: {
+          user: { id: userId },
+          status: BusinessMemberStatus.ACTIVE
+        } as any,
+        relations: ['business'],
+      });
+
+      if (employeeMemberships.length > 0) {
+        const businessIds = employeeMemberships.map(m => m.business.id);
+        queryBuilder.where('business.id IN (:...businessIds)', { businessIds });
+      } else {
+        // No businesses, return empty result
+        return createPaginatedResponse([], 0, limit, offset);
+      }
+    }
+    // For super_admin, no additional filtering needed
+
+    // Apply additional filters
+    if (businessId) {
+      queryBuilder.andWhere('business.id = :businessId', { businessId });
+    }
+
+    if (status) {
+      queryBuilder.andWhere('booking.status = :status', { status });
+    }
+
+    // Apply sorting
+    queryBuilder.orderBy(`booking.${sortBy}`, sortOrder);
+
+    // Get total count
+    const total = await queryBuilder.getCount();
+
+    // Apply pagination
+    queryBuilder.skip(offset).take(limit);
+
+    // Execute query
+    const bookings = await queryBuilder.getMany();
+
+    return createPaginatedResponse(bookings, total, limit, offset);
   }
 
   async findOne(id: string): Promise<Booking> {

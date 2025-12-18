@@ -1,11 +1,12 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Request } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Request, Query } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { TrustScoreService } from './trust-score.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from './entities/user.entity';
+import { PaginationDto } from '../common/dto/pagination.dto';
 
 @ApiTags('Users')
 @Controller('users')
@@ -20,13 +21,22 @@ export class UsersController {
   @Get()
   @UseGuards(RolesGuard)
   @Roles(UserRole.SUPER_ADMIN)
-  @ApiOperation({ summary: 'Get all users (Super Admin only)' })
+  @ApiOperation({ summary: 'Get all users (paginated, Super Admin only)' })
   @ApiResponse({ status: 200, description: 'Users retrieved successfully' })
-  async findAll(@Request() req) {
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'offset', required: false, type: Number })
+  @ApiQuery({ name: 'sortBy', required: false, type: String })
+  @ApiQuery({ name: 'sortOrder', required: false, enum: ['ASC', 'DESC'] })
+  @ApiQuery({ name: 'role', required: false, enum: UserRole })
+  async findAll(
+    @Request() req,
+    @Query() paginationDto: PaginationDto,
+    @Query('role') role?: UserRole,
+  ) {
     if (req.user.role !== UserRole.SUPER_ADMIN) {
       throw new Error('Unauthorized');
     }
-    return this.usersService.findAll();
+    return this.usersService.findAllPaginated(paginationDto, role);
   }
 
   @Get('profile')

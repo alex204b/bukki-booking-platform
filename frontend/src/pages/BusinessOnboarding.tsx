@@ -49,7 +49,10 @@ export const BusinessOnboarding: React.FC = () => {
   const [description, setDescription] = useState('');
   const [latitude, setLatitude] = useState<number | null>(null);
   const [longitude, setLongitude] = useState<number | null>(null);
-  
+  const [priceRange, setPriceRange] = useState<string>('moderate');
+  const [amenities, setAmenities] = useState<string[]>([]);
+  const [selectedImages, setSelectedImages] = useState<File[]>([]);
+
   const [workingHours, setWorkingHours] = useState<WorkingHours>({
     monday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
     tuesday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
@@ -126,6 +129,14 @@ export const BusinessOnboarding: React.FC = () => {
       ...prev,
       [day]: { ...prev[day], ...patch }
     }));
+  };
+
+  const toggleAmenity = (amenity: string) => {
+    setAmenities(prev =>
+      prev.includes(amenity)
+        ? prev.filter(a => a !== amenity)
+        : [...prev, amenity]
+    );
   };
 
   const handleLocationSelect = (lat: number, lng: number, fullAddress: string) => {
@@ -219,13 +230,26 @@ export const BusinessOnboarding: React.FC = () => {
         website,
         latitude,
         longitude,
+        priceRange,
+        amenities,
         workingHours,
         customBookingFields: fields.map(({ id, ...rest }) => rest),
       };
       const businessRes = await api.post('/businesses', businessPayload);
       const business = businessRes.data;
-      
-      // 2) Create services
+
+      // 2) Upload images if any were selected
+      if (selectedImages.length > 0) {
+        try {
+          const { businessService } = await import('../services/api');
+          await businessService.uploadImages(business.id, selectedImages);
+        } catch (error) {
+          console.error('Failed to upload images:', error);
+          toast.error('Business created but some images failed to upload');
+        }
+      }
+
+      // 3) Create services
       for (const service of services) {
         if (service.name && service.price > 0) {
           await api.post('/services', {
@@ -351,6 +375,49 @@ export const BusinessOnboarding: React.FC = () => {
                   onFocus={clearOnFirstFocus('description', () => setDescription(''))}
                 />
               </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Business Images</label>
+                <p className="text-sm text-gray-500 mb-2">Upload up to 10 images (max 5MB each)</p>
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={(e) => {
+                    const files = Array.from(e.target.files || []);
+                    if (files.length + selectedImages.length > 10) {
+                      toast.error('Maximum 10 images allowed');
+                      return;
+                    }
+                    setSelectedImages([...selectedImages, ...files]);
+                  }}
+                  className="block w-full text-sm text-gray-500
+                    file:mr-4 file:py-2 file:px-4
+                    file:rounded-md file:border-0
+                    file:text-sm file:font-semibold
+                    file:bg-primary-50 file:text-primary-700
+                    hover:file:bg-primary-100"
+                />
+                {selectedImages.length > 0 && (
+                  <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {selectedImages.map((file, index) => (
+                      <div key={index} className="relative">
+                        <img
+                          src={URL.createObjectURL(file)}
+                          alt={`Preview ${index + 1}`}
+                          className="w-full h-32 object-cover rounded-lg"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setSelectedImages(selectedImages.filter((_, i) => i !== index))}
+                          className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div className="col-span-full">
                 <MapAddressSelector
                   onLocationSelect={handleLocationSelect}
@@ -411,14 +478,75 @@ export const BusinessOnboarding: React.FC = () => {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">{t('websiteOnboarding')}</label>
-                <input 
-                  className="input w-full" 
-                  placeholder={t('websiteOnboarding')} 
-                  value={website} 
-                  onChange={e => setWebsite(e.target.value)} 
+                <input
+                  className="input w-full"
+                  placeholder={t('websiteOnboarding')}
+                  value={website}
+                  onChange={e => setWebsite(e.target.value)}
                   onFocus={clearOnFirstFocus('website', () => setWebsite(''))}
                 />
               </div>
+            </div>
+
+            {/* Price Range */}
+            <div className="mt-6">
+              <label className="block text-sm font-medium text-gray-700 mb-3">Price Range</label>
+              <div className="grid grid-cols-3 gap-3">
+                {[
+                  { value: 'cheap', label: '$ Budget-Friendly', desc: 'Affordable pricing' },
+                  { value: 'moderate', label: '$$ Moderate', desc: 'Mid-range pricing' },
+                  { value: 'expensive', label: '$$$ Premium', desc: 'High-end pricing' },
+                ].map(option => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setPriceRange(option.value)}
+                    className={`p-4 rounded-lg border-2 transition-all ${
+                      priceRange === option.value
+                        ? 'border-primary-600 bg-primary-50 text-primary-700'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="font-semibold text-lg mb-1">{option.label}</div>
+                    <div className="text-xs text-gray-600">{option.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Amenities */}
+            <div className="mt-6">
+              <label className="block text-sm font-medium text-gray-700 mb-3">Amenities & Features</label>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                {[
+                  { value: 'parking', label: '🅿️ Parking', icon: '🅿️' },
+                  { value: 'wheelchair_accessible', label: '♿ Wheelchair Accessible', icon: '♿' },
+                  { value: 'wifi', label: '📶 Free WiFi', icon: '📶' },
+                  { value: 'outdoor_seating', label: '🌳 Outdoor Seating', icon: '🌳' },
+                  { value: 'air_conditioned', label: '❄️ Air Conditioned', icon: '❄️' },
+                  { value: 'pet_friendly', label: '🐕 Pet Friendly', icon: '🐕' },
+                  { value: 'valet_parking', label: '🚗 Valet Parking', icon: '🚗' },
+                  { value: 'reservations_required', label: '📅 Reservations Required', icon: '📅' },
+                  { value: 'walk_ins_welcome', label: '🚶 Walk-ins Welcome', icon: '🚶' },
+                  { value: 'card_payment', label: '💳 Card Payments', icon: '💳' },
+                  { value: 'cash_only', label: '💵 Cash Only', icon: '💵' },
+                  { value: 'delivery', label: '🚚 Delivery Available', icon: '🚚' },
+                ].map(amenity => (
+                  <button
+                    key={amenity.value}
+                    type="button"
+                    onClick={() => toggleAmenity(amenity.value)}
+                    className={`p-3 rounded-lg border-2 transition-all text-left ${
+                      amenities.includes(amenity.value)
+                        ? 'border-primary-600 bg-primary-50 text-primary-700'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="text-sm font-medium">{amenity.label}</div>
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-gray-500 mt-2">Select all that apply to help customers find your business</p>
             </div>
           </div>
         )}

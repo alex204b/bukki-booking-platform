@@ -102,6 +102,7 @@ export class PushNotificationService {
         bookingUpdates: true,
         messages: true,
         reviews: true,
+        offers: true,
       },
     });
 

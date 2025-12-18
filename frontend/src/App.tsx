@@ -31,6 +31,8 @@ import { MyWaitlist } from './pages/MyWaitlist';
 import { QRScanner } from './pages/QRScanner';
 import { BookingConfirmation } from './pages/BookingConfirmation';
 import { Favorites } from './pages/Favorites';
+import { Offers } from './pages/Offers';
+import { CreateOffer } from './pages/CreateOffer';
 import InfoPage from './pages/InfoPage';
 import { TermsOfService } from './pages/TermsOfService';
 import { PrivacyPolicy } from './pages/PrivacyPolicy';
@@ -226,6 +228,22 @@ function App() {
                 <ProtectedRoute>
                   <Layout>
                     <Favorites />
+                  </Layout>
+                </ProtectedRoute>
+              } />
+              
+              <Route path="/offers" element={
+                <ProtectedRoute>
+                  <Layout>
+                    <Offers />
+                  </Layout>
+                </ProtectedRoute>
+              } />
+              
+              <Route path="/create-offer" element={
+                <ProtectedRoute allowedRoles={['business_owner']}>
+                  <Layout>
+                    <CreateOffer />
                   </Layout>
                 </ProtectedRoute>
               } />

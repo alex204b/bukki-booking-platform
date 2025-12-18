@@ -21,7 +21,10 @@ export const ReviewList: React.FC<ReviewListProps> = ({
 }) => {
   const { data: reviews, isLoading, error, refetch } = useQuery(
     ['reviews', businessId],
-    () => reviewService.getByBusiness(businessId).then(res => res.data),
+    () => reviewService.getByBusiness(businessId).then(res => {
+      // Handle paginated response - extract the data array
+      return Array.isArray(res.data) ? res.data : (res.data?.data || []);
+    }),
     {
       enabled: !!businessId,
     }

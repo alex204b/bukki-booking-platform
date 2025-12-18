@@ -270,8 +270,42 @@ export const businessService = {
   getAll: (status?: string) => api.get('/businesses', { params: { status } }),
   getById: (id: string) => api.get(`/businesses/${id}`),
   update: (id: string, data: any) => api.patch(`/businesses/${id}`, data),
-  search: (query: string, category?: string, location?: string) => 
-    api.get('/businesses/search', { params: { q: query, category, location } }),
+  uploadImages: (id: string, files: FileList | File[]) => {
+    const formData = new FormData();
+    Array.from(files).forEach((file) => {
+      formData.append('images', file);
+    });
+    return api.post(`/businesses/${id}/images`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  deleteImage: (id: string, imageIndex: number) => api.delete(`/businesses/${id}/images/${imageIndex}`),
+  search: (
+    query: string,
+    category?: string,
+    location?: string,
+    options?: {
+      amenities?: string[];
+      priceRange?: string;
+      minRating?: number;
+      verified?: boolean;
+    }
+  ) => {
+    const params: any = { q: query, category, location };
+    if (options?.amenities && options.amenities.length > 0) {
+      params.amenities = options.amenities.join(',');
+    }
+    if (options?.priceRange && options.priceRange !== 'any') {
+      params.priceRange = options.priceRange;
+    }
+    if (options?.minRating) {
+      params.minRating = options.minRating;
+    }
+    if (options?.verified !== undefined) {
+      params.verified = options.verified;
+    }
+    return api.get('/businesses/search', { params });
+  },
   getNearby: (lat: number, lng: number, radius?: number, availableNow?: boolean) => 
     api.get('/businesses/nearby', { params: { lat, lng, radius, availableNow } }),
   getMyBusiness: () => api.get('/businesses/my-business'),
@@ -397,6 +431,30 @@ export const feedbackService = {
     userEmail?: string; 
     userName?: string; 
   }) => api.post('/feedback', data),
+};
+
+// Offers API calls
+export const offerService = {
+  create: (businessId: string, data: {
+    title: string;
+    description: string;
+    discountAmount?: number;
+    discountPercentage?: number;
+    discountCode?: string;
+    validUntil?: string;
+    isActive?: boolean;
+    metadata?: {
+      minPurchaseAmount?: number;
+      maxDiscountAmount?: number;
+      applicableServices?: string[];
+      termsAndConditions?: string;
+    };
+  }) => api.post(`/offers/business/${businessId}`, data),
+  getUserOffers: () => api.get('/offers/user'),
+  getBusinessOffers: (businessId: string) => api.get(`/offers/business/${businessId}`),
+  updateStatus: (offerId: string, businessId: string, isActive: boolean) =>
+    api.patch(`/offers/${offerId}/business/${businessId}/status?isActive=${isActive}`),
+  delete: (offerId: string, businessId: string) => api.delete(`/offers/${offerId}/business/${businessId}`),
   getAll: (page = 1, limit = 10) => api.get(`/feedback?page=${page}&limit=${limit}`),
   getStats: () => api.get('/feedback/stats'),
 };
@@ -417,4 +475,9 @@ export const favoritesService = {
   remove: (businessId: string) => api.delete(`/favorites/${businessId}`),
   getAll: () => api.get('/favorites'),
   isFavorite: (businessId: string) => api.get(`/favorites/${businessId}`),
+};
+
+// AI API calls
+export const aiService = {
+  parseQuery: (query: string) => api.post('/ai/parse-query', { query }),
 };

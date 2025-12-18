@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { useAuth } from '../contexts/AuthContext';
-import { messageService, businessService, bookingService, api } from '../services/api';
+import { messageService, businessService, bookingService, offerService, api } from '../services/api';
 import { Send, ArrowLeft, User, Building2, MoreVertical, Search, Menu, X, Clock, MessageCircle, Mail, Gift, Users, Archive } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useI18n } from '../contexts/I18nContext';
@@ -93,7 +93,14 @@ export const Chat: React.FC = () => {
     () => messageService.getConversations(),
     {
       select: (response) => {
-        const convs = response.data || [];
+        // Handle paginated response - extract the data array
+        let convs: any[] = [];
+        if (Array.isArray(response.data)) {
+          convs = response.data;
+        } else if (response.data?.data && Array.isArray(response.data.data)) {
+          convs = response.data.data;
+        }
+
         console.log('[Chat] Conversations received:', {
           count: convs.length,
           conversations: convs,
@@ -112,12 +119,43 @@ export const Chat: React.FC = () => {
     }
   );
 
-  // Get all system messages (invitations, offers)
+  // Get all system messages (invitations)
   const { data: systemMessages = [], isLoading: systemMessagesLoading } = useQuery(
     'all-messages',
     () => messageService.getMessages(),
     {
-      select: (response) => response.data || [],
+      select: (response) => {
+        // Handle paginated response - extract the data array
+        if (Array.isArray(response.data)) {
+          return response.data;
+        } else if (response.data?.data && Array.isArray(response.data.data)) {
+          return response.data.data;
+        }
+        return [];
+      },
+      refetchInterval: 30000, // Poll every 30 seconds
+    }
+  );
+
+  // Get offers from the new offers API
+  const { data: offers = [], isLoading: offersLoading } = useQuery(
+    'user-offers-for-chat',
+    async () => {
+      try {
+        const response = await offerService.getUserOffers();
+        // Handle paginated response - extract the data array
+        if (Array.isArray(response.data)) {
+          return response.data;
+        } else if (response.data?.data && Array.isArray(response.data.data)) {
+          return response.data.data;
+        }
+        return [];
+      } catch (error) {
+        console.error('[Chat] Error fetching offers:', error);
+        return [];
+      }
+    },
+    {
       refetchInterval: 30000, // Poll every 30 seconds
     }
   );
@@ -162,9 +200,31 @@ export const Chat: React.FC = () => {
   const teamInvitations = systemMessages.filter((msg: SystemMessage) => 
     msg.type === 'team_invitation' && msg.status !== 'archived'
   );
-  const promotionalOffers = systemMessages.filter((msg: SystemMessage) => 
-    msg.type === 'promotional_offer' && msg.status !== 'archived'
-  );
+  
+  // Convert offers to SystemMessage format for display
+  const promotionalOffers: SystemMessage[] = offers.map((offer: any) => {
+    if (!offer.business || !offer.business.id) {
+      console.warn('[Chat] Offer missing business relation:', offer);
+    }
+    return {
+      id: offer.id,
+      type: 'promotional_offer' as const,
+      subject: offer.title,
+      content: offer.description,
+      status: 'unread' as const,
+      business: offer.business ? {
+        id: offer.business.id,
+        name: offer.business.name || 'Unknown Business',
+      } : undefined,
+      metadata: {
+        offerCode: offer.discountCode,
+        discount: offer.discountAmount || offer.discountPercentage,
+        validUntil: offer.validUntil,
+      },
+      createdAt: offer.createdAt,
+    };
+  });
+  
   const archivedMessages = systemMessages.filter((msg: SystemMessage) => 
     msg.status === 'archived'
   );
@@ -592,11 +652,21 @@ export const Chat: React.FC = () => {
   const tabs = [
     { id: 'messages', label: t('messages') || 'Messages', icon: MessageCircle, count: conversations.length },
     { id: 'invitations', label: t('invitations') || 'Invitations', icon: Mail, count: teamInvitations.length },
-    { id: 'offers', label: t('offers') || 'Offers', icon: Gift, count: promotionalOffers.length },
+    { id: 'offers', label: t('offers') || 'Offers', icon: Gift, count: offers.length },
     { id: 'archived', label: t('archived') || 'Archived', icon: Archive, count: archivedMessages.length },
   ];
 
   const currentConversations = getCurrentTabConversations();
+
+  // Debug logging
+  React.useEffect(() => {
+    console.log('[Chat] Active tab:', activeTab);
+    console.log('[Chat] Current conversations count:', currentConversations.length);
+    console.log('[Chat] Team invitations:', teamInvitations.length);
+    console.log('[Chat] Promotional offers:', promotionalOffers.length);
+    console.log('[Chat] Archived messages:', archivedMessages.length);
+    console.log('[Chat] Regular conversations:', conversations.length);
+  }, [activeTab, currentConversations, teamInvitations, promotionalOffers, archivedMessages, conversations]);
 
   return (
     <div className="flex h-screen bg-gray-50">
@@ -604,7 +674,16 @@ export const Chat: React.FC = () => {
       <div className="w-80 bg-white border-r border-gray-200 flex flex-col">
         {/* Header */}
         <div className="p-4 border-b border-gray-200">
-          <h1 className="text-xl font-semibold text-gray-900 mb-4">{t('messages') || 'Messages'}</h1>
+          <div className="flex items-center justify-between mb-4">
+            <h1 className="text-xl font-semibold text-gray-900">{t('messages') || 'Messages'}</h1>
+            {activeTab !== 'messages' && (
+              <span className="text-xs bg-orange-100 text-orange-600 px-2 py-1 rounded-full">
+                {activeTab === 'invitations' && 'Team Invitations'}
+                {activeTab === 'offers' && 'Special Offers'}
+                {activeTab === 'archived' && 'Archived'}
+              </span>
+            )}
+          </div>
           <div className="relative">
             <Search className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
             <input
@@ -625,8 +704,13 @@ export const Chat: React.FC = () => {
               <button
                 key={tab.id}
                 onClick={() => {
+                  console.log('[Chat] Tab clicked:', tab.id);
                   setActiveTab(tab.id as any);
                   setSelectedConversation(null);
+                  // Navigate away from specific conversation when switching tabs
+                  if (tab.id !== 'messages') {
+                    navigate('/chat');
+                  }
                 }}
                 className={`flex-1 flex items-center justify-center gap-2 px-3 py-3 text-sm font-medium border-b-2 transition-colors ${
                   activeTab === tab.id
@@ -648,16 +732,34 @@ export const Chat: React.FC = () => {
 
         {/* Conversations List */}
         <div className="flex-1 overflow-y-auto">
-          {conversationsLoading || systemMessagesLoading ? (
+          {conversationsLoading || systemMessagesLoading || (activeTab === 'offers' && offersLoading) ? (
             <div className="flex justify-center py-8">
               <div className="animate-spin rounded-full h-8 w-8 border-2 border-orange-600 border-t-transparent"></div>
             </div>
           ) : currentConversations.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center px-4 py-12">
-              <MessageCircle className="h-12 w-12 text-gray-300 mb-4" />
+              {activeTab === 'messages' && <MessageCircle className="h-12 w-12 text-gray-300 mb-4" />}
+              {activeTab === 'invitations' && <Mail className="h-12 w-12 text-gray-300 mb-4" />}
+              {activeTab === 'offers' && <Gift className="h-12 w-12 text-gray-300 mb-4" />}
+              {activeTab === 'archived' && <Archive className="h-12 w-12 text-gray-300 mb-4" />}
+
               <h3 className="text-lg font-medium text-gray-900 mb-2">
-                {searchQuery ? (t('noResults') || 'No results') : (t('noConversations') || 'No conversations yet')}
+                {searchQuery ? (t('noResults') || 'No results') : (
+                  activeTab === 'messages' ? (t('noConversations') || 'No conversations yet') :
+                  activeTab === 'invitations' ? 'No team invitations' :
+                  activeTab === 'offers' ? 'No offers available' :
+                  'No archived messages'
+                )}
               </h3>
+
+              {!searchQuery && (
+                <p className="text-sm text-gray-500 max-w-sm">
+                  {activeTab === 'messages' && 'Start a conversation with a business to see it here'}
+                  {activeTab === 'invitations' && 'Team invitations from businesses will appear here'}
+                  {activeTab === 'offers' && 'Special offers from businesses you\'ve booked with will appear here'}
+                  {activeTab === 'archived' && 'Archived messages will appear here'}
+                </p>
+              )}
             </div>
           ) : (
             currentConversations.map((conv: Conversation | SystemMessage) => {
@@ -675,7 +777,8 @@ export const Chat: React.FC = () => {
                   key={convId}
                   onClick={() => {
                     setSelectedConversation(conv);
-                    if (isSystemMessage && (conv as SystemMessage).status === 'unread') {
+                    // Only mark as read for system messages that are NOT offers (offers don't use the messages API)
+                    if (isSystemMessage && (conv as SystemMessage).status === 'unread' && (conv as SystemMessage).type !== 'promotional_offer') {
                       handleMarkAsRead((conv as SystemMessage).id);
                     }
                     if ('business' in conv && 'lastMessage' in conv) {
@@ -735,7 +838,7 @@ export const Chat: React.FC = () => {
 
       {/* Chat Area */}
       <div className="flex-1 flex flex-col">
-        {(selectedConversation && 'business' in selectedConversation) || businessId ? (
+        {((selectedConversation && 'business' in selectedConversation && 'lastMessage' in selectedConversation) || businessId) ? (
           <>
             {/* Chat Header */}
             <div className="bg-white border-b border-gray-200 p-4 flex items-center justify-between">
@@ -921,57 +1024,198 @@ export const Chat: React.FC = () => {
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-6 bg-gray-50">
-              <div className="max-w-2xl mx-auto">
-                <div className="bg-white rounded-lg p-6 shadow-sm">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4">{selectedConversation.subject}</h3>
-                  <p className="text-gray-700 mb-4 whitespace-pre-wrap">{selectedConversation.content}</p>
-                  {selectedConversation.metadata && (
-                    <div className="mt-4 space-y-2">
-                      {selectedConversation.metadata.offerCode && (
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium text-gray-600">Code:</span>
-                          <span className="px-3 py-1 bg-orange-100 text-orange-700 rounded font-mono text-sm">
-                            {selectedConversation.metadata.offerCode}
-                          </span>
+            <div className="flex-1 overflow-y-auto bg-gradient-to-br from-orange-50 via-white to-orange-50">
+              {selectedConversation.type === 'promotional_offer' ? (
+                <div className="max-w-3xl mx-auto p-6">
+                  {/* Offer Hero Card */}
+                  <div className="bg-gradient-to-br from-orange-500 to-orange-600 rounded-2xl shadow-xl overflow-hidden mb-6">
+                    <div className="p-8 text-white">
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center backdrop-blur-sm">
+                            <Gift className="h-8 w-8" />
+                          </div>
+                          <div>
+                            <h1 className="text-3xl font-bold mb-1">{selectedConversation.subject}</h1>
+                            {selectedConversation.business?.name && (
+                              <p className="text-orange-100 text-lg">{selectedConversation.business.name}</p>
+                            )}
+                          </div>
                         </div>
-                      )}
-                      {selectedConversation.metadata.discount && (
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium text-gray-600">Discount:</span>
-                          <span className="px-3 py-1 bg-green-100 text-green-700 rounded font-semibold text-sm">
-                            {selectedConversation.metadata.discount}% OFF
-                          </span>
+                      </div>
+                      
+                      {selectedConversation.metadata?.discount && (
+                        <div className="mt-6 inline-block">
+                          <div className="bg-white/20 backdrop-blur-sm rounded-xl px-6 py-3 border border-white/30">
+                            <p className="text-sm text-orange-100 mb-1">Special Discount</p>
+                            <p className="text-4xl font-bold">
+                              {typeof selectedConversation.metadata.discount === 'number' 
+                                ? `${selectedConversation.metadata.discount}% OFF`
+                                : selectedConversation.metadata.discount}
+                            </p>
+                          </div>
                         </div>
                       )}
                     </div>
-                  )}
-                  {selectedConversation.type === 'team_invitation' && !isAlreadyMember(selectedConversation) && (
-                    <div className="mt-6 flex gap-3">
-                      <button
-                        onClick={() => handleAcceptInvite(selectedConversation)}
-                        disabled={acceptInviteMutation.isLoading}
-                        className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 disabled:opacity-50"
-                      >
-                        {acceptInviteMutation.isLoading ? (t('accepting') || 'Accepting...') : (t('accept') || 'Accept Invitation')}
-                      </button>
-                      <button
-                        onClick={() => handleArchive(selectedConversation.id)}
-                        className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
-                      >
-                        {t('decline') || 'Decline'}
-                      </button>
+                  </div>
+
+                  {/* Offer Details Card */}
+                  <div className="bg-white rounded-2xl shadow-lg p-8 mb-6">
+                    <h2 className="text-2xl font-bold text-gray-900 mb-4">Offer Details</h2>
+                    <div className="prose prose-lg max-w-none">
+                      <p className="text-gray-700 text-lg leading-relaxed whitespace-pre-wrap mb-6">
+                        {selectedConversation.content}
+                      </p>
+                    </div>
+
+                    {selectedConversation.metadata && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6 pt-6 border-t border-gray-200">
+                        {selectedConversation.metadata.offerCode && (
+                          <div className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-xl p-6 border border-orange-200">
+                            <p className="text-sm font-medium text-gray-600 mb-2">Promo Code</p>
+                            <div className="flex items-center gap-3">
+                              <code className="text-2xl font-bold text-orange-700 font-mono bg-white px-4 py-2 rounded-lg border-2 border-orange-300">
+                                {selectedConversation.metadata.offerCode}
+                              </code>
+                              <button
+                                onClick={() => {
+                                  if (selectedConversation.metadata?.offerCode) {
+                                    navigator.clipboard.writeText(selectedConversation.metadata.offerCode);
+                                    toast.success('Promo code copied!');
+                                  }
+                                }}
+                                className="p-2 hover:bg-orange-200 rounded-lg transition-colors"
+                                title="Copy code"
+                              >
+                                <svg className="w-5 h-5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                </svg>
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                        
+                        {selectedConversation.metadata.validUntil && (
+                          <div className="bg-gray-50 rounded-xl p-6 border border-gray-200">
+                            <p className="text-sm font-medium text-gray-600 mb-2">Valid Until</p>
+                            <p className="text-lg font-semibold text-gray-900">
+                              {new Date(selectedConversation.metadata.validUntil).toLocaleDateString('en-US', {
+                                weekday: 'long',
+                                year: 'numeric',
+                                month: 'long',
+                                day: 'numeric'
+                              })}
+                            </p>
+                            <p className="text-sm text-gray-500 mt-1">
+                              {formatDistanceToNow(new Date(selectedConversation.metadata.validUntil), { addSuffix: true })}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {selectedConversation.business?.id && (
+                      <div className="mt-8 pt-6 border-t border-gray-200">
+                        <button
+                          onClick={() => {
+                            if (selectedConversation.business?.id) {
+                              navigate(`/businesses/${selectedConversation.business.id}`);
+                            }
+                          }}
+                          className="w-full bg-gradient-to-r from-orange-500 to-orange-600 text-white font-semibold py-4 px-6 rounded-xl hover:from-orange-600 hover:to-orange-700 transition-all duration-200 shadow-lg hover:shadow-xl flex items-center justify-center gap-3 text-lg"
+                        >
+                          <Building2 className="h-5 w-5" />
+                          View Business & Book Now
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Additional Info */}
+                  {selectedConversation.business?.name && (
+                    <div className="bg-white rounded-xl shadow-md p-6">
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center">
+                          <Building2 className="h-6 w-6 text-orange-600" />
+                        </div>
+                        <div>
+                          <p className="text-sm text-gray-500">From</p>
+                          <p className="text-lg font-semibold text-gray-900">{selectedConversation.business.name}</p>
+                        </div>
+                      </div>
                     </div>
                   )}
                 </div>
-              </div>
+              ) : (
+                /* Team Invitation View */
+                <div className="max-w-2xl mx-auto p-6">
+                  <div className="bg-white rounded-2xl shadow-lg p-8">
+                    <h3 className="text-2xl font-bold text-gray-900 mb-4">{selectedConversation.subject}</h3>
+                    <p className="text-gray-700 mb-6 text-lg leading-relaxed whitespace-pre-wrap">{selectedConversation.content}</p>
+                    {selectedConversation.type === 'team_invitation' && !isAlreadyMember(selectedConversation) && (
+                      <div className="mt-6 flex gap-3">
+                        <button
+                          onClick={() => handleAcceptInvite(selectedConversation)}
+                          disabled={acceptInviteMutation.isLoading}
+                          className="px-6 py-3 bg-orange-500 text-white rounded-xl hover:bg-orange-600 disabled:opacity-50 font-semibold transition-all shadow-lg hover:shadow-xl"
+                        >
+                          {acceptInviteMutation.isLoading ? (t('accepting') || 'Accepting...') : (t('accept') || 'Accept Invitation')}
+                        </button>
+                        <button
+                          onClick={() => handleArchive(selectedConversation.id)}
+                          className="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl hover:bg-gray-300 font-semibold transition-all"
+                        >
+                          {t('decline') || 'Decline'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </>
         ) : (
           <div className="flex-1 flex items-center justify-center text-gray-500">
-            <div className="text-center">
-              <MessageCircle className="h-16 w-16 mx-auto mb-4 text-gray-300" />
-              <p className="text-lg">{t('selectConversation') || 'Select a conversation to start messaging'}</p>
+            <div className="text-center px-4">
+              {activeTab === 'messages' && (
+                <>
+                  <MessageCircle className="h-16 w-16 mx-auto mb-4 text-gray-300" />
+                  <p className="text-lg">{t('selectConversation') || 'Select a conversation to start messaging'}</p>
+                </>
+              )}
+              {activeTab === 'invitations' && (
+                <>
+                  <Mail className="h-16 w-16 mx-auto mb-4 text-blue-300" />
+                  <p className="text-lg font-semibold text-gray-900 mb-2">Team Invitations</p>
+                  <p className="text-sm text-gray-600 max-w-md">
+                    {teamInvitations.length > 0
+                      ? 'Select an invitation from the left to view details and accept or decline'
+                      : 'No team invitations yet. When a business invites you to join their team, it will appear here.'}
+                  </p>
+                </>
+              )}
+              {activeTab === 'offers' && (
+                <>
+                  <Gift className="h-16 w-16 mx-auto mb-4 text-orange-300" />
+                  <p className="text-lg font-semibold text-gray-900 mb-2">Special Offers</p>
+                  <p className="text-sm text-gray-600 max-w-md">
+                    {promotionalOffers.length > 0
+                      ? 'Select an offer from the left to view details and discount codes'
+                      : 'No offers available yet. Book with a business to receive exclusive deals and promotions!'}
+                  </p>
+                </>
+              )}
+              {activeTab === 'archived' && (
+                <>
+                  <Archive className="h-16 w-16 mx-auto mb-4 text-gray-300" />
+                  <p className="text-lg font-semibold text-gray-900 mb-2">Archived Messages</p>
+                  <p className="text-sm text-gray-600 max-w-md">
+                    {archivedMessages.length > 0
+                      ? 'Select an archived message from the left to view it'
+                      : 'No archived messages. Archive messages you want to hide from your main inbox.'}
+                  </p>
+                </>
+              )}
             </div>
           </div>
         )}

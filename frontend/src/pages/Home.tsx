@@ -182,7 +182,7 @@ export const Home: React.FC = () => {
             </div>
           </div>
         </div>
-        
+
         {/* Favorites Widget */}
         <div className="card p-3 sm:p-4 md:p-6 lg:p-8 relative hover:shadow-xl transition-all duration-300 group hover:-translate-y-1 border border-gray-100 bg-white">
           <div className="absolute top-1 right-1 sm:top-2 sm:right-2 opacity-10">
@@ -208,7 +208,7 @@ export const Home: React.FC = () => {
             </div>
           </div>
         </div>
-        
+
         {/* My Businesses Widget */}
         {user?.role === 'business_owner' ? (
           <div className="card p-3 sm:p-4 md:p-6 lg:p-8 relative hover:shadow-xl transition-all duration-300 group hover:-translate-y-1 border border-gray-100 bg-white">
@@ -371,8 +371,8 @@ export const Home: React.FC = () => {
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 md:gap-6 pb-4">
           {features.map((feature, index) => (
-            <div 
-              key={feature.title} 
+            <div
+              key={feature.title}
               className="card p-3 sm:p-4 md:p-6 text-center hover:shadow-xl transition-all duration-300 hover:-translate-y-1 border border-gray-100 bg-white group"
               style={{ animationDelay: `${index * 0.1}s` }}
             >

@@ -133,7 +133,111 @@ npm start
 ```
 Backend on http://localhost:3000, frontend on http://localhost:3001.
 
-## Deployment (overview)
+## Deployment Options
+
+### Option 1: Docker Compose (Recommended for Development)
+
+The easiest way to run the entire stack locally:
+
+```bash
+# Start all services (backend, frontend, postgres)
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# Stop services
+docker-compose down
+```
+
+Services will be available at:
+- Frontend: http://localhost:3001
+- Backend API: http://localhost:3000
+- PostgreSQL: localhost:5432
+
+### Option 2: Kubernetes (Production)
+
+Complete production-ready Kubernetes deployment with auto-scaling, backups, and monitoring.
+
+**Quick Start:**
+
+```bash
+# 1. Build Docker images
+docker build -t booking-backend:latest ./backend
+docker build -t booking-frontend:latest ./frontend
+
+# 2. Configure secrets
+cd k8s
+# Edit backend-secret.yaml with your values
+# Edit frontend-configmap.yaml with your API URL
+
+# 3. Deploy to Kubernetes
+kubectl apply -f k8s/
+
+# 4. Check deployment status
+kubectl get all -n booking-platform
+
+# 5. Access via port forwarding
+kubectl port-forward -n booking-platform svc/backend 3000:3000
+kubectl port-forward -n booking-platform svc/frontend 8080:80
+```
+
+**What's Included:**
+- PostgreSQL StatefulSet with persistent storage
+- Backend (NestJS) with 2+ replicas
+- Frontend (React/Nginx) with 2+ replicas
+- Nginx Ingress Controller for routing
+- Horizontal Pod Autoscaling (HPA)
+- Automated database backups
+- Health checks and readiness probes
+
+**Documentation:**
+- [KUBERNETES_DEPLOYMENT.md](./KUBERNETES_DEPLOYMENT.md) - Complete setup guide
+- [KUBERNETES_SETUP_COMPLETE.md](./KUBERNETES_SETUP_COMPLETE.md) - Post-deployment guide
+- [k8s/README.md](./k8s/README.md) - Kubernetes manifests reference
+
+**For Production Deployment:**
+
+1. **Push images to registry:**
+   ```bash
+   # Using GitHub Container Registry (GHCR)
+   docker build -t ghcr.io/YOUR_USERNAME/booking-backend:latest ./backend
+   docker push ghcr.io/YOUR_USERNAME/booking-backend:latest
+
+   docker build -t ghcr.io/YOUR_USERNAME/booking-frontend:latest ./frontend
+   docker push ghcr.io/YOUR_USERNAME/booking-frontend:latest
+   ```
+
+   Or use the included GitHub Actions workflow (`.github/workflows/build-and-push.yml`) for automated builds.
+
+2. **Update deployment files:**
+   - Edit `k8s/backend-deployment.yaml` with your image name
+   - Edit `k8s/frontend-deployment.yaml` with your image name
+   - Update `k8s/ingress.yaml` with your domain
+
+3. **Deploy to cluster:**
+   ```bash
+   # Deploy all resources
+   kubectl apply -f k8s/
+
+   # Or use the deployment script
+   chmod +x k8s/deploy.sh
+   ./k8s/deploy.sh
+   ```
+
+4. **Run database migrations:**
+   ```bash
+   BACKEND_POD=$(kubectl get pod -n booking-platform -l app=backend -o jsonpath="{.items[0].metadata.name}")
+   kubectl exec -it $BACKEND_POD -n booking-platform -- npm run typeorm:run-migrations
+   ```
+
+5. **Configure DNS:**
+   ```bash
+   kubectl get ingress -n booking-platform
+   # Point your domain to the ingress IP/hostname
+   ```
+
+### Option 3: Traditional Cloud Deployment
 
 1) Push to GitHub (private recommended)
 2) Provision managed Postgres (Neon/Railway/Supabase)
@@ -145,6 +249,26 @@ Backend on http://localhost:3000, frontend on http://localhost:3001.
    - Build: `npm ci && npm run build`
    - Set `REACT_APP_API_URL` to backend URL
 5) Domains/HTTPS: point your domain to frontend host; `api.your-domain.com` to backend host
+
+### Docker Images
+
+Individual Docker images for backend and frontend:
+
+**Backend:**
+```bash
+cd backend
+docker build -t booking-backend:latest .
+docker run -p 3000:3000 --env-file .env booking-backend:latest
+```
+
+**Frontend:**
+```bash
+cd frontend
+docker build -t booking-frontend:latest .
+docker run -p 80:80 booking-frontend:latest
+```
+
+Both images use multi-stage builds for optimized production size.
 
 ## Key Flows
 

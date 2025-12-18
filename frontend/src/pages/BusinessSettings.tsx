@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { businessService, serviceService } from '../services/api';
 import { useI18n } from '../contexts/I18nContext';
 import { GeometricSymbol } from '../components/GeometricSymbols';
-import { Gift, Send } from 'lucide-react';
+import { Gift, Send, Image as ImageIcon, Trash2, Upload } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export const BusinessSettings: React.FC = () => {
@@ -421,6 +421,9 @@ export const BusinessSettings: React.FC = () => {
           )}
         </div>
 
+        {/* Image Management */}
+        <ImageManagementSection businessId={business.id} />
+
         {/* Team Management */}
         <TeamSection businessId={business.id} />
 
@@ -508,6 +511,147 @@ const TeamSection: React.FC<{ businessId: string }> = ({ businessId }) => {
         ))}
         {(!members || members.length === 0) && (
           <div className="p-4 text-gray-500">{t('noMembers') || 'No team members yet.'}</div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const ImageManagementSection: React.FC<{ businessId: string }> = ({ businessId }) => {
+  const { t } = useI18n();
+  const queryClient = useQueryClient();
+  const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000';
+  const [selectedFiles, setSelectedFiles] = useState<FileList | null>(null);
+
+  const { data: business } = useQuery(
+    ['business', businessId],
+    () => businessService.getById(businessId),
+    { select: (res) => res.data }
+  );
+
+  const uploadMutation = useMutation(
+    (files: FileList) => businessService.uploadImages(businessId, files),
+    {
+      onSuccess: () => {
+        toast.success('Images uploaded successfully!');
+        setSelectedFiles(null);
+        queryClient.invalidateQueries(['business', businessId]);
+        queryClient.invalidateQueries('my-business');
+      },
+      onError: (e: any) => {
+        toast.error(e.response?.data?.message || 'Failed to upload images');
+      },
+    }
+  );
+
+  const deleteMutation = useMutation(
+    (imageIndex: number) => businessService.deleteImage(businessId, imageIndex),
+    {
+      onSuccess: () => {
+        toast.success('Image deleted successfully!');
+        queryClient.invalidateQueries(['business', businessId]);
+        queryClient.invalidateQueries('my-business');
+      },
+      onError: (e: any) => {
+        toast.error(e.response?.data?.message || 'Failed to delete image');
+      },
+    }
+  );
+
+  const handleUpload = () => {
+    if (!selectedFiles || selectedFiles.length === 0) {
+      toast.error('Please select images to upload');
+      return;
+    }
+    uploadMutation.mutate(selectedFiles);
+  };
+
+  return (
+    <div className="bg-white rounded-lg shadow-sm border p-6 mt-8">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <ImageIcon className="h-5 w-5 text-primary-600" />
+          <h2 className="text-xl font-semibold text-gray-900">{t('imageManagement') || 'Image Management'}</h2>
+        </div>
+      </div>
+
+      {/* Upload Section */}
+      <div className="mb-6">
+        <label className="block text-sm font-medium text-gray-700 mb-2">
+          {t('uploadImages') || 'Upload Images'}
+        </label>
+        <p className="text-sm text-gray-500 mb-3">
+          Upload up to 10 images (max 5MB each). Supported formats: JPEG, PNG, GIF, WebP
+        </p>
+        <div className="flex gap-2">
+          <input
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={(e) => setSelectedFiles(e.target.files)}
+            className="flex-1 block text-sm text-gray-500
+              file:mr-4 file:py-2 file:px-4
+              file:rounded-md file:border-0
+              file:text-sm file:font-semibold
+              file:bg-primary-50 file:text-primary-700
+              hover:file:bg-primary-100"
+          />
+          <button
+            onClick={handleUpload}
+            disabled={!selectedFiles || uploadMutation.isLoading}
+            className="btn btn-primary"
+          >
+            {uploadMutation.isLoading ? (
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+            ) : (
+              <>
+                <Upload className="h-4 w-4 mr-2" />
+                {t('upload') || 'Upload'}
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Image Gallery */}
+      <div>
+        <h3 className="text-sm font-medium text-gray-700 mb-3">
+          {t('currentImages') || 'Current Images'} ({business?.images?.length || 0}/10)
+        </h3>
+        {business?.images && business.images.length > 0 ? (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {business.images.map((image: string, index: number) => (
+              <div key={index} className="relative group">
+                <img
+                  src={`${image.startsWith('http') ? '' : API_BASE_URL}${image}`}
+                  alt={`Business image ${index + 1}`}
+                  className="w-full h-40 object-cover rounded-lg"
+                  onError={(e) => {
+                    e.currentTarget.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="200"%3E%3Crect fill="%23ddd" width="200" height="200"/%3E%3Ctext fill="%23999" x="50%25" y="50%25" text-anchor="middle" dy=".3em"%3EImage not found%3C/text%3E%3C/svg%3E';
+                  }}
+                />
+                <button
+                  onClick={() => {
+                    if (window.confirm('Are you sure you want to delete this image?')) {
+                      deleteMutation.mutate(index);
+                    }
+                  }}
+                  disabled={deleteMutation.isLoading}
+                  className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-2 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
+            <ImageIcon className="h-12 w-12 mx-auto mb-3 text-gray-400" />
+            <p className="text-gray-500">{t('noImages') || 'No images uploaded yet'}</p>
+            <p className="text-sm text-gray-400 mt-1">
+              {t('uploadImagesToShowcase') || 'Upload images to showcase your business'}
+            </p>
+          </div>
         )}
       </div>
     </div>

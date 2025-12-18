@@ -8,6 +8,7 @@ import { BusinessMember, BusinessMemberStatus } from './entities/business-member
 import { BusinessContact } from './entities/business-contact.entity';
 import { User } from '../users/entities/user.entity';
 import { MessagesService } from '../messages/messages.service';
+import { PaginationDto, PaginatedResult, createPaginatedResponse } from '../common/dto/pagination.dto';
 
 @Injectable()
 export class BusinessesService {
@@ -252,6 +253,8 @@ export class BusinessesService {
         onboardingCompleted: true,
         subscriptionPlan: true,
         subscriptionExpiresAt: true,
+        amenities: true,
+        priceRange: true,
         createdAt: true,
         updatedAt: true,
         owner: {
@@ -262,6 +265,36 @@ export class BusinessesService {
         },
       },
     });
+  }
+
+  async findAllPaginated(
+    paginationDto: PaginationDto,
+    status?: BusinessStatus,
+  ): Promise<PaginatedResult<Business>> {
+    const { limit = 20, offset = 0, sortBy = 'createdAt', sortOrder = 'DESC' } = paginationDto;
+
+    const queryBuilder = this.businessRepository
+      .createQueryBuilder('business')
+      .leftJoinAndSelect('business.owner', 'owner');
+
+    // Apply status filter if provided
+    if (status) {
+      queryBuilder.where('business.status = :status', { status });
+    }
+
+    // Apply sorting
+    queryBuilder.orderBy(`business.${sortBy}`, sortOrder);
+
+    // Get total count
+    const total = await queryBuilder.getCount();
+
+    // Apply pagination
+    queryBuilder.skip(offset).take(limit);
+
+    // Execute query
+    const businesses = await queryBuilder.getMany();
+
+    return createPaginatedResponse(businesses, total, limit, offset);
   }
 
   async findOne(id: string): Promise<Business> {
@@ -298,6 +331,8 @@ export class BusinessesService {
         onboardingCompleted: true,
         subscriptionPlan: true,
         subscriptionExpiresAt: true,
+        amenities: true,
+        priceRange: true,
         createdAt: true,
         updatedAt: true,
         owner: {
@@ -379,6 +414,8 @@ export class BusinessesService {
     maxPrice?: number,
     sortBy?: 'rating' | 'distance' | 'price' | 'name',
     verified?: boolean,
+    amenities?: string[],
+    priceRange?: string,
   ): Promise<Business[]> {
     const qb = this.businessRepository
       .createQueryBuilder('business')
@@ -409,6 +446,18 @@ export class BusinessesService {
 
     if (verified !== undefined) {
       qb.andWhere('business.isVerified = :verified', { verified });
+    }
+
+    // Price range filtering
+    if (priceRange && priceRange !== 'any') {
+      qb.andWhere('business.priceRange = :priceRange', { priceRange });
+    }
+
+    // Amenities filtering - business must have ALL specified amenities
+    if (amenities && amenities.length > 0) {
+      qb.andWhere('business.amenities @> :amenities', {
+        amenities: JSON.stringify(amenities)
+      });
     }
 
     // Price filtering based on service prices
@@ -576,5 +625,49 @@ export class BusinessesService {
     });
 
     return counts;
+  }
+
+  async addImages(businessId: string, imagePaths: string[]): Promise<Business> {
+    const business = await this.findOne(businessId);
+
+    // Initialize images array if it doesn't exist
+    if (!business.images) {
+      business.images = [];
+    }
+
+    // Add new images to the existing array
+    business.images = [...business.images, ...imagePaths];
+
+    return this.businessRepository.save(business);
+  }
+
+  async deleteImage(businessId: string, imageIndex: number): Promise<Business> {
+    const business = await this.findOne(businessId);
+
+    if (!business.images || business.images.length === 0) {
+      throw new BadRequestException('No images to delete');
+    }
+
+    if (imageIndex < 0 || imageIndex >= business.images.length) {
+      throw new BadRequestException('Invalid image index');
+    }
+
+    // Delete the file from filesystem
+    const fs = await import('fs/promises');
+    const path = await import('path');
+    const imagePath = business.images[imageIndex];
+    const fullPath = path.join(process.cwd(), imagePath);
+
+    try {
+      await fs.unlink(fullPath);
+    } catch (error) {
+      console.error('Error deleting file:', error);
+      // Continue even if file deletion fails (file might not exist)
+    }
+
+    // Remove from array
+    business.images.splice(imageIndex, 1);
+
+    return this.businessRepository.save(business);
   }
 }

@@ -1,8 +1,9 @@
 import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Request, Query } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { BookingsService } from './bookings.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { BookingStatus } from './entities/booking.entity';
+import { PaginationDto } from '../common/dto/pagination.dto';
 
 @ApiTags('Bookings')
 @Controller('bookings')
@@ -21,19 +22,27 @@ export class BookingsController {
   @Get()
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Get all bookings for current user' })
+  @ApiOperation({ summary: 'Get all bookings for current user (paginated)' })
   @ApiResponse({ status: 200, description: 'Bookings retrieved successfully' })
-  async findAll(@Request() req, @Query('businessId') businessId?: string) {
-    const bookings = await this.bookingsService.findAll(req.user.id, req.user.role);
-    
-    // If businessId is provided, filter bookings for that business
-    if (businessId) {
-      return bookings.filter((booking: any) => 
-        booking.business?.id === businessId || String(booking.business?.id) === String(businessId)
-      );
-    }
-    
-    return bookings;
+  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Number of items per page (default: 20, max: 100)' })
+  @ApiQuery({ name: 'offset', required: false, type: Number, description: 'Number of items to skip (default: 0)' })
+  @ApiQuery({ name: 'sortBy', required: false, type: String, description: 'Field to sort by (default: appointmentDate)' })
+  @ApiQuery({ name: 'sortOrder', required: false, enum: ['ASC', 'DESC'], description: 'Sort order (default: DESC)' })
+  @ApiQuery({ name: 'businessId', required: false, type: String, description: 'Filter by business ID' })
+  @ApiQuery({ name: 'status', required: false, type: String, description: 'Filter by booking status' })
+  async findAll(
+    @Request() req,
+    @Query() paginationDto: PaginationDto,
+    @Query('businessId') businessId?: string,
+    @Query('status') status?: BookingStatus,
+  ) {
+    return this.bookingsService.findAllPaginated(
+      req.user.id,
+      req.user.role,
+      paginationDto,
+      businessId,
+      status,
+    );
   }
 
   @Get('business/:businessId/date/:date')

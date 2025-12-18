@@ -4,13 +4,21 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+import { NestExpressApplication } from '@nestjs/platform-express';
+import { join } from 'path';
 
 async function bootstrap() {
   console.log('🚀 Starting application...');
   console.log('Environment:', process.env.NODE_ENV);
   console.log('Port:', process.env.PORT);
-  
-  const app = await NestFactory.create(AppModule);
+
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  // Serve static files from uploads directory
+  // In development, __dirname is dist/src, so we need to go up two levels to reach backend root
+  app.useStaticAssets(join(__dirname, '..', '..', 'uploads'), {
+    prefix: '/uploads/',
+  });
 
   // Trust proxy (needed when behind Render/NGINX/Cloudflare) so rate-limit sees real IP
   const httpAdapter = app.getHttpAdapter();
@@ -25,9 +33,11 @@ async function bootstrap() {
   }) as any);
 
   // Rate limiting
+  // In development, use a much higher limit to avoid blocking during testing
+  const isDev = process.env.NODE_ENV !== 'production';
   const globalLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: parseInt(process.env.RATE_LIMIT_GLOBAL_MAX || '300'),
+    max: parseInt(process.env.RATE_LIMIT_GLOBAL_MAX || (isDev ? '10000' : '300')),
     standardHeaders: true,
     legacyHeaders: false,
   });

@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: uploads-pvc
+  namespace: booking-platform
+spec:
+  accessModes:
+    - ReadWriteOnce # Docker Desktop doesn't support ReadWriteMany
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: hostpath

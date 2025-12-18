@@ -1,11 +1,14 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Request, Query, NotFoundException, UnauthorizedException } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Request, Query, NotFoundException, UnauthorizedException, UseInterceptors, UploadedFiles, UploadedFile } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery, ApiConsumes } from '@nestjs/swagger';
+import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { BusinessesService } from './businesses.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../users/entities/user.entity';
 import { BusinessStatus } from './entities/business.entity';
+import { PaginationDto } from '../common/dto/pagination.dto';
+import { multerConfig } from '../common/config/multer.config';
 
 @ApiTags('Businesses')
 @Controller('businesses')
@@ -22,10 +25,18 @@ export class BusinessesController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'Get all businesses' })
+  @ApiOperation({ summary: 'Get all businesses (paginated)' })
   @ApiResponse({ status: 200, description: 'Businesses retrieved successfully' })
-  async findAll(@Query('status') status?: BusinessStatus) {
-    return this.businessesService.findAll(status);
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'offset', required: false, type: Number })
+  @ApiQuery({ name: 'sortBy', required: false, type: String })
+  @ApiQuery({ name: 'sortOrder', required: false, enum: ['ASC', 'DESC'] })
+  @ApiQuery({ name: 'status', required: false, enum: BusinessStatus })
+  async findAll(
+    @Query() paginationDto: PaginationDto,
+    @Query('status') status?: BusinessStatus,
+  ) {
+    return this.businessesService.findAllPaginated(paginationDto, status);
   }
 
   @Get('search')
@@ -40,7 +51,10 @@ export class BusinessesController {
     @Query('minPrice') minPrice?: string,
     @Query('sortBy') sortBy?: 'rating' | 'distance' | 'price' | 'name',
     @Query('verified') verified?: string,
+    @Query('amenities') amenities?: string,
+    @Query('priceRange') priceRange?: string,
   ) {
+    const amenitiesArray = amenities ? amenities.split(',').map(a => a.trim()) : undefined;
     return this.businessesService.searchBusinesses(
       query,
       category,
@@ -50,6 +64,8 @@ export class BusinessesController {
       maxPrice ? parseFloat(maxPrice) : undefined,
       sortBy,
       verified === 'true',
+      amenitiesArray,
+      priceRange,
     );
   }
 
@@ -316,5 +332,70 @@ export class BusinessesController {
       throw new UnauthorizedException('You do not have permission to send campaigns for this business');
     }
     return this.businessesService.sendCampaign(id, body.subject, body.html);
+  }
+
+  // Image upload endpoints
+  @Post(':id/images')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @UseInterceptors(FilesInterceptor('images', 10, multerConfig))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Upload images for business' })
+  @ApiResponse({ status: 200, description: 'Images uploaded successfully' })
+  async uploadImages(
+    @Param('id') id: string,
+    @UploadedFiles() files: Array<Express.Multer.File>,
+    @Request() req,
+  ) {
+    if (!req.user) {
+      throw new UnauthorizedException('User not authenticated');
+    }
+
+    // Check if user owns the business
+    const business = await this.businessesService.findOne(id);
+    if (!business) {
+      throw new NotFoundException('Business not found');
+    }
+
+    const ownerId = String(business.owner?.id || '');
+    const userId = String(req.user.id);
+
+    if (ownerId !== userId && req.user.role !== UserRole.SUPER_ADMIN) {
+      throw new UnauthorizedException('You do not have permission to upload images for this business');
+    }
+
+    // Save file paths
+    const imagePaths = files.map(file => `/uploads/businesses/${file.filename}`);
+    return this.businessesService.addImages(id, imagePaths);
+  }
+
+  @Delete(':id/images/:imageIndex')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Delete a business image by index' })
+  @ApiResponse({ status: 200, description: 'Image deleted successfully' })
+  async deleteImage(
+    @Param('id') id: string,
+    @Param('imageIndex') imageIndex: string,
+    @Request() req,
+  ) {
+    if (!req.user) {
+      throw new UnauthorizedException('User not authenticated');
+    }
+
+    // Check if user owns the business
+    const business = await this.businessesService.findOne(id);
+    if (!business) {
+      throw new NotFoundException('Business not found');
+    }
+
+    const ownerId = String(business.owner?.id || '');
+    const userId = String(req.user.id);
+
+    if (ownerId !== userId && req.user.role !== UserRole.SUPER_ADMIN) {
+      throw new UnauthorizedException('You do not have permission to delete images for this business');
+    }
+
+    return this.businessesService.deleteImage(id, parseInt(imageIndex));
   }
 }

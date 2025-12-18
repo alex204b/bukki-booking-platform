@@ -7,6 +7,8 @@ import interactionPlugin from '@fullcalendar/interaction';
 import { format, addDays, isToday } from 'date-fns';
 import { Sparkles, Search } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { businessService, aiService } from '../services/api';
+import { useNavigate } from 'react-router-dom';
 
 interface Booking {
   id: string;
@@ -65,7 +67,12 @@ export const EnhancedCalendarView: React.FC<EnhancedCalendarViewProps> = ({
   onBookingClick,
 }) => {
   const calendarRef = useRef<FullCalendar>(null);
+  const navigate = useNavigate();
   const [currentView, setCurrentView] = useState<'timeGridWeek' | 'dayGridMonth' | 'timeGridDay'>('timeGridWeek');
+  const [showAIChat, setShowAIChat] = useState(false);
+  const [aiQuery, setAiQuery] = useState('');
+  const [aiSuggestions, setAiSuggestions] = useState<any[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
   
   // Update calendar view when currentView changes
   useEffect(() => {
@@ -74,9 +81,6 @@ export const EnhancedCalendarView: React.FC<EnhancedCalendarViewProps> = ({
       calendarApi.changeView(currentView);
     }
   }, [currentView]);
-  const [showAIChat, setShowAIChat] = useState(false);
-  const [aiQuery, setAiQuery] = useState('');
-  const [aiSuggestions, setAiSuggestions] = useState<any[]>([]);
 
   // Convert bookings to FullCalendar events
   const events = bookings.map(booking => {
@@ -199,50 +203,151 @@ ${notes ? `Notes: ${notes}` : ''}
     }
   };
 
-  // AI-powered slot suggestion
+  // AI-powered slot suggestion - searches for available businesses
   const findSmartSlots = async (query: string) => {
     if (!query.trim()) {
       setAiSuggestions([]);
       return;
     }
 
-    try {
-      // Parse query for service type and time preference
-      const lowerQuery = query.toLowerCase();
-      
-      // Find matching businesses
-      const allBookings = bookings || [];
-      const suggestedSlots: any[] = [];
-      
-      // Simple AI logic: find businesses matching query
-      const matchingBookings = allBookings.filter((booking: Booking) => {
-        const businessName = booking.business.name.toLowerCase();
-        const serviceName = booking.service.name.toLowerCase();
-        const category = booking.business.category.toLowerCase();
-        
-        return businessName.includes(lowerQuery) || 
-               serviceName.includes(lowerQuery) ||
-               category.includes(lowerQuery);
-      });
+    setIsSearching(true);
+    setAiSuggestions([]);
 
-      // Suggest next available slots (simplified - in real app, check actual availability)
-      matchingBookings.slice(0, 3).forEach((booking: Booking) => {
-        const nextDate = addDays(new Date(booking.appointmentDate), 7);
-        suggestedSlots.push({
-          business: booking.business.name,
-          service: booking.service.name,
-          suggestedDate: nextDate,
-          reason: 'Based on your past bookings',
-        });
+    try {
+      // First, try to parse the query using AI service
+      let serviceType: string | null = null;
+      let parsedServices: Array<{ type: string; name: string; step: number }> = [];
+
+      try {
+        const aiResponse = await Promise.race([
+          aiService.parseQuery(query),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('AI timeout')), 5000)
+          )
+        ]) as any;
+
+        const data = aiResponse?.data || (aiResponse?.response?.data ? aiResponse.response.data : null);
+        
+        // Check if response contains an error
+        if (data?.error) {
+          throw new Error(data.error);
+        }
+        
+        // Validate AI response
+        if (!data || !Array.isArray(data.services) || data.services.length === 0) {
+          throw new Error('AI did not return any services. Please try rephrasing your query.');
+        }
+        
+        const validServices = data.services.filter((s: any) => s && s.type && s.name);
+        if (validServices.length === 0) {
+          throw new Error('AI returned invalid service data. Please try rephrasing your query.');
+        }
+        
+        parsedServices = validServices;
+        serviceType = validServices[0].type; // Use first service type (AI returns database category directly)
+      } catch (aiError: any) {
+        console.error('[Calendar AI] ❌ AI parsing failed:', aiError);
+        
+        // Extract error message
+        const errorData = aiError.response?.data;
+        let errorMessage = errorData?.error || aiError.message || 'Failed to understand your request.';
+        
+        // Make error message more user-friendly
+        if (errorMessage.includes('not configured') || errorMessage.includes('API key')) {
+          errorMessage = '⚠️ AI service is not configured. Please add GEMINI_API_KEY (recommended) or HUGGINGFACE_API_KEY to your backend .env file. Only ONE is needed.';
+        } else if (errorMessage.includes('timeout') || errorMessage.includes('timed out')) {
+          errorMessage = '⏱️ AI request timed out. Please try again.';
+        } else if (!errorData || (errorData.services && errorData.services.length === 0)) {
+          errorMessage = '❌ No services found. Please try rephrasing your query (e.g., "I need a haircut" or "Find me a restaurant").';
+        }
+        
+        toast.error(errorMessage, { duration: 5000 });
+        setIsSearching(false);
+        setAiSuggestions([]);
+        return;
+      }
+
+      // Search for available businesses
+      let businesses: any[] = [];
+      
+      if (serviceType) {
+        // Search by service type
+        try {
+          const searchResults = await businessService.search('', serviceType, '');
+          businesses = searchResults.data || [];
+        } catch (searchError: any) {
+          console.warn('[Calendar AI] Search failed, using getAll:', searchError.message);
+          try {
+            const allBusinessesRes = await businessService.getAll();
+            const allBusinesses = allBusinessesRes.data || [];
+            const lowerServiceType = serviceType.toLowerCase();
+            businesses = allBusinesses.filter((b: any) => 
+              b.status === 'approved' && 
+              b.isActive && 
+              b.category?.toLowerCase() === lowerServiceType
+            );
+          } catch (getAllError: any) {
+            console.error('[Calendar AI] getAll also failed:', getAllError);
+          }
+        }
+      } else {
+        // General search by query text
+        try {
+          const searchResults = await businessService.search(query, '', '');
+          businesses = searchResults.data || [];
+        } catch (searchError: any) {
+          console.warn('[Calendar AI] General search failed:', searchError.message);
+          try {
+            const allBusinessesRes = await businessService.getAll();
+            const allBusinesses = allBusinessesRes.data || [];
+            const lowerQuery = query.toLowerCase();
+            businesses = allBusinesses.filter((b: any) => 
+              b.status === 'approved' && 
+              b.isActive && 
+              (b.name?.toLowerCase().includes(lowerQuery) ||
+               b.category?.toLowerCase().includes(lowerQuery) ||
+               b.description?.toLowerCase().includes(lowerQuery))
+            );
+          } catch (getAllError: any) {
+            console.error('[Calendar AI] getAll also failed:', getAllError);
+          }
+        }
+      }
+
+      // Create suggestions from found businesses
+      const suggestedSlots = businesses.slice(0, 5).map((business: any) => {
+        // Suggest a date next week
+        const suggestedDate = addDays(new Date(), 7);
+        
+        return {
+          businessId: business.id,
+          business: business.name,
+          service: serviceType ? `${serviceType} service` : 'Service',
+          category: business.category,
+          suggestedDate: suggestedDate,
+          reason: 'Available business found',
+          address: business.address,
+          rating: business.rating || 0,
+        };
       });
 
       setAiSuggestions(suggestedSlots);
       
       if (suggestedSlots.length === 0) {
-        toast('No matching bookings found. Try searching for a service type.', { icon: 'ℹ️' });
+        toast('No businesses found. Try searching for a service type like "haircut", "restaurant", or "mechanic".', { 
+          icon: 'ℹ️',
+          duration: 4000 
+        });
+      } else {
+        toast.success(`Found ${suggestedSlots.length} business${suggestedSlots.length > 1 ? 'es' : ''} for you!`, {
+          duration: 2000
+        });
       }
-    } catch (error) {
-      toast.error('Failed to find suggestions');
+    } catch (error: any) {
+      console.error('[Calendar AI] Error finding slots:', error);
+      toast.error('Failed to search for businesses. Please try again.');
+    } finally {
+      setIsSearching(false);
     }
   };
 
@@ -369,24 +474,45 @@ ${notes ? `Notes: ${notes}` : ''}
               <div className="bg-gray-100 rounded-lg p-3 text-sm text-gray-700">
                 <p className="font-medium mb-1">Try asking:</p>
                 <ul className="list-disc list-inside space-y-1 text-xs">
-                  <li>"Find me a haircut next week"</li>
-                  <li>"Show gym bookings"</li>
-                  <li>"When is my next appointment?"</li>
+                  <li>"Find me a haircut"</li>
+                  <li>"Show me restaurants"</li>
+                  <li>"I need a mechanic"</li>
+                  <li>"Beauty salon near me"</li>
                 </ul>
               </div>
 
-              {aiSuggestions.length > 0 && (
+              {isSearching && (
+                <div className="text-center py-4 text-sm text-gray-500">
+                  Searching for businesses...
+                </div>
+              )}
+
+              {!isSearching && aiSuggestions.length > 0 && (
                 <div className="space-y-2">
-                  <p className="text-sm font-medium text-gray-700">Suggested Slots:</p>
+                  <p className="text-sm font-medium text-gray-700">Available Businesses:</p>
                   {aiSuggestions.map((slot, idx) => (
-                    <div key={idx} className="bg-primary-50 rounded-lg p-3 text-sm">
-                      <div className="font-medium text-gray-900">{slot.service}</div>
-                      <div className="text-xs text-gray-600">{slot.business}</div>
-                      <div className="text-xs text-primary-600 mt-1">
-                        {format(slot.suggestedDate, 'MMM d, yyyy')}
+                    <button
+                      key={idx}
+                      onClick={() => {
+                        if (slot.businessId) {
+                          navigate(`/businesses/${slot.businessId}`);
+                          setShowAIChat(false);
+                        }
+                      }}
+                      className="w-full text-left bg-primary-50 hover:bg-primary-100 rounded-lg p-3 text-sm transition-colors"
+                    >
+                      <div className="font-medium text-gray-900">{slot.business}</div>
+                      <div className="text-xs text-gray-600 mt-1">{slot.category}</div>
+                      {slot.address && (
+                        <div className="text-xs text-gray-500 mt-1">{slot.address}</div>
+                      )}
+                      {slot.rating > 0 && (
+                        <div className="text-xs text-primary-600 mt-1">⭐ {slot.rating.toFixed(1)}</div>
+                      )}
+                      <div className="text-xs text-primary-600 mt-2 font-medium">
+                        Click to book →
                       </div>
-                      <div className="text-xs text-gray-500 mt-1">{slot.reason}</div>
-                    </div>
+                    </button>
                   ))}
                 </div>
               )}

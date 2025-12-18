@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Review } from './entities/review.entity';
 import { CreateReviewDto, UpdateReviewDto, ReviewResponseDto } from './dto/review.dto';
+import { PaginationDto, PaginatedResult, createPaginatedResponse } from '../common/dto/pagination.dto';
 
 @Injectable()
 export class ReviewsService {
@@ -38,6 +39,27 @@ export class ReviewsService {
     });
 
     return reviews.map(review => this.formatReviewResponse(review));
+  }
+
+  async findAllByBusinessPaginated(
+    businessId: string,
+    paginationDto: PaginationDto,
+  ): Promise<PaginatedResult<ReviewResponseDto>> {
+    const { limit = 20, offset = 0, sortBy = 'createdAt', sortOrder = 'DESC' } = paginationDto;
+
+    const queryBuilder = this.reviewRepository
+      .createQueryBuilder('review')
+      .leftJoinAndSelect('review.user', 'user')
+      .where('review.businessId = :businessId', { businessId })
+      .orderBy(`review.${sortBy}`, sortOrder);
+
+    const total = await queryBuilder.getCount();
+    queryBuilder.skip(offset).take(limit);
+
+    const reviews = await queryBuilder.getMany();
+    const formattedReviews = reviews.map(review => this.formatReviewResponse(review));
+
+    return createPaginatedResponse(formattedReviews, total, limit, offset);
   }
 
   async findAllByUser(userId: string): Promise<ReviewResponseDto[]> {

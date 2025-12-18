@@ -1,12 +1,22 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import Stripe from 'stripe';
+import { Booking } from '../bookings/entities/booking.entity';
+import { EmailService } from '../common/services/email.service';
 
 @Injectable()
 export class PaymentsService {
   private stripe: Stripe;
+  private readonly logger = new Logger(PaymentsService.name);
 
-  constructor(private configService: ConfigService) {
+  constructor(
+    private configService: ConfigService,
+    @InjectRepository(Booking)
+    private bookingRepository: Repository<Booking>,
+    private emailService: EmailService,
+  ) {
     this.stripe = new Stripe(this.configService.get('STRIPE_SECRET_KEY'), {
       apiVersion: '2023-10-16',
     });
@@ -83,15 +93,137 @@ export class PaymentsService {
   }
 
   private async handlePaymentSucceeded(paymentIntent: Stripe.PaymentIntent): Promise<void> {
-    // Update booking status to paid
-    console.log('Payment succeeded:', paymentIntent.id);
-    // Here you would update your database with the successful payment
+    this.logger.log(`Payment succeeded: ${paymentIntent.id}`);
+
+    const bookingId = paymentIntent.metadata?.bookingId;
+
+    if (!bookingId) {
+      this.logger.warn('Payment succeeded but no bookingId in metadata');
+      return;
+    }
+
+    try {
+      const booking = await this.bookingRepository.findOne({
+        where: { id: bookingId },
+        relations: ['customer', 'business', 'service'],
+      });
+
+      if (!booking) {
+        this.logger.error(`Booking ${bookingId} not found for payment ${paymentIntent.id}`);
+        return;
+      }
+
+      // Update booking payment status
+      await this.bookingRepository.update(bookingId, {
+        paymentStatus: 'paid' as any,
+        paymentDetails: {
+          stripePaymentIntentId: paymentIntent.id,
+          amount: paymentIntent.amount / 100, // Convert from cents
+          currency: paymentIntent.currency,
+          paidAt: new Date(),
+        } as any,
+      });
+
+      // Auto-confirm booking if it was pending payment
+      if (booking.status === 'pending') {
+        await this.bookingRepository.update(bookingId, {
+          status: 'confirmed' as any,
+        });
+
+        this.logger.log(`Booking ${bookingId} auto-confirmed after successful payment`);
+      }
+
+      // Send payment confirmation email
+      try {
+        await this.emailService.sendEmail(
+          booking.customer.email,
+          'Payment Confirmed - BUKKi',
+          `
+            <h2>Payment Confirmed</h2>
+            <p>Your payment of ${paymentIntent.currency.toUpperCase()} ${paymentIntent.amount / 100} has been successfully processed.</p>
+            <p><strong>Booking Details:</strong></p>
+            <ul>
+              <li>Business: ${booking.business.name}</li>
+              <li>Service: ${booking.service.name}</li>
+              <li>Date: ${booking.appointmentDate.toLocaleString()}</li>
+            </ul>
+            <p>Thank you for your booking!</p>
+          `,
+        );
+      } catch (emailError) {
+        this.logger.error(`Failed to send payment confirmation email: ${emailError.message}`);
+      }
+    } catch (error) {
+      this.logger.error(`Error handling payment success: ${error.message}`);
+      throw error;
+    }
   }
 
   private async handlePaymentFailed(paymentIntent: Stripe.PaymentIntent): Promise<void> {
-    // Handle failed payment
-    console.log('Payment failed:', paymentIntent.id);
-    // Here you would update your database with the failed payment
+    this.logger.log(`Payment failed: ${paymentIntent.id}`);
+
+    const bookingId = paymentIntent.metadata?.bookingId;
+
+    if (!bookingId) {
+      this.logger.warn('Payment failed but no bookingId in metadata');
+      return;
+    }
+
+    try {
+      const booking = await this.bookingRepository.findOne({
+        where: { id: bookingId },
+        relations: ['customer', 'business', 'service'],
+      });
+
+      if (!booking) {
+        this.logger.error(`Booking ${bookingId} not found for failed payment ${paymentIntent.id}`);
+        return;
+      }
+
+      // Update booking payment status
+      await this.bookingRepository.update(bookingId, {
+        paymentStatus: 'failed' as any,
+        paymentDetails: {
+          stripePaymentIntentId: paymentIntent.id,
+          failureReason: paymentIntent.last_payment_error?.message || 'Unknown error',
+          failedAt: new Date(),
+        } as any,
+      });
+
+      // Optionally cancel the booking
+      await this.bookingRepository.update(bookingId, {
+        status: 'cancelled' as any,
+        cancellationReason: 'Payment failed',
+        cancelledAt: new Date(),
+      });
+
+      this.logger.log(`Booking ${bookingId} cancelled due to failed payment`);
+
+      // Send payment failure notification
+      try {
+        await this.emailService.sendEmail(
+          booking.customer.email,
+          'Payment Failed - BUKKi',
+          `
+            <h2>Payment Failed</h2>
+            <p>Unfortunately, your payment could not be processed.</p>
+            <p><strong>Reason:</strong> ${paymentIntent.last_payment_error?.message || 'Unknown error'}</p>
+            <p><strong>Booking Details:</strong></p>
+            <ul>
+              <li>Business: ${booking.business.name}</li>
+              <li>Service: ${booking.service.name}</li>
+              <li>Date: ${booking.appointmentDate.toLocaleString()}</li>
+            </ul>
+            <p>Your booking has been cancelled. Please try booking again or contact us for assistance.</p>
+          `,
+        );
+      } catch (emailError) {
+        this.logger.error(`Failed to send payment failure email: ${emailError.message}`);
+      }
+    } catch (error) {
+      this.logger.error(`Error handling payment failure: ${error.message}`);
+      throw error;
+    }
   }
 
   async getPaymentMethods(customerId: string): Promise<Stripe.PaymentMethod[]> {

@@ -15,7 +15,8 @@ import {
   Mail,
   Heart,
   Bell,
-  Sparkles
+  Sparkles,
+  Tag
 } from 'lucide-react';
 import { useI18n } from '../contexts/I18nContext';
 import Motif from './Motif';
@@ -59,17 +60,19 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     { name: t('appInfo'), href: '/info', icon: Settings },
   ];
 
-  // Add messages, favorites, and waitlist links for customers
+  // Add messages, favorites, waitlist, and offers links for customers
   if (user?.role === 'customer') {
     navigation.splice(3, 0, { name: 'Messages', href: '/chat-list', icon: Mail });
     navigation.splice(4, 0, { name: t('favorites') || 'Favorites', href: '/favorites', icon: Heart });
     navigation.splice(5, 0, { name: t('myWaitlist') || 'My Waitlist', href: '/my-waitlist', icon: Calendar });
+    navigation.splice(6, 0, { name: 'Offers', href: '/offers', icon: Tag });
   }
 
   if (user?.role === 'business_owner') {
     navigation.splice(2, 0, { name: t('businessDashboard'), href: '/business-dashboard', icon: Building2 });
     navigation.splice(3, 0, { name: t('businessSettings'), href: '/business-settings', icon: Settings });
     navigation.splice(4, 0, { name: 'Messages', href: '/chat', icon: Mail });
+    navigation.splice(5, 0, { name: 'Create Offer', href: '/create-offer', icon: Tag });
   }
 
   if (user?.role === 'employee') {
@@ -80,6 +83,13 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   if (user?.role === 'super_admin') {
     navigation.splice(-1, 0, { name: t('adminDashboard'), href: '/admin-dashboard', icon: Shield });
   }
+
+  // Close modals when route changes
+  React.useEffect(() => {
+    setSidebarOpen(false);
+    setShowNotifications(false);
+    setShowAIAssistant(false);
+  }, [location.pathname]);
 
   return (
     <div className="min-h-screen bg-background">

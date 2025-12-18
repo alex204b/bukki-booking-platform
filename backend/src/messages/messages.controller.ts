@@ -1,8 +1,9 @@
 import { Controller, Get, Post, Body, Param, Patch, Query, UseGuards, Request, ForbiddenException } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { MessagesService } from './messages.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { MessageStatus } from './entities/message.entity';
+import { PaginationDto } from '../common/dto/pagination.dto';
 
 @ApiTags('Messages')
 @Controller('messages')
@@ -12,10 +13,19 @@ export class MessagesController {
   constructor(private readonly messagesService: MessagesService) {}
 
   @Get()
-  @ApiOperation({ summary: 'Get all messages for current user' })
+  @ApiOperation({ summary: 'Get all messages for current user (paginated)' })
   @ApiResponse({ status: 200, description: 'Messages retrieved successfully' })
-  async getUserMessages(@Request() req, @Query('status') status?: MessageStatus) {
-    return this.messagesService.getUserMessages(req.user.id, status);
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'offset', required: false, type: Number })
+  @ApiQuery({ name: 'sortBy', required: false, type: String })
+  @ApiQuery({ name: 'sortOrder', required: false, enum: ['ASC', 'DESC'] })
+  @ApiQuery({ name: 'status', required: false, enum: MessageStatus })
+  async getUserMessages(
+    @Request() req,
+    @Query() paginationDto: PaginationDto,
+    @Query('status') status?: MessageStatus,
+  ) {
+    return this.messagesService.getUserMessagesPaginated(req.user.id, paginationDto, status);
   }
 
   @Get('business/:businessId/past-customers')

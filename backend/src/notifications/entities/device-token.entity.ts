@@ -37,6 +37,7 @@ export class DeviceToken extends BaseEntity {
     bookingUpdates: boolean;
     messages: boolean;
     reviews: boolean;
+    offers: boolean;
   };
 
   @ManyToOne(() => User, { onDelete: 'CASCADE' })

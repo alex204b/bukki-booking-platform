@@ -8,6 +8,7 @@ import { Booking, BookingStatus } from '../bookings/entities/booking.entity';
 import { BusinessMember, BusinessMemberStatus } from '../businesses/entities/business-member.entity';
 import { EmailService } from '../common/services/email.service';
 import { PushNotificationService } from '../notifications/push-notification.service';
+import { PaginationDto, PaginatedResult, createPaginatedResponse } from '../common/dto/pagination.dto';
 
 @Injectable()
 export class MessagesService {
@@ -134,6 +135,36 @@ export class MessagesService {
       relations: ['business', 'sender'],
       order: { createdAt: 'DESC' },
     });
+  }
+
+  /**
+   * Get all messages for a user (paginated)
+   */
+  async getUserMessagesPaginated(
+    userId: string,
+    paginationDto: PaginationDto,
+    status?: MessageStatus,
+  ): Promise<PaginatedResult<Message>> {
+    const { limit = 20, offset = 0, sortBy = 'createdAt', sortOrder = 'DESC' } = paginationDto;
+
+    const queryBuilder = this.messageRepository
+      .createQueryBuilder('message')
+      .leftJoinAndSelect('message.business', 'business')
+      .leftJoinAndSelect('message.sender', 'sender')
+      .where('message.recipientId = :userId', { userId });
+
+    if (status) {
+      queryBuilder.andWhere('message.status = :status', { status });
+    }
+
+    queryBuilder.orderBy(`message.${sortBy}`, sortOrder);
+
+    const total = await queryBuilder.getCount();
+    queryBuilder.skip(offset).take(limit);
+
+    const messages = await queryBuilder.getMany();
+
+    return createPaginatedResponse(messages, total, limit, offset);
   }
 
   /**

@@ -30,6 +30,19 @@ export class Booking extends BaseEntity {
   })
   status: BookingStatus;
 
+  @Column({ nullable: true })
+  paymentStatus: string;
+
+  @Column({ type: 'json', nullable: true })
+  paymentDetails: {
+    stripePaymentIntentId?: string;
+    amount?: number;
+    currency?: string;
+    paidAt?: Date;
+    failureReason?: string;
+    failedAt?: Date;
+  };
+
   @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true, name: 'totalAmount' })
   totalAmount: number;
 

@@ -1,21 +1,34 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Request } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Request, Query } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
 import { ReviewsService } from './reviews.service';
 import { CreateReviewDto, UpdateReviewDto } from './dto/review.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { PaginationDto } from '../common/dto/pagination.dto';
 
+@ApiTags('Reviews')
 @Controller('reviews')
 export class ReviewsController {
   constructor(private readonly reviewsService: ReviewsService) {}
 
   @Post()
   @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Create a review' })
   create(@Body() createReviewDto: CreateReviewDto, @Request() req) {
     return this.reviewsService.create(createReviewDto, req.user.id);
   }
 
   @Get('business/:businessId')
-  findAllByBusiness(@Param('businessId') businessId: string) {
-    return this.reviewsService.findAllByBusiness(businessId);
+  @ApiOperation({ summary: 'Get reviews for a business (paginated)' })
+  @ApiResponse({ status: 200, description: 'Reviews retrieved successfully' })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'offset', required: false, type: Number })
+  @ApiQuery({ name: 'sortBy', required: false, type: String })
+  @ApiQuery({ name: 'sortOrder', required: false, enum: ['ASC', 'DESC'] })
+  findAllByBusiness(
+    @Param('businessId') businessId: string,
+    @Query() paginationDto: PaginationDto,
+  ) {
+    return this.reviewsService.findAllByBusinessPaginated(businessId, paginationDto);
   }
 
   @Get('user/:userId')

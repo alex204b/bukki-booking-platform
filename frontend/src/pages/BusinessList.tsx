@@ -15,6 +15,7 @@ import { EmptyBusinesses } from '../components/EmptyState';
 
 export const BusinessList: React.FC = () => {
   const { t } = useI18n();
+  const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000';
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedLocation, setSelectedLocation] = useState(''); // Location filter
@@ -36,11 +37,21 @@ export const BusinessList: React.FC = () => {
     },
     {
       select: (response) => {
-        // Handle different response structures
-        const businesses = Array.isArray(response.data) ? response.data : (Array.isArray(response) ? response : []);
-        
+        // Handle different response structures (paginated vs array)
+        let businesses: any[] = [];
+        if (Array.isArray(response.data)) {
+          // Old format: response.data is the array directly
+          businesses = response.data;
+        } else if (response.data?.data && Array.isArray(response.data.data)) {
+          // New paginated format: response.data.data contains the array
+          businesses = response.data.data;
+        } else if (Array.isArray(response)) {
+          // Fallback: response itself is the array
+          businesses = response;
+        }
+
         // Filter out pending businesses - only show approved businesses to customers
-        const approvedBusinesses = businesses.filter((business: any) => 
+        const approvedBusinesses = businesses.filter((business: any) =>
           business && business.status === 'approved' && business.isActive !== false
         );
         return approvedBusinesses;
@@ -241,10 +252,10 @@ export const BusinessList: React.FC = () => {
 
       {/* Map */}
       {listData.length ? (
-        <div id="business-map" className="card p-4">
-          <GeoResolvedMap 
-            businesses={listData} 
-            center={userLocation || undefined} 
+        <div id="business-map" className="card p-4 relative z-10">
+          <GeoResolvedMap
+            businesses={listData}
+            center={userLocation || undefined}
             selectedBusiness={selectedBusiness}
           />
         </div>
@@ -270,27 +281,45 @@ export const BusinessList: React.FC = () => {
             <Link
               key={business.id}
               to={`/businesses/${business.id}`}
-              className="card p-6 hover:shadow-lg transition-shadow"
+              className="card overflow-hidden hover:shadow-lg transition-shadow"
             >
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <h3 className="text-lg font-semibold text-gray-900">
-                      {business.name}
-                    </h3>
-                    <FavoriteButton businessId={business.id} size="sm" />
+              {/* Business Image */}
+              {business.images && business.images.length > 0 ? (
+                <img
+                  src={`${business.images[0].startsWith('http') ? '' : API_BASE_URL}${business.images[0]}`}
+                  alt={business.name}
+                  className="w-full h-48 object-cover"
+                  onError={(e) => {
+                    // Hide image if it fails to load
+                    e.currentTarget.style.display = 'none';
+                  }}
+                />
+              ) : (
+                <div className="w-full h-48 bg-gradient-to-br from-primary-100 to-primary-200 flex items-center justify-center">
+                  <GeometricSymbol variant="diamond" size={80} strokeWidth={3} color="#f97316" />
+                </div>
+              )}
+
+              <div className="p-6">
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <h3 className="text-lg font-semibold text-gray-900">
+                        {business.name}
+                      </h3>
+                      <FavoriteButton businessId={business.id} size="sm" />
+                    </div>
+                    <p className="text-sm text-gray-600 mb-2">
+                      {formatCategory(business.category)}
+                    </p>
                   </div>
-                  <p className="text-sm text-gray-600 mb-2">
-                    {formatCategory(business.category)}
-                  </p>
+                  <div className="flex items-center">
+                    <Star className="h-4 w-4 text-yellow-400 fill-current" />
+                    <span className="text-sm text-gray-600 ml-1">
+                      {business.rating.toFixed(1)}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex items-center">
-                  <Star className="h-4 w-4 text-yellow-400 fill-current" />
-                  <span className="text-sm text-gray-600 ml-1">
-                    {business.rating.toFixed(1)}
-                  </span>
-                </div>
-              </div>
               
               {business.description && (
                 <p className="text-sm text-gray-600 mb-4 line-clamp-2">
@@ -323,6 +352,7 @@ export const BusinessList: React.FC = () => {
                     View Details →
                   </span>
                 </div>
+              </div>
               </div>
             </Link>
           ))}

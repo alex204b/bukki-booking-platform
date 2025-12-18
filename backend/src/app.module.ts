@@ -22,6 +22,8 @@ import { CalendarModule } from './calendar/calendar.module';
 import { AdminModule } from './admin/admin.module';
 import { AuditModule } from './audit/audit.module';
 import { FavoritesModule } from './favorites/favorites.module';
+import { OffersModule } from './offers/offers.module';
+import { AIModule } from './ai/ai.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
@@ -29,6 +31,7 @@ import { AppService } from './app.service';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      envFilePath: '.env', // Explicitly specify .env file path
     }),
     ScheduleModule.forRoot(),
     TypeOrmModule.forRoot({
@@ -58,6 +61,8 @@ import { AppService } from './app.service';
     AdminModule,
     AuditModule,
     FavoritesModule,
+    OffersModule,
+    AIModule,
   ],
   controllers: [AppController],
   providers: [AppService],
