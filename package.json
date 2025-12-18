@@ -14,10 +14,19 @@
     "start": "cd backend && node dist/main.js",
     "start:prod": "cd backend && node dist/main.js"
   },
-  "keywords": ["booking", "platform", "multibusiness", "react", "nestjs"],
+  "keywords": [
+    "booking",
+    "platform",
+    "multibusiness",
+    "react",
+    "nestjs"
+  ],
   "author": "Your Name",
   "license": "MIT",
   "devDependencies": {
     "concurrently": "^8.2.2"
+  },
+  "dependencies": {
+    "pg": "^8.16.3"
   }
 }
