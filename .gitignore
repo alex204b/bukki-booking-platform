@@ -65,4 +65,14 @@ coverage/
 # Temporary files
 *.tmp
 *.temp
+nul
 
+# AI Assistant
+.claude/
+**/.claude/
+
+# Uploads
+**/uploads/
+
+# Generated config
+.current-ip.txt
