@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { api, bookingService } from '../services/api';
 import { useI18n } from '../contexts/I18nContext';
-import { Building2, Calendar, DollarSign, Users, Plus, Eye, Edit, CheckCircle, XCircle, QrCode, Clock, Bell, MessageCircle } from 'lucide-react';
+import { Building2, Calendar, DollarSign, Users, Plus, Eye, Edit, CheckCircle, XCircle, QrCode, Clock, Bell, MessageCircle, Settings } from 'lucide-react';
 import { RevenueChart } from '../components/RevenueChart';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from 'react-query';
@@ -184,6 +184,15 @@ export const BusinessDashboard: React.FC = () => {
           </p>
         </div>
         <div className="flex gap-3">
+          {!isStaff && (
+            <button
+              onClick={() => navigate('/business-settings')}
+              className="btn btn-outline"
+            >
+              <Settings className="h-4 w-4 mr-2" />
+              {t('settings') || 'Settings'}
+            </button>
+          )}
           <button
             onClick={() => navigate('/chat-list')}
             className="btn btn-outline"
@@ -199,7 +208,7 @@ export const BusinessDashboard: React.FC = () => {
             {t('scanQRCode')}
           </button>
           {!isStaff && (
-            <button 
+            <button
               onClick={() => setShowAddService(true)}
               className="btn btn-primary"
             >

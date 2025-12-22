@@ -122,11 +122,20 @@ export class BusinessesController {
   async getMyBusiness(@Request() req) {
     // For business owners, get their owned business
     if (req.user.role === 'business_owner') {
-      const business = await this.businessesService.findByOwner(req.user.id);
-      if (!business) {
-        throw new NotFoundException('Business not found. Please complete the onboarding process.');
+      try {
+        const business = await this.businessesService.findByOwner(req.user.id);
+        if (!business) {
+          throw new NotFoundException('Business not found. Please complete the onboarding process.');
+        }
+        return business;
+      } catch (error) {
+        console.error('[getMyBusiness] Error fetching business:', {
+          userId: req.user.id,
+          userRole: req.user.role,
+          error: error.message,
+        });
+        throw error;
       }
-      return business;
     }
     
     // For employees, get the first business they're a member of

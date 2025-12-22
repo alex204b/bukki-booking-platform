@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { useI18n } from '../contexts/I18nContext';
 import { GeometricSymbol } from '../components/GeometricSymbols';
 import { MapAddressSelector } from '../components/MapAddressSelector';
+import { generateUUID } from '../utils/uuid';
 
 type FieldType = 'text' | 'number' | 'textarea' | 'select' | 'checkbox';
 
@@ -37,6 +38,7 @@ interface WorkingHours {
 export const BusinessOnboarding: React.FC = () => {
   const { t } = useI18n();
   const [currentStep, setCurrentStep] = useState(1);
+  const [countdown, setCountdown] = useState(5);
   const [businessName, setBusinessName] = useState('');
   const [category, setCategory] = useState('beauty_salon');
   const [address, setAddress] = useState('');
@@ -52,6 +54,8 @@ export const BusinessOnboarding: React.FC = () => {
   const [priceRange, setPriceRange] = useState<string>('moderate');
   const [amenities, setAmenities] = useState<string[]>([]);
   const [selectedImages, setSelectedImages] = useState<File[]>([]);
+  const [country, setCountry] = useState<string>('USA');
+  const [countryCode, setCountryCode] = useState<string>('US');
 
   const [workingHours, setWorkingHours] = useState<WorkingHours>({
     monday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
@@ -65,7 +69,7 @@ export const BusinessOnboarding: React.FC = () => {
   
   const [services, setServices] = useState<Service[]>([
     {
-      id: crypto.randomUUID(),
+      id: generateUUID(),
       name: 'Basic Service',
       description: 'Standard service offering',
       price: 50,
@@ -76,9 +80,20 @@ export const BusinessOnboarding: React.FC = () => {
   ]);
   
   const [fields, setFields] = useState<FormField[]>([
-    { id: crypto.randomUUID(), label: 'Notes', type: 'textarea', required: false },
+    { id: generateUUID(), label: 'Notes', type: 'textarea', required: false },
   ]);
   const [saving, setSaving] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  // Auto-redirect to dashboard after success
+  React.useEffect(() => {
+    if (currentStep === 5 && countdown > 0) {
+      const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
+      return () => clearTimeout(timer);
+    } else if (currentStep === 5 && countdown === 0) {
+      window.location.href = '/business-dashboard';
+    }
+  }, [currentStep, countdown]);
 
   // Clear default text on first focus for better UX
   const [clearedOnce, setClearedOnce] = useState<Set<string>>(new Set());
@@ -90,7 +105,7 @@ export const BusinessOnboarding: React.FC = () => {
   };
 
   const addField = (type: FieldType) => {
-    const base: FormField = { id: crypto.randomUUID(), label: 'New Field', type, required: false };
+    const base: FormField = { id: generateUUID(), label: 'New Field', type, required: false };
     if (type === 'select') base.options = ['Option 1', 'Option 2'];
     setFields(prev => [...prev, base]);
   };
@@ -105,7 +120,7 @@ export const BusinessOnboarding: React.FC = () => {
 
   const addService = () => {
     const newService: Service = {
-      id: crypto.randomUUID(),
+      id: generateUUID(),
       name: 'New Service',
       description: '',
       price: 0,
@@ -139,80 +154,310 @@ export const BusinessOnboarding: React.FC = () => {
     );
   };
 
-  const handleLocationSelect = (lat: number, lng: number, fullAddress: string) => {
+  const handleLocationSelect = (lat: number, lng: number, fullAddress: string, details?: any) => {
     setLatitude(lat);
     setLongitude(lng);
     setAddress(fullAddress);
     
-    // Try to extract city, state, and zip from the full address
-    const addressParts = fullAddress.split(',');
-    if (addressParts.length >= 2) {
-      setCity(addressParts[addressParts.length - 2]?.trim() || '');
-      setState(addressParts[addressParts.length - 1]?.trim() || '');
+    // Extract address details from the geocoding response
+    if (details) {
+      if (details.postalCode) {
+        setZipCode(details.postalCode);
+      }
+      if (details.city) {
+        setCity(details.city);
+      }
+      if (details.state) {
+        setState(details.state);
+      }
+      if (details.country) {
+        setCountry(details.country);
+      }
+      if (details.countryCode) {
+        setCountryCode(details.countryCode);
+      }
+    } else {
+      // Fallback: Try to extract city, state, and zip from the full address string
+      const addressParts = fullAddress.split(',');
+      if (addressParts.length >= 2) {
+        setCity(addressParts[addressParts.length - 2]?.trim() || '');
+        setState(addressParts[addressParts.length - 1]?.trim() || '');
+      }
+      
+      // Try to extract postal code from address string (common formats)
+      const zipMatch = fullAddress.match(/\b\d{4,6}(-\d{4})?\b/);
+      if (zipMatch) {
+        setZipCode(zipMatch[0]);
+      }
     }
   };
 
-  const validateForm = () => {
+  // Validate a specific step and return detailed error messages
+  const validateStep = (step: number): { isValid: boolean; errors: string[]; fieldErrors: Record<string, string> } => {
     const errors: string[] = [];
-    
-    // Required field validation
-    if (!businessName.trim()) errors.push('Business name is required');
-    if (!address.trim()) errors.push('Address is required');
-    if (!city.trim()) errors.push('City is required');
-    if (!state.trim()) errors.push('State is required');
-    if (!phone.trim()) errors.push('Phone number is required');
-    if (!latitude || !longitude) errors.push('Please select your location on the map');
-    
-    // Phone number validation
-    if (phone.trim()) {
-      const phoneRegex = /^[+]?[1-9][\d]{0,15}$/;
-      if (!phoneRegex.test(phone.replace(/[\s\-()]/g, ''))) {
-        errors.push('Please enter a valid phone number');
-      }
-    }
-    
-    // Email validation (if provided)
-    if (email.trim()) {
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(email)) {
-        errors.push('Please enter a valid email address');
-      }
-    }
-    
-    // Website validation (if provided)
-    if (website.trim()) {
-      const urlRegex = /^https?:\/\/.+/;
-      if (!urlRegex.test(website)) {
-        errors.push('Website must start with http:// or https://');
-      }
-    }
-    
-    // Service validation
-    if (services.length === 0) {
-      errors.push('At least one service is required');
-    } else {
-      services.forEach((service, index) => {
-        if (!service.name.trim()) {
-          errors.push(`Service ${index + 1}: Name is required`);
+    const fieldErrors: Record<string, string> = {};
+
+    switch (step) {
+      case 1: // Business Info
+        if (!businessName.trim()) {
+          errors.push('Business name is required');
+          fieldErrors.businessName = 'Business name is required';
+        } else if (businessName.trim().length < 2) {
+          errors.push('Business name must be at least 2 characters');
+          fieldErrors.businessName = 'Business name must be at least 2 characters';
         }
-        if (service.price <= 0) {
-          errors.push(`Service ${index + 1}: Price must be greater than 0`);
+
+        if (!address.trim()) {
+          errors.push('Address is required');
+          fieldErrors.address = 'Address is required';
+        } else if (address.trim().length < 5) {
+          errors.push('Please enter a complete address');
+          fieldErrors.address = 'Please enter a complete address (at least 5 characters)';
         }
-        if (service.duration <= 0) {
-          errors.push(`Service ${index + 1}: Duration must be greater than 0`);
+
+        if (!city.trim()) {
+          errors.push('City is required');
+          fieldErrors.city = 'City is required';
+        } else if (city.trim().length < 2) {
+          errors.push('City name must be at least 2 characters');
+          fieldErrors.city = 'City name must be at least 2 characters';
         }
-      });
+
+        if (!state.trim()) {
+          errors.push('State is required');
+          fieldErrors.state = 'State is required';
+        } else if (state.trim().length < 2) {
+          errors.push('State must be at least 2 characters');
+          fieldErrors.state = 'State must be at least 2 characters';
+        }
+
+        // Postal code validation based on country
+        if (!zipCode.trim()) {
+          errors.push('Postal code is required');
+          fieldErrors.zipCode = 'Postal code is required';
+        } else {
+          // Country-specific postal code validation
+          const postalCode = zipCode.trim();
+          let isValid = false;
+          let errorMessage = '';
+          
+          switch (countryCode.toUpperCase()) {
+            case 'US':
+              // US ZIP: 5 digits or 5+4 format
+              isValid = /^\d{5}(-\d{4})?$/.test(postalCode);
+              errorMessage = 'ZIP code must be 5 digits (or 9 digits with dash: 12345-6789)';
+              break;
+            case 'CA':
+              // Canadian postal code: A1A 1A1 format
+              isValid = /^[A-Za-z]\d[A-Za-z][ -]?\d[A-Za-z]\d$/.test(postalCode);
+              errorMessage = 'Canadian postal code must be in format A1A 1A1';
+              break;
+            case 'GB':
+            case 'UK':
+              // UK postcode: Various formats
+              isValid = /^[A-Z]{1,2}\d{1,2}[A-Z]?\s?\d[A-Z]{2}$/i.test(postalCode);
+              errorMessage = 'UK postcode must be in format SW1A 1AA';
+              break;
+            case 'AU':
+              // Australian postcode: 4 digits
+              isValid = /^\d{4}$/.test(postalCode);
+              errorMessage = 'Australian postcode must be 4 digits';
+              break;
+            case 'DE':
+              // German postcode: 5 digits
+              isValid = /^\d{5}$/.test(postalCode);
+              errorMessage = 'German postcode must be 5 digits';
+              break;
+            case 'FR':
+              // French postcode: 5 digits
+              isValid = /^\d{5}$/.test(postalCode);
+              errorMessage = 'French postcode must be 5 digits';
+              break;
+            case 'IT':
+              // Italian postcode: 5 digits
+              isValid = /^\d{5}$/.test(postalCode);
+              errorMessage = 'Italian postcode must be 5 digits';
+              break;
+            case 'ES':
+              // Spanish postcode: 5 digits
+              isValid = /^\d{5}$/.test(postalCode);
+              errorMessage = 'Spanish postcode must be 5 digits';
+              break;
+            case 'NL':
+              // Dutch postcode: 4 digits, space, 2 letters
+              isValid = /^\d{4}\s?[A-Z]{2}$/i.test(postalCode);
+              errorMessage = 'Dutch postcode must be in format 1234 AB';
+              break;
+            case 'BR':
+              // Brazilian CEP: 5 digits, dash, 3 digits
+              isValid = /^\d{5}-?\d{3}$/.test(postalCode);
+              errorMessage = 'Brazilian CEP must be in format 12345-678';
+              break;
+            case 'IN':
+              // Indian PIN: 6 digits
+              isValid = /^\d{6}$/.test(postalCode);
+              errorMessage = 'Indian PIN must be 6 digits';
+              break;
+            case 'JP':
+              // Japanese postal code: 3 digits, dash, 4 digits
+              isValid = /^\d{3}-?\d{4}$/.test(postalCode);
+              errorMessage = 'Japanese postal code must be in format 123-4567';
+              break;
+            default:
+              // For other countries, accept any non-empty value (no strict validation)
+              isValid = postalCode.length >= 2 && postalCode.length <= 20;
+              errorMessage = 'Please enter a valid postal code for your country';
+          }
+          
+          if (!isValid) {
+            errors.push(errorMessage);
+            fieldErrors.zipCode = errorMessage;
+          }
+        }
+
+        if (!phone.trim()) {
+          errors.push('Phone number is required');
+          fieldErrors.phone = 'Phone number is required';
+        } else {
+          // Remove all non-digit characters except +
+          const cleanedPhone = phone.replace(/[\s\-().]/g, '');
+          // Check if it's a valid phone number (10 digits for US, or 11 with country code)
+          if (cleanedPhone.startsWith('+')) {
+            // International format: + followed by 10-15 digits
+            const intlRegex = /^\+[1-9]\d{9,14}$/;
+            if (!intlRegex.test(cleanedPhone)) {
+              errors.push('Phone number must be in international format: +1234567890 (10-15 digits after +)');
+              fieldErrors.phone = 'Phone number must be in international format: +1234567890 (10-15 digits after +)';
+            }
+          } else {
+            // US format: exactly 10 digits
+            const usRegex = /^\d{10}$/;
+            if (!usRegex.test(cleanedPhone)) {
+              errors.push('Phone number must be exactly 10 digits (e.g., 1234567890)');
+              fieldErrors.phone = 'Phone number must be exactly 10 digits (e.g., 1234567890)';
+            }
+          }
+        }
+
+        // Email validation (if provided)
+        if (email.trim()) {
+          const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+          if (!emailRegex.test(email)) {
+            errors.push('Please enter a valid email address (e.g., example@domain.com)');
+            fieldErrors.email = 'Please enter a valid email address (e.g., example@domain.com)';
+          }
+        }
+
+        // Website validation (if provided)
+        if (website.trim()) {
+          const urlRegex = /^https?:\/\/.+/;
+          if (!urlRegex.test(website)) {
+            errors.push('Website must start with http:// or https:// (e.g., https://example.com)');
+            fieldErrors.website = 'Website must start with http:// or https:// (e.g., https://example.com)';
+          }
+        }
+
+        if (!latitude || !longitude) {
+          errors.push('Please select your business location on the map');
+          fieldErrors.location = 'Please select your business location on the map';
+        }
+        break;
+
+      case 2: // Services
+        if (services.length === 0) {
+          errors.push('At least one service is required');
+        } else {
+          services.forEach((service, index) => {
+            const serviceNum = index + 1;
+            if (!service.name.trim()) {
+              errors.push(`Service ${serviceNum}: Name is required`);
+              fieldErrors[`service_${index}_name`] = 'Service name is required';
+            } else if (service.name.trim().length < 2) {
+              errors.push(`Service ${serviceNum}: Name must be at least 2 characters`);
+              fieldErrors[`service_${index}_name`] = 'Service name must be at least 2 characters';
+            }
+
+            if (service.price <= 0) {
+              errors.push(`Service ${serviceNum}: Price must be greater than $0`);
+              fieldErrors[`service_${index}_price`] = 'Price must be greater than $0';
+            } else if (service.price > 100000) {
+              errors.push(`Service ${serviceNum}: Price cannot exceed $100,000`);
+              fieldErrors[`service_${index}_price`] = 'Price cannot exceed $100,000';
+            }
+
+            if (service.duration <= 0) {
+              errors.push(`Service ${serviceNum}: Duration must be greater than 0 minutes`);
+              fieldErrors[`service_${index}_duration`] = 'Duration must be greater than 0 minutes';
+            } else if (service.duration > 1440) {
+              errors.push(`Service ${serviceNum}: Duration cannot exceed 1440 minutes (24 hours)`);
+              fieldErrors[`service_${index}_duration`] = 'Duration cannot exceed 1440 minutes (24 hours)';
+            }
+          });
+        }
+        break;
+
+      case 3: // Working Hours - optional, no validation needed
+        break;
+
+      case 4: // Custom Fields - optional, no validation needed
+        break;
     }
-    
-    return errors;
+
+    return {
+      isValid: errors.length === 0,
+      errors,
+      fieldErrors,
+    };
+  };
+
+  // Legacy validateForm for final save (validates all steps)
+  const validateForm = () => {
+    const allErrors: string[] = [];
+    for (let step = 1; step <= 4; step++) {
+      const { errors } = validateStep(step);
+      allErrors.push(...errors);
+    }
+    return allErrors;
   };
 
   const handleSave = async () => {
-    const validationErrors = validateForm();
-    if (validationErrors.length > 0) {
-      toast.error(validationErrors[0]); // Show first error
+    // Validate all steps before saving
+    const allFieldErrors: Record<string, string> = {};
+    const allErrors: string[] = [];
+    
+    for (let step = 1; step <= 4; step++) {
+      const validation = validateStep(step);
+      allErrors.push(...validation.errors);
+      Object.assign(allFieldErrors, validation.fieldErrors);
+    }
+    
+    if (allErrors.length > 0) {
+      // Show all validation errors
+      allErrors.forEach((error, index) => {
+        if (index === 0) {
+          toast.error(error, { duration: 4000 });
+        } else {
+          setTimeout(() => {
+            toast.error(error, { duration: 3000 });
+          }, index * 100);
+        }
+      });
+      
+      // Set field errors for display
+      setFieldErrors(allFieldErrors);
+      
+      // Scroll to first step with errors
+      if (allFieldErrors.businessName || allFieldErrors.address || allFieldErrors.phone) {
+        setCurrentStep(1);
+      } else if (Object.keys(allFieldErrors).some(key => key.startsWith('service_'))) {
+        setCurrentStep(2);
+      }
+      
       return;
     }
+    
+    // Clear field errors if validation passes
+    setFieldErrors({});
     setSaving(true);
     try {
       // 1) Create business
@@ -224,7 +469,7 @@ export const BusinessOnboarding: React.FC = () => {
         city,
         state,
         zipCode,
-        country: 'USA',
+        country: country,
         phone,
         email,
         website,
@@ -262,17 +507,54 @@ export const BusinessOnboarding: React.FC = () => {
       
       // Show pending review notice
       toast.success('Business submitted! Review usually takes 30–60 minutes. You\'ll receive an email when it\'s approved.');
+
+      // Update localStorage to reflect the new business owner role
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      user.role = 'business_owner';
+      localStorage.setItem('user', JSON.stringify(user));
+
       // Show success screen instead of redirecting immediately
       setCurrentStep(5); // Add a success step
     } catch (e: any) {
-      toast.error(e.response?.data?.message || 'Failed to save');
+      console.error('Business creation error:', e);
+      toast.error(e.response?.data?.message || 'Failed to save business. Please try again.');
     } finally {
       setSaving(false);
     }
   };
 
   const nextStep = () => {
-    if (currentStep < 4) setCurrentStep(currentStep + 1);
+    if (currentStep >= 4) return;
+
+    // Validate current step before proceeding
+    const validation = validateStep(currentStep);
+    
+    if (!validation.isValid) {
+      // Show all validation errors
+      validation.errors.forEach((error, index) => {
+        if (index === 0) {
+          // Show first error as main toast
+          toast.error(error, { duration: 4000 });
+        } else {
+          // Show additional errors after a short delay
+          setTimeout(() => {
+            toast.error(error, { duration: 3000 });
+          }, index * 100);
+        }
+      });
+      
+      // Set field errors for display
+      setFieldErrors(validation.fieldErrors);
+      return;
+    }
+
+    // Clear field errors if validation passes
+    setFieldErrors({});
+    
+    // Proceed to next step
+    if (currentStep < 4) {
+      setCurrentStep(currentStep + 1);
+    }
   };
 
   const prevStep = () => {
@@ -280,18 +562,8 @@ export const BusinessOnboarding: React.FC = () => {
   };
 
   const isStepValid = (step: number) => {
-    switch (step) {
-      case 1:
-        return businessName.trim() && address.trim() && city.trim() && state.trim() && phone.trim() && latitude && longitude;
-      case 2:
-        return services.length > 0 && services.every(s => s.name.trim() && s.price > 0 && s.duration > 0);
-      case 3:
-        return true; // Working hours are optional
-      case 4:
-        return true; // Custom fields are optional
-      default:
-        return false;
-    }
+    const validation = validateStep(step);
+    return validation.isValid;
   };
 
   const steps = [
@@ -346,16 +618,52 @@ export const BusinessOnboarding: React.FC = () => {
               <p className="text-gray-600 mt-2">{t('businessInfoDesc')}</p>
             </div>
             
+            {/* Validation Summary */}
+            {Object.keys(fieldErrors).length > 0 && (
+              <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded">
+                <div className="flex">
+                  <div className="flex-shrink-0">
+                    <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                  <div className="ml-3 flex-1">
+                    <h3 className="text-sm font-medium text-red-800">
+                      Please fix the following issues before continuing:
+                    </h3>
+                    <ul className="mt-2 text-sm text-red-700 list-disc list-inside space-y-1">
+                      {Object.entries(fieldErrors).map(([field, error]) => (
+                        <li key={field}>{error}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            )}
+            
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">{t('businessNameOnboarding')} *</label>
                 <input 
-                  className="input w-full" 
+                  className={`input w-full ${fieldErrors.businessName ? 'border-red-500 focus:ring-red-500' : ''}`}
                   placeholder={t('businessNameOnboarding')} 
                   value={businessName} 
-                  onChange={e => setBusinessName(e.target.value)} 
+                  onChange={e => {
+                    setBusinessName(e.target.value);
+                    // Clear error when user starts typing
+                    if (fieldErrors.businessName) {
+                      setFieldErrors(prev => {
+                        const next = { ...prev };
+                        delete next.businessName;
+                        return next;
+                      });
+                    }
+                  }}
                   onFocus={clearOnFirstFocus('businessName', () => setBusinessName(''))}
                 />
+                {fieldErrors.businessName && (
+                  <p className="mt-1 text-sm text-red-600">{fieldErrors.businessName}</p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">{t('categoryOnboarding')} *</label>
@@ -425,66 +733,166 @@ export const BusinessOnboarding: React.FC = () => {
                   initialLng={longitude || undefined}
                   initialAddress={address}
                 />
+                {fieldErrors.location && (
+                  <p className="mt-1 text-sm text-red-600">{fieldErrors.location}</p>
+                )}
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Address *</label>
+                <input 
+                  className={`input w-full ${fieldErrors.address ? 'border-red-500 focus:ring-red-500' : ''}`}
+                  placeholder="Street address" 
+                  value={address} 
+                  onChange={e => {
+                    setAddress(e.target.value);
+                    if (fieldErrors.address) {
+                      setFieldErrors(prev => {
+                        const next = { ...prev };
+                        delete next.address;
+                        return next;
+                      });
+                    }
+                  }}
+                  onFocus={clearOnFirstFocus('address', () => setAddress(''))}
+                />
+                {fieldErrors.address && (
+                  <p className="mt-1 text-sm text-red-600">{fieldErrors.address}</p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">{t('cityOnboarding')} *</label>
                 <input 
-                  className="input w-full" 
+                  className={`input w-full ${fieldErrors.city ? 'border-red-500 focus:ring-red-500' : ''}`}
                   placeholder={t('cityOnboarding')} 
                   value={city} 
-                  onChange={e => setCity(e.target.value)} 
+                  onChange={e => {
+                    setCity(e.target.value);
+                    if (fieldErrors.city) {
+                      setFieldErrors(prev => {
+                        const next = { ...prev };
+                        delete next.city;
+                        return next;
+                      });
+                    }
+                  }}
                   onFocus={clearOnFirstFocus('city', () => setCity(''))}
                 />
+                {fieldErrors.city && (
+                  <p className="mt-1 text-sm text-red-600">{fieldErrors.city}</p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">{t('stateOnboarding')} *</label>
                 <input 
-                  className="input w-full" 
+                  className={`input w-full ${fieldErrors.state ? 'border-red-500 focus:ring-red-500' : ''}`}
                   placeholder={t('stateOnboarding')} 
                   value={state} 
-                  onChange={e => setState(e.target.value)} 
+                  onChange={e => {
+                    setState(e.target.value);
+                    if (fieldErrors.state) {
+                      setFieldErrors(prev => {
+                        const next = { ...prev };
+                        delete next.state;
+                        return next;
+                      });
+                    }
+                  }}
                   onFocus={clearOnFirstFocus('state', () => setState(''))}
                 />
+                {fieldErrors.state && (
+                  <p className="mt-1 text-sm text-red-600">{fieldErrors.state}</p>
+                )}
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">{t('zipCodeOnboarding')}</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Postal Code *</label>
                 <input 
-                  className="input w-full" 
-                  placeholder={t('zipCodeOnboarding')} 
+                  className={`input w-full ${fieldErrors.zipCode ? 'border-red-500 focus:ring-red-500' : ''}`}
+                  placeholder="Postal Code (auto-filled from map)" 
                   value={zipCode} 
-                  onChange={e => setZipCode(e.target.value)} 
+                  onChange={e => {
+                    setZipCode(e.target.value);
+                    if (fieldErrors.zipCode) {
+                      setFieldErrors(prev => {
+                        const next = { ...prev };
+                        delete next.zipCode;
+                        return next;
+                      });
+                    }
+                  }}
                   onFocus={clearOnFirstFocus('zipCode', () => setZipCode(''))}
                 />
+                {fieldErrors.zipCode && (
+                  <p className="mt-1 text-sm text-red-600">{fieldErrors.zipCode}</p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">{t('phoneOnboarding')} *</label>
                 <input 
-                  className="input w-full" 
-                  placeholder={t('phoneOnboarding')} 
+                  className={`input w-full ${fieldErrors.phone ? 'border-red-500 focus:ring-red-500' : ''}`}
+                  placeholder="1234567890 or +1234567890" 
                   value={phone} 
-                  onChange={e => setPhone(e.target.value)} 
+                  onChange={e => {
+                    setPhone(e.target.value);
+                    if (fieldErrors.phone) {
+                      setFieldErrors(prev => {
+                        const next = { ...prev };
+                        delete next.phone;
+                        return next;
+                      });
+                    }
+                  }}
                   onFocus={clearOnFirstFocus('phone', () => setPhone(''))}
                 />
+                {fieldErrors.phone && (
+                  <p className="mt-1 text-sm text-red-600">{fieldErrors.phone}</p>
+                )}
+                {!fieldErrors.phone && (
+                  <p className="mt-1 text-xs text-gray-500">Enter 10 digits (e.g., 1234567890) or international format with +</p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">{t('emailOnboarding')}</label>
                 <input 
-                  className="input w-full" 
+                  className={`input w-full ${fieldErrors.email ? 'border-red-500 focus:ring-red-500' : ''}`}
                   placeholder={t('emailOnboarding')} 
                   value={email} 
-                  onChange={e => setEmail(e.target.value)} 
+                  onChange={e => {
+                    setEmail(e.target.value);
+                    if (fieldErrors.email) {
+                      setFieldErrors(prev => {
+                        const next = { ...prev };
+                        delete next.email;
+                        return next;
+                      });
+                    }
+                  }}
                   onFocus={clearOnFirstFocus('email', () => setEmail(''))}
                 />
+                {fieldErrors.email && (
+                  <p className="mt-1 text-sm text-red-600">{fieldErrors.email}</p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">{t('websiteOnboarding')}</label>
                 <input
-                  className="input w-full"
-                  placeholder={t('websiteOnboarding')}
+                  className={`input w-full ${fieldErrors.website ? 'border-red-500 focus:ring-red-500' : ''}`}
+                  placeholder="https://example.com"
                   value={website}
-                  onChange={e => setWebsite(e.target.value)}
+                  onChange={e => {
+                    setWebsite(e.target.value);
+                    if (fieldErrors.website) {
+                      setFieldErrors(prev => {
+                        const next = { ...prev };
+                        delete next.website;
+                        return next;
+                      });
+                    }
+                  }}
                   onFocus={clearOnFirstFocus('website', () => setWebsite(''))}
                 />
+                {fieldErrors.website && (
+                  <p className="mt-1 text-sm text-red-600">{fieldErrors.website}</p>
+                )}
               </div>
             </div>
 
@@ -559,6 +967,29 @@ export const BusinessOnboarding: React.FC = () => {
               <p className="text-gray-600 mt-2">{t('servicesDesc')}</p>
             </div>
             
+            {/* Validation Summary */}
+            {Object.keys(fieldErrors).length > 0 && (
+              <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded">
+                <div className="flex">
+                  <div className="flex-shrink-0">
+                    <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                  <div className="ml-3 flex-1">
+                    <h3 className="text-sm font-medium text-red-800">
+                      Please fix the following issues before continuing:
+                    </h3>
+                    <ul className="mt-2 text-sm text-red-700 list-disc list-inside space-y-1">
+                      {Object.entries(fieldErrors).map(([field, error]) => (
+                        <li key={field}>{error}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            )}
+            
             <div className="space-y-6">
               {services.map((service, index) => (
                 <div key={service.id} className="border rounded-lg p-6 bg-gray-50">
@@ -578,34 +1009,70 @@ export const BusinessOnboarding: React.FC = () => {
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">{t('serviceNameOnboarding')} *</label>
                       <input 
-                        className="input w-full" 
+                        className={`input w-full ${fieldErrors[`service_${index}_name`] ? 'border-red-500 focus:ring-red-500' : ''}`}
                         placeholder={t('serviceNameOnboarding')} 
                         value={service.name} 
-                        onChange={e => updateService(service.id, { name: e.target.value })} 
+                        onChange={e => {
+                          updateService(service.id, { name: e.target.value });
+                          if (fieldErrors[`service_${index}_name`]) {
+                            setFieldErrors(prev => {
+                              const next = { ...prev };
+                              delete next[`service_${index}_name`];
+                              return next;
+                            });
+                          }
+                        }}
                         onFocus={clearOnFirstFocus(`service-name-${service.id}`, () => updateService(service.id, { name: '' }))}
                       />
+                      {fieldErrors[`service_${index}_name`] && (
+                        <p className="mt-1 text-sm text-red-600">{fieldErrors[`service_${index}_name`]}</p>
+                      )}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">{t('priceOnboarding')} *</label>
                       <input 
                         type="number" 
-                        className="input w-full" 
+                        className={`input w-full ${fieldErrors[`service_${index}_price`] ? 'border-red-500 focus:ring-red-500' : ''}`}
                         placeholder="0.00" 
                         value={service.price} 
-                        onChange={e => updateService(service.id, { price: parseFloat(e.target.value) || 0 })} 
+                        onChange={e => {
+                          updateService(service.id, { price: parseFloat(e.target.value) || 0 });
+                          if (fieldErrors[`service_${index}_price`]) {
+                            setFieldErrors(prev => {
+                              const next = { ...prev };
+                              delete next[`service_${index}_price`];
+                              return next;
+                            });
+                          }
+                        }}
                         onFocus={clearOnFirstFocus(`service-price-${service.id}`, () => updateService(service.id, { price: 0 }))}
                       />
+                      {fieldErrors[`service_${index}_price`] && (
+                        <p className="mt-1 text-sm text-red-600">{fieldErrors[`service_${index}_price`]}</p>
+                      )}
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">{t('durationOnboarding')} *</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">{t('durationOnboarding')} * (minutes)</label>
                       <input 
                         type="number" 
-                        className="input w-full" 
+                        className={`input w-full ${fieldErrors[`service_${index}_duration`] ? 'border-red-500 focus:ring-red-500' : ''}`}
                         placeholder="30" 
                         value={service.duration} 
-                        onChange={e => updateService(service.id, { duration: parseInt(e.target.value) || 30 })} 
+                        onChange={e => {
+                          updateService(service.id, { duration: parseInt(e.target.value) || 30 });
+                          if (fieldErrors[`service_${index}_duration`]) {
+                            setFieldErrors(prev => {
+                              const next = { ...prev };
+                              delete next[`service_${index}_duration`];
+                              return next;
+                            });
+                          }
+                        }}
                         onFocus={clearOnFirstFocus(`service-duration-${service.id}`, () => updateService(service.id, { duration: 0 }))}
                       />
+                      {fieldErrors[`service_${index}_duration`] && (
+                        <p className="mt-1 text-sm text-red-600">{fieldErrors[`service_${index}_duration`]}</p>
+                      )}
                     </div>
                     <div className="flex items-center">
                       <label className="flex items-center gap-2 text-sm text-gray-700">
@@ -702,9 +1169,15 @@ export const BusinessOnboarding: React.FC = () => {
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                     <input 
                       className="input" 
-                      placeholder={t('fieldLabel')} 
+                      placeholder={t('fieldLabel') || 'Field Label (e.g., Notes, Special Requests)'} 
                       value={field.label} 
                       onChange={e => updateField(field.id, { label: e.target.value })} 
+                      onFocus={clearOnFirstFocus(`field-label-${field.id}`, () => {
+                        // Clear if it's a default value
+                        if (field.label === 'Notes' || field.label === 'New Field') {
+                          updateField(field.id, { label: '' });
+                        }
+                      })}
                     />
                     <select 
                       className="input" 
@@ -737,10 +1210,16 @@ export const BusinessOnboarding: React.FC = () => {
                       <p className="text-sm text-gray-700 mb-2">{t('options')}</p>
                       <input
                         className="input w-full"
-                        placeholder={t('options')}
+                        placeholder={t('options') || 'Enter options separated by commas (e.g., Option 1, Option 2, Option 3)'}
                         value={(field.options || []).join(', ')}
                         onChange={e => updateField(field.id, { 
                           options: e.target.value.split(',').map(s => s.trim()).filter(Boolean) 
+                        })}
+                        onFocus={clearOnFirstFocus(`field-options-${field.id}`, () => {
+                          const currentOptions = (field.options || []).join(', ');
+                          if (currentOptions === 'Option 1, Option 2') {
+                            updateField(field.id, { options: [] });
+                          }
                         })}
                       />
                     </div>
@@ -781,14 +1260,19 @@ export const BusinessOnboarding: React.FC = () => {
               </div>
             </div>
             
-            <div className="flex justify-center gap-4">
-              <button 
+            <div className="mt-6 text-gray-600">
+              <p className="text-sm">Redirecting to your dashboard in <strong>{countdown}</strong> seconds...</p>
+              <p className="text-xs mt-2">Or click below to go now</p>
+            </div>
+
+            <div className="flex justify-center gap-4 mt-4">
+              <button
                 className="btn btn-primary"
                 onClick={() => window.location.href = '/business-dashboard'}
               >
-                Go to Dashboard
+                Go to Dashboard Now
               </button>
-              <button 
+              <button
                 className="btn btn-outline"
                 onClick={() => window.location.href = '/businesses'}
               >
@@ -814,7 +1298,6 @@ export const BusinessOnboarding: React.FC = () => {
                 <button 
                   className="btn btn-primary" 
                   onClick={nextStep}
-                  disabled={!isStepValid(currentStep)}
                 >
                   {t('nextStep')}
                 </button>

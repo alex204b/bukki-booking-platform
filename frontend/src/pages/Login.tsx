@@ -190,12 +190,17 @@ export const Login: React.FC = () => {
       setLoginLoading(false);
     } catch (error: any) {
       console.error('[LOGIN] Login error:', error);
-      
+
+      // Check for rate limit error
+      if (error.response?.status === 429 || error.message?.includes('Too many requests')) {
+        toast.error('Too many login attempts. Please wait a moment and try again.');
+      }
       // Check if it's a network/connection error
-      if (!error.response) {
+      else if (!error.response) {
         const baseURL = error.config?.baseURL || authApi.defaults.baseURL || 'unknown';
-        const isMobile = window.location.protocol === 'capacitor:' || (window as any).Capacitor;
-        
+        // Properly detect mobile: check if it's a Capacitor app (returns boolean)
+        const isMobile = window.location.protocol === 'capacitor:' || !!(window as any).Capacitor;
+
         // Show connection error modal
         setConnectionError({
           show: true,
@@ -203,7 +208,12 @@ export const Login: React.FC = () => {
           isMobile: isMobile,
         });
       }
-      
+      // Other errors
+      else {
+        const errorMessage = error.response?.data?.message || 'Login failed. Please try again.';
+        toast.error(errorMessage);
+      }
+
       setLoginLoading(false);
     }
   };

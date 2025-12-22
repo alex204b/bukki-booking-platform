@@ -11,8 +11,16 @@ L.Icon.Default.mergeOptions({
   shadowUrl: require('leaflet/dist/images/marker-shadow.png'),
 });
 
+interface AddressDetails {
+  postalCode?: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  countryCode?: string;
+}
+
 interface MapAddressSelectorProps {
-  onLocationSelect: (lat: number, lng: number, address: string) => void;
+  onLocationSelect: (lat: number, lng: number, address: string, details?: AddressDetails) => void;
   initialLat?: number;
   initialLng?: number;
   initialAddress?: string;
@@ -25,7 +33,7 @@ interface LocationData {
 }
 
 const MapClickHandler: React.FC<{
-  onLocationSelect: (lat: number, lng: number, address: string) => void;
+  onLocationSelect: (lat: number, lng: number, address: string, details?: AddressDetails) => void;
 }> = ({ onLocationSelect }) => {
   useMapEvents({
     click: async (e) => {
@@ -39,7 +47,18 @@ const MapClickHandler: React.FC<{
         const data = await response.json();
         
         const address = data.display_name || `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
-        onLocationSelect(lat, lng, address);
+        
+        // Extract address details
+        const addressDetails: AddressDetails = {};
+        if (data.address) {
+          addressDetails.postalCode = data.address.postcode || data.address.postal_code || '';
+          addressDetails.city = data.address.city || data.address.town || data.address.village || '';
+          addressDetails.state = data.address.state || data.address.region || '';
+          addressDetails.country = data.address.country || '';
+          addressDetails.countryCode = data.address.country_code?.toUpperCase() || '';
+        }
+        
+        onLocationSelect(lat, lng, address, addressDetails);
       } catch (error) {
         console.error('Error getting address:', error);
         onLocationSelect(lat, lng, `${lat.toFixed(6)}, ${lng.toFixed(6)}`);
@@ -73,9 +92,9 @@ export const MapAddressSelector: React.FC<MapAddressSelectorProps> = ({
     }
   }, [initialLat, initialLng, initialAddress]);
 
-  const handleLocationSelect = (lat: number, lng: number, address: string) => {
+  const handleLocationSelect = (lat: number, lng: number, address: string, details?: AddressDetails) => {
     setLocation({ lat, lng, address });
-    onLocationSelect(lat, lng, address);
+    onLocationSelect(lat, lng, address, details);
   };
 
   const handleSearchAddress = async (searchTerm: string) => {
@@ -94,8 +113,18 @@ export const MapAddressSelector: React.FC<MapAddressSelectorProps> = ({
         const lng = parseFloat(result.lon);
         const address = result.display_name;
         
+        // Extract address details
+        const addressDetails: AddressDetails = {};
+        if (result.address) {
+          addressDetails.postalCode = result.address.postcode || result.address.postal_code || '';
+          addressDetails.city = result.address.city || result.address.town || result.address.village || '';
+          addressDetails.state = result.address.state || result.address.region || '';
+          addressDetails.country = result.address.country || '';
+          addressDetails.countryCode = result.address.country_code?.toUpperCase() || '';
+        }
+        
         setLocation({ lat, lng, address });
-        onLocationSelect(lat, lng, address);
+        onLocationSelect(lat, lng, address, addressDetails);
       } else {
         // If no results found, show a message
         console.warn('No address found for:', searchTerm);

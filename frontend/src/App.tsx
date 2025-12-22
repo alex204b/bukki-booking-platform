@@ -146,7 +146,7 @@ function App() {
               } />
 
               <Route path="/business-onboarding" element={
-                <ProtectedRoute allowedRoles={['business_owner']}>
+                <ProtectedRoute allowedRoles={['customer', 'business_owner']}>
                   <Layout>
                     <BusinessOnboarding />
                   </Layout>

@@ -30,9 +30,31 @@ export const AdminDashboard: React.FC = () => {
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
   const { data: usersData } = useQuery(['admin-users'], () => userService.getAllUsers(), { select: (r) => r.data });
-  const { data: businessesData } = useQuery(['admin-businesses', statusFilter], () => businessService.getAll(statusFilter === 'all' ? undefined : statusFilter), { select: (r) => r.data });
-  const users: User[] = useMemo(() => usersData || [], [usersData]);
-  const businesses: any[] = useMemo(() => businessesData || [], [businessesData]);
+  const { data: businessesData } = useQuery(['admin-businesses', statusFilter], () => businessService.getAll(statusFilter === 'all' ? undefined : statusFilter), {
+    select: (r) => {
+      // Handle different response structures
+      const data = r.data;
+      // If data has a 'data' property (nested), use that
+      if (data && typeof data === 'object' && 'data' in data && Array.isArray(data.data)) {
+        return data.data;
+      }
+      // If data is already an array, return it
+      if (Array.isArray(data)) {
+        return data;
+      }
+      // Otherwise return empty array
+      return [];
+    }
+  });
+  const users: User[] = useMemo(() => {
+    if (!usersData) return [];
+    if (Array.isArray(usersData)) return usersData;
+    if (usersData && typeof usersData === 'object' && 'data' in usersData && Array.isArray((usersData as any).data)) {
+      return (usersData as any).data;
+    }
+    return [];
+  }, [usersData]);
+  const businesses: any[] = useMemo(() => Array.isArray(businessesData) ? businessesData : [], [businessesData]);
   const stats: PlatformStats = useMemo(() => ({
     totalUsers: users.length,
     totalBusinesses: businesses.length,

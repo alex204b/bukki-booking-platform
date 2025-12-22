@@ -152,7 +152,10 @@ export class BusinessesService {
 
   async create(createBusinessDto: any, ownerId: string): Promise<Business> {
     // Prevent duplicate businesses per owner
-    const existing = await this.businessRepository.findOne({ where: { owner: { id: ownerId } } as any });
+    const existing = await this.businessRepository
+      .createQueryBuilder('business')
+      .where('business.ownerId = :ownerId', { ownerId })
+      .getOne();
     if (existing) {
       throw new BadRequestException('You already have a business');
     }
@@ -353,10 +356,12 @@ export class BusinessesService {
   }
 
   async findByOwner(ownerId: string): Promise<Business | null> {
-    return this.businessRepository.findOne({
-      where: { owner: { id: ownerId } },
-      relations: ['owner'],
-    });
+    // Use query builder for better compatibility with Neon database
+    return this.businessRepository
+      .createQueryBuilder('business')
+      .leftJoinAndSelect('business.owner', 'owner')
+      .where('business.ownerId = :ownerId', { ownerId })
+      .getOne();
   }
 
   async update(id: string, updateData: any, userId: string, userRole: string): Promise<Business> {
@@ -388,15 +393,68 @@ export class BusinessesService {
   }
 
   async approve(id: string): Promise<Business> {
-    const business = await this.findOne(id);
+    // Load business with owner to get email
+    const business = await this.businessRepository.findOne({
+      where: { id },
+      relations: ['owner'],
+    });
+
+    if (!business) {
+      throw new NotFoundException('Business not found');
+    }
+
     business.status = BusinessStatus.APPROVED;
-    return this.businessRepository.save(business);
+    const savedBusiness = await this.businessRepository.save(business);
+
+    // Send approval email to business owner
+    if (business.owner && business.owner.email) {
+      try {
+        await this.emailService.sendBusinessApprovalEmail(
+          business.owner.email,
+          business.owner.firstName || 'Business Owner',
+          business.name,
+        );
+        console.log(`Approval email sent to ${business.owner.email} for business: ${business.name}`);
+      } catch (error) {
+        console.error('Failed to send approval email:', error);
+        // Don't fail the approval if email fails
+      }
+    }
+
+    return savedBusiness;
   }
 
   async reject(id: string, reason?: string): Promise<Business> {
-    const business = await this.findOne(id);
+    // Load business with owner to get email
+    const business = await this.businessRepository.findOne({
+      where: { id },
+      relations: ['owner'],
+    });
+
+    if (!business) {
+      throw new NotFoundException('Business not found');
+    }
+
     business.status = BusinessStatus.REJECTED;
-    return this.businessRepository.save(business);
+    const savedBusiness = await this.businessRepository.save(business);
+
+    // Send rejection email to business owner
+    if (business.owner && business.owner.email) {
+      try {
+        await this.emailService.sendBusinessRejectionEmail(
+          business.owner.email,
+          business.owner.firstName || 'Business Owner',
+          business.name,
+          reason,
+        );
+        console.log(`Rejection email sent to ${business.owner.email} for business: ${business.name}`);
+      } catch (error) {
+        console.error('Failed to send rejection email:', error);
+        // Don't fail the rejection if email fails
+      }
+    }
+
+    return savedBusiness;
   }
 
   async suspend(id: string): Promise<Business> {

@@ -16,6 +16,25 @@ export const BusinessSettings: React.FC = () => {
   const [serviceFields, setServiceFields] = useState<any[]>([]);
   const [isEditingFields, setIsEditingFields] = useState<boolean>(false);
 
+  // Business info edit states
+  const [isEditingInfo, setIsEditingInfo] = useState(false);
+  const [businessInfo, setBusinessInfo] = useState({
+    name: '',
+    description: '',
+    phone: '',
+    email: '',
+    website: '',
+    category: '',
+    address: '',
+    city: '',
+    state: '',
+    zipCode: '',
+  });
+
+  // Working hours edit states
+  const [isEditingHours, setIsEditingHours] = useState(false);
+  const [workingHours, setWorkingHours] = useState<any>({});
+
   const { data: business, isLoading, error } = useQuery(
     'my-business',
     () => businessService.getMyBusiness(),
@@ -25,6 +44,31 @@ export const BusinessSettings: React.FC = () => {
         if (data) {
           setMaxBookings(data.maxBookingsPerUserPerDay || 2);
           setAutoAccept(!!data.autoAcceptBookings);
+
+          // Populate business info
+          setBusinessInfo({
+            name: data.name || '',
+            description: data.description || '',
+            phone: data.phone || '',
+            email: data.email || '',
+            website: data.website || '',
+            category: data.category || '',
+            address: data.address || '',
+            city: data.city || '',
+            state: data.state || '',
+            zipCode: data.zipCode || '',
+          });
+
+          // Populate working hours
+          setWorkingHours(data.workingHours || {
+            monday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
+            tuesday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
+            wednesday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
+            thursday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
+            friday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
+            saturday: { isOpen: false },
+            sunday: { isOpen: false },
+          });
         }
       },
       onError: (err: any) => {

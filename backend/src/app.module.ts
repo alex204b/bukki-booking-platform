@@ -34,13 +34,35 @@ import { AppService } from './app.service';
       envFilePath: '.env', // Explicitly specify .env file path
     }),
     ScheduleModule.forRoot(),
-    TypeOrmModule.forRoot({
-      type: 'postgres',
-      url: process.env.DATABASE_URL || `postgresql://${process.env.DATABASE_USERNAME || 'postgres'}:${process.env.DATABASE_PASSWORD || 'password'}@${process.env.DATABASE_HOST || 'localhost'}:${process.env.DATABASE_PORT || 5432}/${process.env.DATABASE_NAME || 'booking_platform'}`,
-      autoLoadEntities: true,
-      synchronize: process.env.NODE_ENV === 'development',
-      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-    }),
+    TypeOrmModule.forRoot((() => {
+      const dbUrl = process.env.DATABASE_URL || `postgresql://${process.env.DATABASE_USERNAME || 'postgres'}:${process.env.DATABASE_PASSWORD || 'password'}@${process.env.DATABASE_HOST || 'localhost'}:${process.env.DATABASE_PORT || 5432}/${process.env.DATABASE_NAME || 'booking_platform'}`;
+      const useSSL = process.env.DATABASE_URL ? { rejectUnauthorized: false } : false;
+
+      // Extract host from URL for logging (without credentials)
+      let dbHost = 'unknown';
+      try {
+        const urlObj = new URL(dbUrl);
+        dbHost = urlObj.hostname;
+      } catch (e) {
+        dbHost = 'localhost';
+      }
+
+      console.log('🔍 Database Configuration:');
+      console.log('  DATABASE_URL set:', !!process.env.DATABASE_URL);
+      console.log('  Database host:', dbUrl.includes('neon.tech') ? 'Neon Cloud ☁️' : 'localhost 💻');
+      console.log('  Actual hostname:', dbHost);
+      console.log('  SSL enabled:', !!useSSL);
+      console.log('  Connection URL preview:', dbUrl.substring(0, 20) + '...' + dbUrl.substring(dbUrl.length - 30));
+
+      return {
+        type: 'postgres',
+        url: dbUrl,
+        autoLoadEntities: true,
+        synchronize: process.env.NODE_ENV === 'development',
+        ssl: useSSL,
+        logging: false,
+      };
+    })()),
     AuthModule,
     UsersModule,
     BusinessesModule,
