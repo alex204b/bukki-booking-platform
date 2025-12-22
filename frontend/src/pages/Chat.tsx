@@ -894,23 +894,26 @@ export const Chat: React.FC = () => {
                       </div>
                       {msgs.map((msg) => {
                         const isMyMsg = isMyMessage(msg);
-                        const otherUser = isMyMsg ? msg.recipient : msg.sender;
-                        const otherUserInitials = `${otherUser.firstName[0]}${otherUser.lastName[0]}`;
+                        const isSystemMessage = !msg.sender; // System messages have null sender
+                        const otherUser = isSystemMessage ? null : (isMyMsg ? msg.recipient : msg.sender);
+                        const otherUserInitials = isSystemMessage ? 'BK' : otherUser ? `${otherUser.firstName[0]}${otherUser.lastName[0]}` : '??';
+                        const otherUserName = isSystemMessage ? 'BUKKi System' : otherUser ? `${otherUser.firstName} ${otherUser.lastName}` : 'Unknown';
                         const myInitials = user ? `${user.firstName?.[0] || ''}${user.lastName?.[0] || ''}` : 'ME';
-                        
+
                         // Debug log for first message
                         if (msgs.indexOf(msg) === 0) {
                           console.log('[Message Render] First message debug:', {
                             isMyMsg,
-                            senderId: msg.sender.id,
+                            isSystemMessage,
+                            senderId: msg.sender?.id,
                             recipientId: msg.recipient.id,
                             currentUserId: user?.id,
-                            senderName: `${msg.sender.firstName} ${msg.sender.lastName}`,
+                            senderName: msg.sender ? `${msg.sender.firstName} ${msg.sender.lastName}` : 'System',
                             recipientName: `${msg.recipient.firstName} ${msg.recipient.lastName}`,
                             currentUserName: `${user?.firstName} ${user?.lastName}`,
                           });
                         }
-                        
+
                         // RECEIVED MESSAGE (LEFT SIDE)
                         if (!isMyMsg) {
                           return (
@@ -919,16 +922,16 @@ export const Chat: React.FC = () => {
                               className="flex items-end gap-2 mb-3 w-full"
                             >
                               {/* Avatar on left */}
-                              <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-semibold flex-shrink-0 bg-gray-400">
+                              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-semibold flex-shrink-0 ${isSystemMessage ? 'bg-blue-500' : 'bg-gray-400'}`}>
                                 {otherUserInitials}
                               </div>
-                              
+
                               {/* Message bubble on left */}
                               <div className="flex flex-col items-start max-w-[70%]">
-                                <span className="text-xs text-gray-500 mb-1 px-1">
-                                  {otherUser.firstName} {otherUser.lastName}
+                                <span className={`text-xs mb-1 px-1 ${isSystemMessage ? 'text-blue-700 font-semibold' : 'text-gray-500'}`}>
+                                  {otherUserName}
                                 </span>
-                                <div className="bg-gray-200 text-gray-900 px-4 py-2 rounded-2xl rounded-bl-none">
+                                <div className={`${isSystemMessage ? 'bg-blue-50 border-l-4 border-blue-400' : 'bg-gray-200'} text-gray-900 px-4 py-2 rounded-2xl rounded-bl-none`}>
                                   <p className="break-words whitespace-pre-wrap text-sm">{msg.content}</p>
                                   <span className="text-xs mt-1 block text-gray-600">
                                     {format(new Date(msg.createdAt), 'h:mm a')}

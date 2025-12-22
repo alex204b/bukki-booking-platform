@@ -457,10 +457,105 @@ export class BusinessesService {
     return savedBusiness;
   }
 
-  async suspend(id: string): Promise<Business> {
-    const business = await this.findOne(id);
+  async suspend(id: string, reason?: string): Promise<Business> {
+    // 1. Load business with owner relation
+    const business = await this.businessRepository.findOne({
+      where: { id },
+      relations: ['owner'],
+    });
+
+    if (!business) {
+      throw new NotFoundException('Business not found');
+    }
+
+    // 2. Update status
     business.status = BusinessStatus.SUSPENDED;
-    return this.businessRepository.save(business);
+    const savedBusiness = await this.businessRepository.save(business);
+
+    // 3. Send suspension email
+    if (business.owner && business.owner.email) {
+      try {
+        await this.emailService.sendBusinessSuspensionEmail(
+          business.owner.email,
+          business.owner.firstName || 'Business Owner',
+          business.name,
+          reason
+        );
+        console.log(`Suspension email sent to ${business.owner.email}`);
+      } catch (error) {
+        console.error('Failed to send suspension email:', error);
+      }
+    }
+
+    // 4. Create BUKKi system notification message
+    if (business.owner) {
+      try {
+        await this.messagesService.createSystemNotification(
+          business.owner.id,
+          `Business Suspended: ${business.name}`,
+          reason
+            ? `Your business has been suspended. Reason: ${reason}\n\nYou can request unsuspension from your Business Settings page.`
+            : `Your business has been suspended. Please contact support for details or request unsuspension from your Business Settings page.`,
+          { businessId: id, suspensionReason: reason }
+        );
+        console.log(`System notification created for user ${business.owner.id}`);
+      } catch (error) {
+        console.error('Failed to create system notification:', error);
+      }
+    }
+
+    return savedBusiness;
+  }
+
+  async unsuspend(id: string): Promise<Business> {
+    // 1. Load business with owner relation
+    const business = await this.businessRepository.findOne({
+      where: { id },
+      relations: ['owner'],
+    });
+
+    if (!business) {
+      throw new NotFoundException('Business not found');
+    }
+
+    if (business.status !== BusinessStatus.SUSPENDED) {
+      throw new BadRequestException('Business is not suspended');
+    }
+
+    // 2. Update status to approved
+    business.status = BusinessStatus.APPROVED;
+    const savedBusiness = await this.businessRepository.save(business);
+
+    // 3. Send unsuspension email
+    if (business.owner && business.owner.email) {
+      try {
+        await this.emailService.sendBusinessUnsuspensionEmail(
+          business.owner.email,
+          business.owner.firstName || 'Business Owner',
+          business.name
+        );
+        console.log(`Unsuspension email sent to ${business.owner.email}`);
+      } catch (error) {
+        console.error('Failed to send unsuspension email:', error);
+      }
+    }
+
+    // 4. Create BUKKi system notification message
+    if (business.owner) {
+      try {
+        await this.messagesService.createSystemNotification(
+          business.owner.id,
+          `Business Reactivated: ${business.name}`,
+          `Great news! Your business has been reactivated and is now visible to customers again. You can start accepting bookings immediately.`,
+          { businessId: id }
+        );
+        console.log(`System notification created for user ${business.owner.id}`);
+      } catch (error) {
+        console.error('Failed to create system notification:', error);
+      }
+    }
+
+    return savedBusiness;
   }
 
   async searchBusinesses(

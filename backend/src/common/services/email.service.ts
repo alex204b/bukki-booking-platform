@@ -629,4 +629,116 @@ export class EmailService {
 
     await this.sendEmail(email, 'Business Application Update - BUKKi', html);
   }
+
+  async sendBusinessSuspensionEmail(
+    email: string,
+    firstName: string,
+    businessName: string,
+    reason?: string,
+  ): Promise<void> {
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="background: linear-gradient(135deg, #ef4444, #dc2626); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+          <h1 style="color: white; margin: 0; font-size: 28px;">⚠️ Business Suspended</h1>
+          <p style="color: white; margin: 10px 0 0 0; font-size: 16px;">Action Required</p>
+        </div>
+
+        <div style="background: #ffffff; padding: 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 10px 10px;">
+          <h2 style="color: #1f2937; margin: 0 0 20px 0;">Hello ${firstName},</h2>
+
+          <p style="color: #6b7280; line-height: 1.6; margin-bottom: 25px;">
+            Your business <strong>"${businessName}"</strong> has been <strong style="color: #ef4444;">suspended</strong> on the BUKKi platform.
+          </p>
+
+          ${reason ? `
+            <div style="background: #fee2e2; border-left: 4px solid #ef4444; padding: 20px; margin: 25px 0; border-radius: 4px;">
+              <h3 style="color: #991b1b; margin: 0 0 10px 0; font-size: 18px;">Reason for Suspension:</h3>
+              <p style="color: #991b1b; margin: 0; line-height: 1.6;">
+                ${reason}
+              </p>
+            </div>
+          ` : ''}
+
+          <div style="background: #f3f4f6; padding: 20px; border-radius: 8px; margin: 25px 0;">
+            <h3 style="color: #1f2937; margin: 0 0 15px 0; font-size: 18px;">What This Means:</h3>
+            <div style="color: #374151; line-height: 1.8;">
+              <p style="margin: 8px 0;">🔒 Your business is not visible to customers</p>
+              <p style="margin: 8px 0;">📅 No new bookings can be made</p>
+              <p style="margin: 8px 0;">⏸️ Your business profile is temporarily inactive</p>
+            </div>
+          </div>
+
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${this.configService.get<string>('FRONTEND_URL')}/business-settings"
+               style="background: #f97316; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block; font-size: 16px;">
+              Request Unsuspension
+            </a>
+          </div>
+
+          <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0; border-radius: 4px;">
+            <p style="color: #92400e; margin: 0; font-size: 14px;">
+              <strong>💡 Need Help?</strong> Contact our support team for assistance or to request unsuspension.
+            </p>
+          </div>
+
+          <p style="color: #6b7280; font-size: 14px; margin-top: 30px;">
+            Best regards,<br>
+            The BUKKi Team
+          </p>
+        </div>
+      </div>
+    `;
+
+    await this.sendEmail(email, '⚠️ Your Business Has Been Suspended - BUKKi', html);
+  }
+
+  async sendBusinessUnsuspensionEmail(
+    email: string,
+    firstName: string,
+    businessName: string,
+  ): Promise<void> {
+    const dashboardUrl = `${this.configService.get<string>('FRONTEND_URL')}/business-dashboard`;
+
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="background: linear-gradient(135deg, #22c55e, #16a34a); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+          <h1 style="color: white; margin: 0; font-size: 32px;">🎉 Business Reactivated!</h1>
+          <p style="color: white; margin: 10px 0 0 0; font-size: 16px;">Your business is now live again</p>
+        </div>
+
+        <div style="background: #ffffff; padding: 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 10px 10px;">
+          <h2 style="color: #1f2937; margin: 0 0 20px 0;">Great news, ${firstName}!</h2>
+
+          <p style="color: #6b7280; line-height: 1.6; margin-bottom: 25px;">
+            Your business <strong style="color: #1f2937;">"${businessName}"</strong> has been <strong style="color: #22c55e;">unsuspended</strong> and is now active on the BUKKi platform.
+          </p>
+
+          <div style="background: #dcfce7; border-left: 4px solid #22c55e; padding: 20px; margin: 25px 0; border-radius: 4px;">
+            <h3 style="color: #166534; margin: 0 0 10px 0; font-size: 18px;">✅ Your business is live!</h3>
+            <p style="color: #166534; margin: 0; line-height: 1.6;">
+              Customers can now discover your business, view services, and make bookings again.
+            </p>
+          </div>
+
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${dashboardUrl}"
+               style="background: #f97316; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block; font-size: 16px;">
+              Go to Dashboard
+            </a>
+          </div>
+
+          <p style="color: #6b7280; font-size: 14px; margin-top: 30px;">
+            Thank you for your patience and cooperation.
+          </p>
+
+          <p style="color: #6b7280; font-size: 14px; margin-top: 20px;">
+            Best regards,<br>
+            The BUKKi Team
+          </p>
+        </div>
+      </div>
+    `;
+
+    await this.sendEmail(email, '🎉 Your Business Has Been Reactivated - BUKKi', html);
+  }
 }

@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useI18n } from '../contexts/I18nContext';
-import { Building2, Users, Calendar, DollarSign, CheckCircle, XCircle, Eye, Settings, TrendingUp, AlertTriangle } from 'lucide-react';
+import { Building2, Users, Calendar, DollarSign, CheckCircle, XCircle, Eye, EyeOff, Settings, TrendingUp, AlertTriangle } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { userService, businessService } from '../services/api';
 import toast from 'react-hot-toast';
@@ -29,6 +29,7 @@ export const AdminDashboard: React.FC = () => {
   const capitalizeWords = (s: string) => s.replace(/\b\w/g, (letter: string): string => letter.toUpperCase());
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
+  const [showOwnerEmails, setShowOwnerEmails] = useState(false);
   const { data: usersData } = useQuery(['admin-users'], () => userService.getAllUsers(), { select: (r) => r.data });
   const { data: businessesData } = useQuery(['admin-businesses', statusFilter], () => businessService.getAll(statusFilter === 'all' ? undefined : statusFilter), {
     select: (r) => {
@@ -74,10 +75,15 @@ export const AdminDashboard: React.FC = () => {
     onSuccess: () => { toast.success(t('reject') || 'Rejected'); queryClient.invalidateQueries(['admin-businesses']); },
     onError: (e: any) => { toast.error(e?.response?.data?.message || 'Failed to reject'); },
   });
-  const suspendMutation = useMutation<any, any, string>({
-    mutationFn: (id: string) => businessService.suspend(id),
-    onSuccess: () => { toast.success(t('suspended')); queryClient.invalidateQueries(['admin-businesses']); },
-    onError: (e: any) => { toast.error(e?.response?.data?.message || t('failedToSuspend')); },
+  const suspendMutation = useMutation<any, any, { id: string; reason?: string }>({
+    mutationFn: (vars) => businessService.suspend(vars.id, vars.reason),
+    onSuccess: () => { toast.success('Business suspended successfully'); queryClient.invalidateQueries(['admin-businesses']); },
+    onError: (e: any) => { toast.error(e?.response?.data?.message || 'Failed to suspend business'); },
+  });
+  const unsuspendMutation = useMutation<any, any, string>({
+    mutationFn: (id: string) => businessService.unsuspend(id),
+    onSuccess: () => { toast.success('Business unsuspended successfully'); queryClient.invalidateQueries(['admin-businesses']); },
+    onError: (e: any) => { toast.error(e?.response?.data?.message || 'Failed to unsuspend business'); },
   });
   const toggleUserStatusMutation = useMutation<any, any, User>({
     mutationFn: (u: User) => (u.isActive ? userService.deactivateUser(u.id) : userService.activateUser(u.id)),
@@ -250,6 +256,22 @@ export const AdminDashboard: React.FC = () => {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('businessName')}</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('category')}</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('owner')}</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <div className="flex items-center gap-2">
+                      Email
+                      <button
+                        onClick={() => setShowOwnerEmails(!showOwnerEmails)}
+                        className="text-indigo-600 hover:text-indigo-900 transition-colors"
+                        title={showOwnerEmails ? "Hide emails" : "Show emails"}
+                      >
+                        {showOwnerEmails ? (
+                          <EyeOff className="h-4 w-4" />
+                        ) : (
+                          <Eye className="h-4 w-4" />
+                        )}
+                      </button>
+                    </div>
+                  </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('location')}</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('status')}</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
@@ -267,6 +289,11 @@ export const AdminDashboard: React.FC = () => {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900">{business.owner?.firstName} {business.owner?.lastName}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900 font-mono">
+                        {showOwnerEmails ? business.owner?.email : '••••••@••••.com'}
+                      </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900">{business.city}, {business.state}</div>
@@ -298,16 +325,31 @@ export const AdminDashboard: React.FC = () => {
                           </button>
                         </>
                       )}
-                      <button 
-                        onClick={() => suspendMutation.mutate(business.id)}
-                        className="text-yellow-600 hover:text-yellow-900"
-                        title="Suspend"
-                      >
-                        <AlertTriangle className="h-4 w-4" />
-                      </button>
-                      <button className="text-indigo-600 hover:text-indigo-900" title="View Details">
-                        <Eye className="h-4 w-4" />
-                      </button>
+                      {business.status === 'approved' && (
+                        <button
+                          onClick={() => {
+                            const reason = prompt('Reason for suspension (optional):');
+                            suspendMutation.mutate({ id: business.id, reason: reason || undefined });
+                          }}
+                          className="text-yellow-600 hover:text-yellow-900"
+                          title="Suspend"
+                        >
+                          <AlertTriangle className="h-5 w-5" />
+                        </button>
+                      )}
+                      {business.status === 'suspended' && (
+                        <button
+                          onClick={() => {
+                            if (window.confirm(`Unsuspend ${business.name}?`)) {
+                              unsuspendMutation.mutate(business.id);
+                            }
+                          }}
+                          className="text-green-600 hover:text-green-900"
+                          title="Unsuspend"
+                        >
+                          <CheckCircle className="h-5 w-5" />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

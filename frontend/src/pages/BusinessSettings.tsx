@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { businessService, serviceService } from '../services/api';
 import { useI18n } from '../contexts/I18nContext';
 import { GeometricSymbol } from '../components/GeometricSymbols';
-import { Gift, Send, Image as ImageIcon, Trash2, Upload } from 'lucide-react';
+import { Gift, Send, Image as ImageIcon, Trash2, Upload, AlertTriangle } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export const BusinessSettings: React.FC = () => {
@@ -34,6 +34,10 @@ export const BusinessSettings: React.FC = () => {
   // Working hours edit states
   const [isEditingHours, setIsEditingHours] = useState(false);
   const [workingHours, setWorkingHours] = useState<any>({});
+
+  // Unsuspension request states
+  const [showUnsuspendForm, setShowUnsuspendForm] = useState(false);
+  const [unsuspendReason, setUnsuspendReason] = useState('');
 
   const { data: business, isLoading, error } = useQuery(
     'my-business',
@@ -237,6 +241,83 @@ export const BusinessSettings: React.FC = () => {
   return (
     <div className="min-h-screen bg-background py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-4xl mx-auto">
+        {/* Suspension Notice */}
+        {business?.status === 'suspended' && (
+          <div className="bg-red-50 border-2 border-red-300 rounded-lg p-6 mb-8">
+            <div className="flex items-center gap-3 mb-4">
+              <AlertTriangle className="h-6 w-6 text-red-600" />
+              <div>
+                <h2 className="text-xl font-bold text-red-900">
+                  Business Suspended
+                </h2>
+                <p className="text-sm text-red-700 mt-1">
+                  Your business is currently suspended and not visible to customers
+                </p>
+              </div>
+            </div>
+
+            {!showUnsuspendForm ? (
+              <div className="space-y-3">
+                <p className="text-gray-700">
+                  If you believe this suspension was made in error or you have resolved
+                  the issues, you can request unsuspension.
+                </p>
+                <button
+                  onClick={() => setShowUnsuspendForm(true)}
+                  className="btn btn-primary"
+                >
+                  Request Unsuspension
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Reason for Unsuspension Request <span className="text-red-500">*</span>
+                  </label>
+                  <textarea
+                    value={unsuspendReason}
+                    onChange={(e) => setUnsuspendReason(e.target.value)}
+                    rows={4}
+                    placeholder="Please explain why your business should be unsuspended..."
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  />
+                  <p className="text-sm text-gray-500 mt-1">
+                    Be specific about what steps you've taken to address the suspension reason
+                  </p>
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      if (!unsuspendReason.trim()) {
+                        toast.error('Please provide a reason for unsuspension');
+                        return;
+                      }
+                      toast.success('Unsuspension request submitted. An admin will review it shortly.');
+                      setShowUnsuspendForm(false);
+                      setUnsuspendReason('');
+                    }}
+                    disabled={!unsuspendReason.trim()}
+                    className="btn btn-primary disabled:opacity-50"
+                  >
+                    Submit Request
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowUnsuspendForm(false);
+                      setUnsuspendReason('');
+                    }}
+                    className="btn btn-outline"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">
             {t('businessSettings')}

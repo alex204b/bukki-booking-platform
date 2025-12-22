@@ -805,6 +805,51 @@ export class MessagesService {
   }
 
   /**
+   * Create a system notification message from BUKKi
+   * Used for automated platform notifications (e.g., business suspension, important updates)
+   */
+  async createSystemNotification(
+    recipientId: string,
+    subject: string,
+    content: string,
+    metadata?: any,
+  ): Promise<Message> {
+    const recipient = await this.userRepository.findOne({
+      where: { id: recipientId },
+    });
+
+    if (!recipient) {
+      throw new NotFoundException('Recipient not found');
+    }
+
+    const message = this.messageRepository.create({
+      recipient,
+      sender: null, // System message - no sender (displays as "BUKKi System")
+      business: null,
+      type: MessageType.SYSTEM_NOTIFICATION,
+      subject,
+      content,
+      status: MessageStatus.UNREAD,
+      metadata,
+    });
+
+    const savedMessage = await this.messageRepository.save(message);
+
+    // Send push notification for system messages
+    try {
+      await this.pushNotificationService.sendNotification(
+        recipientId,
+        subject,
+        content,
+      );
+    } catch (error) {
+      console.error('Failed to send push notification for system message:', error);
+    }
+
+    return savedMessage;
+  }
+
+  /**
    * Clean up old chat messages to save database space
    * Archives messages older than the specified days (default: 90 days)
    * Deletes archived messages older than the specified days (default: 180 days)

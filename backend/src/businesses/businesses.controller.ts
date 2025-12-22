@@ -204,11 +204,28 @@ export class BusinessesController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Suspend business (Super Admin only)' })
   @ApiResponse({ status: 200, description: 'Business suspended successfully' })
-  async suspend(@Param('id') id: string, @Request() req) {
+  async suspend(
+    @Param('id') id: string,
+    @Body() body: { reason?: string },
+    @Request() req
+  ) {
     if (!req.user || req.user.role !== UserRole.SUPER_ADMIN) {
       throw new UnauthorizedException('Only super admins can suspend businesses');
     }
-    return this.businessesService.suspend(id);
+    return this.businessesService.suspend(id, body.reason);
+  }
+
+  @Post(':id/unsuspend')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Unsuspend business (Super Admin only)' })
+  @ApiResponse({ status: 200, description: 'Business unsuspended successfully' })
+  async unsuspend(@Param('id') id: string, @Request() req) {
+    if (!req.user || req.user.role !== UserRole.SUPER_ADMIN) {
+      throw new UnauthorizedException('Only super admins can unsuspend businesses');
+    }
+    return this.businessesService.unsuspend(id);
   }
 
   @Get(':id/stats')

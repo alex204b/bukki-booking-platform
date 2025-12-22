@@ -7,6 +7,7 @@ export enum MessageType {
   TEAM_INVITATION = 'team_invitation',
   PROMOTIONAL_OFFER = 'promotional_offer',
   CHAT = 'chat', // Direct chat message between customer and business
+  SYSTEM_NOTIFICATION = 'system_notification', // Automated messages from BUKKi system
 }
 
 export enum MessageStatus {

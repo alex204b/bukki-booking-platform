@@ -311,7 +311,8 @@ export const businessService = {
   getMyBusiness: () => api.get('/businesses/my-business'),
   approve: (id: string) => api.post(`/businesses/${id}/approve`),
   reject: (id: string, reason?: string) => api.post(`/businesses/${id}/reject`, { reason }),
-  suspend: (id: string) => api.post(`/businesses/${id}/suspend`),
+  suspend: (id: string, reason?: string) => api.post(`/businesses/${id}/suspend`, { reason }),
+  unsuspend: (id: string) => api.post(`/businesses/${id}/unsuspend`),
   getStats: (id: string) => api.get(`/businesses/${id}/stats`),
   // Team members
   inviteMember: (id: string, email: string) => api.post(`/businesses/${id}/members`, { email }),
