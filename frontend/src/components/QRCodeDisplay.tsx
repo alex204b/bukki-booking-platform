@@ -48,7 +48,7 @@ export const QRCodeDisplay: React.FC<QRCodeDisplayProps> = ({ bookingId, onClose
         
         <button
           onClick={onClose}
-          className="mt-6 w-full btn btn-primary"
+          className="mt-6 w-full px-4 py-2 text-sm font-medium text-white bg-[#E7001E] rounded-md hover:bg-[#c50018] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#E7001E] transition-colors"
         >
           {t('close')}
         </button>

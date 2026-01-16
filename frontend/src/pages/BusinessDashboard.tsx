@@ -4,6 +4,7 @@ import { api, bookingService } from '../services/api';
 import { useI18n } from '../contexts/I18nContext';
 import { Building2, Calendar, DollarSign, Users, Plus, Eye, Edit, CheckCircle, XCircle, QrCode, Clock, Bell, MessageCircle, Settings } from 'lucide-react';
 import { RevenueChart } from '../components/RevenueChart';
+import { BookingActionModal } from '../components/BookingActionModal';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from 'react-query';
 import toast from 'react-hot-toast';
@@ -14,6 +15,10 @@ interface Service {
   price: number;
   duration: number;
   isActive: boolean;
+  maxBookingsPerCustomerPerDay?: number;
+  maxBookingsPerCustomerPerWeek?: number;
+  bookingCooldownHours?: number;
+  allowMultipleActiveBookings?: boolean;
 }
 
 interface Booking {
@@ -34,79 +39,230 @@ export const BusinessDashboard: React.FC = () => {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [showAddService, setShowAddService] = useState(false);
   const [newService, setNewService] = useState({ name: '', price: '', duration: '' });
+  const [showEditService, setShowEditService] = useState(false);
+  const [editingService, setEditingService] = useState<Service | null>(null);
+  const [editServiceData, setEditServiceData] = useState({ 
+    name: '', 
+    price: '', 
+    duration: '',
+    maxBookingsPerCustomerPerDay: '1',
+    maxBookingsPerCustomerPerWeek: '',
+    bookingCooldownHours: '0',
+    allowMultipleActiveBookings: true
+  });
   const [myBusiness, setMyBusiness] = useState<any | null>(null);
   const [statsApi, setStatsApi] = useState<any | null>(null);
   const [isStaff, setIsStaff] = useState(false);
   const [waitlist, setWaitlist] = useState<any[]>([]);
   const [bookingFilter, setBookingFilter] = useState<'all' | 'upcoming' | 'pending' | 'done'>('all');
+  const [servicesLoading, setServicesLoading] = useState(true);
+  const [bookingActionModal, setBookingActionModal] = useState<{
+    isOpen: boolean;
+    booking: Booking | null;
+    action: 'accept' | 'reject';
+  }>({
+    isOpen: false,
+    booking: null,
+    action: 'accept',
+  });
+  const [isUpdatingBooking, setIsUpdatingBooking] = useState(false);
 
   // Determine if user is an employee (staff)
   useEffect(() => {
     setIsStaff(user?.role === 'employee');
   }, [user]);
 
+  // Function to load bookings - can be called manually
+  const loadBookings = async (businessId: string) => {
+    try {
+      console.log('[BusinessDashboard] 🔄 Loading bookings for business:', businessId);
+      const bookingsRes = await api.get(`/bookings/business/${businessId}`);
+
+      console.log('[BusinessDashboard] Raw bookings response:', {
+        data: bookingsRes.data,
+        dataType: typeof bookingsRes.data,
+        isArray: Array.isArray(bookingsRes.data),
+        count: Array.isArray(bookingsRes.data) ? bookingsRes.data.length : 0,
+      });
+
+      const allBookings = Array.isArray(bookingsRes.data) ? bookingsRes.data : [];
+
+      const businessBookings = allBookings.map((b: any) => ({
+        id: b.id,
+        customerName: `${b.customer?.firstName || ''} ${b.customer?.lastName || ''}`.trim() || t('customer'),
+        serviceName: b.service?.name || t('serviceName'),
+        appointmentDate: b.appointmentDate,
+        status: b.status,
+        totalAmount: Number(b.totalAmount) || 0,
+      }));
+
+      console.log('[BusinessDashboard] ✅ Formatted bookings:', {
+        count: businessBookings.length,
+        bookings: businessBookings.slice(0, 3),
+      });
+
+      setBookings(businessBookings);
+      return businessBookings;
+    } catch (err: any) {
+      console.error('[BusinessDashboard] ❌ Error loading bookings:', err);
+      console.error('[BusinessDashboard] Error details:', {
+        message: err.message,
+        response: err.response?.data,
+        status: err.response?.status,
+      });
+      return [];
+    }
+  };
+
   // Load real data from API only (no mock fallbacks)
   useEffect(() => {
     (async () => {
       try {
+        setServicesLoading(true);
         const bRes = await api.get('/businesses/my-business');
         setMyBusiness(bRes.data);
         if (bRes.data?.id) {
-          const [sRes, servicesRes, bookingsRes, waitlistRes] = await Promise.all([
-            api.get(`/businesses/${bRes.data.id}/stats`),
-            api.get(`/services/business/${bRes.data.id}`),
-            api.get('/bookings', { params: { businessId: bRes.data.id } }), // Get bookings filtered for this business
+          console.log('[BusinessDashboard] Loading data for business:', bRes.data.id);
+          
+          const [sRes, servicesRes, waitlistRes] = await Promise.all([
+            api.get(`/businesses/${bRes.data.id}/stats`).catch((err) => {
+              console.error('[BusinessDashboard] ❌ Error fetching stats:', err);
+              return { data: {} };
+            }),
+            api.get(`/services/business/${bRes.data.id}`).catch((err) => {
+              console.error('[BusinessDashboard] ❌ Error fetching services:', err);
+              console.error('[BusinessDashboard] Error details:', {
+                message: err.message,
+                response: err.response?.data,
+                status: err.response?.status,
+              });
+              return { data: [] };
+            }),
             api.get(`/waitlist/business/${bRes.data.id}`).catch(() => ({ data: [] })), // Waitlist (optional)
           ]);
+          
           setStatsApi(sRes.data);
-          setServices(servicesRes.data || []);
+          
+          // Handle services response - it might be an array directly or wrapped in data
+          let servicesData: Service[] = [];
+          if (Array.isArray(servicesRes.data)) {
+            servicesData = servicesRes.data;
+          } else if (servicesRes.data?.data && Array.isArray(servicesRes.data.data)) {
+            servicesData = servicesRes.data.data;
+          } else if (servicesRes.data && typeof servicesRes.data === 'object') {
+            // Try to extract array from response
+            servicesData = [];
+            console.warn('[BusinessDashboard] Unexpected services response format:', servicesRes.data);
+          }
+          
+          console.log('[BusinessDashboard] ✅ Services loaded:', servicesData.length, 'services');
+          console.log('[BusinessDashboard] Services data:', servicesData);
+          setServices(servicesData);
+          setServicesLoading(false);
           setWaitlist(waitlistRes.data || []);
-          
-          // Format bookings (already filtered by backend if businessId param was used)
-          const allBookings = Array.isArray(bookingsRes.data) ? bookingsRes.data : [];
-          
-          console.log('[BusinessDashboard] Bookings data:', {
-            totalBookings: allBookings.length,
-            businessId: bRes.data.id,
-            sampleBooking: allBookings[0],
-            bookingsWithBusiness: allBookings.filter((b: any) => b.business).length,
-          });
-          
-          const businessBookings = allBookings
-            .map((b: any) => ({
-              id: b.id,
-              customerName: `${b.customer?.firstName || ''} ${b.customer?.lastName || ''}`.trim() || t('customer'),
-              serviceName: b.service?.name || t('serviceName'),
-              appointmentDate: b.appointmentDate,
-              status: b.status,
-              totalAmount: Number(b.totalAmount) || 0,
-            }));
-          
-          console.log('[BusinessDashboard] Formatted bookings:', {
-            formattedCount: businessBookings.length,
-            businessId: bRes.data.id,
-          });
-          
-          setBookings(businessBookings);
+
+          // Load bookings using the dedicated function
+          await loadBookings(bRes.data.id);
         }
       } catch (err: any) {
-        console.error('Failed to load business data', err?.response?.data || err?.message);
+        console.error('[BusinessDashboard] ❌ Failed to load business data:', err?.response?.data || err?.message);
+        setServicesLoading(false);
       }
     })();
   }, [user, t]);
 
-  const handleAddService = () => {
-    if (newService.name && newService.price && newService.duration) {
-      const service: Service = {
-        id: Date.now().toString(),
+  const handleAddService = async () => {
+    if (!newService.name || !newService.price || !newService.duration) {
+      toast.error('Please fill in all fields');
+      return;
+    }
+
+    if (!myBusiness?.id) {
+      toast.error('Business not found');
+      return;
+    }
+
+    try {
+      const response = await api.post('/services', {
         name: newService.name,
         price: parseFloat(newService.price),
         duration: parseInt(newService.duration),
         isActive: true,
-      };
-      setServices([...services, service]);
+        businessId: myBusiness.id,
+      });
+
+      toast.success('Service added successfully!');
       setNewService({ name: '', price: '', duration: '' });
       setShowAddService(false);
+      
+      // Refresh services list
+      await refreshServices();
+    } catch (error: any) {
+      console.error('Error adding service:', error);
+      toast.error(error.response?.data?.message || 'Failed to add service');
+    }
+  };
+
+  const refreshServices = async () => {
+    if (!myBusiness?.id) return;
+    try {
+      const servicesRes = await api.get(`/services/business/${myBusiness.id}`);
+      const servicesData = Array.isArray(servicesRes.data) 
+        ? servicesRes.data 
+        : (servicesRes.data?.data || []);
+      console.log('[BusinessDashboard] Services refreshed:', servicesData.length, 'services');
+      setServices(servicesData);
+    } catch (error: any) {
+      console.error('[BusinessDashboard] Error refreshing services:', error);
+    }
+  };
+
+  const handleEditService = async () => {
+    if (!editingService || !myBusiness?.id) {
+      toast.error('Service not found');
+      return;
+    }
+
+    if (!editServiceData.name || !editServiceData.price || !editServiceData.duration) {
+      toast.error('Please fill in all fields');
+      return;
+    }
+
+    try {
+      const updateData: any = {
+        name: editServiceData.name,
+        price: parseFloat(editServiceData.price),
+        duration: parseInt(editServiceData.duration),
+        maxBookingsPerCustomerPerDay: parseInt(editServiceData.maxBookingsPerCustomerPerDay) || 1,
+        bookingCooldownHours: parseInt(editServiceData.bookingCooldownHours) || 0,
+        allowMultipleActiveBookings: editServiceData.allowMultipleActiveBookings,
+      };
+
+      // Only include weekly limit if it's set
+      if (editServiceData.maxBookingsPerCustomerPerWeek) {
+        updateData.maxBookingsPerCustomerPerWeek = parseInt(editServiceData.maxBookingsPerCustomerPerWeek);
+      }
+
+      await api.patch(`/services/${editingService.id}`, updateData);
+
+      toast.success('Service updated successfully!');
+      setShowEditService(false);
+      setEditingService(null);
+      setEditServiceData({ 
+        name: '', 
+        price: '', 
+        duration: '',
+        maxBookingsPerCustomerPerDay: '1',
+        maxBookingsPerCustomerPerWeek: '',
+        bookingCooldownHours: '0',
+        allowMultipleActiveBookings: true
+      });
+      
+      // Refresh services list
+      await refreshServices();
+    } catch (error: any) {
+      console.error('Error updating service:', error);
+      toast.error(error.response?.data?.message || 'Failed to update service');
     }
   };
 
@@ -116,31 +272,63 @@ export const BusinessDashboard: React.FC = () => {
     ));
   };
 
-  const updateBookingStatus = async (bookingId: string, status: string) => {
+  const handleBookingAction = (booking: Booking, action: 'accept' | 'reject') => {
+    setBookingActionModal({
+      isOpen: true,
+      booking,
+      action,
+    });
+  };
+
+  const handleConfirmBookingAction = async (reason?: string) => {
+    if (!bookingActionModal.booking) return;
+
+    setIsUpdatingBooking(true);
     try {
-      await bookingService.updateStatus(bookingId, status);
+      const status = bookingActionModal.action === 'accept' ? 'confirmed' : 'cancelled';
+      await bookingService.updateStatus(bookingActionModal.booking.id, status, reason);
+      
       // Update local state
       setBookings(bookings.map(booking => 
-        booking.id === bookingId ? { ...booking, status } : booking
+        booking.id === bookingActionModal.booking!.id ? { ...booking, status } : booking
       ));
+      
       // Invalidate queries to refresh data everywhere (including customer view)
       queryClient.invalidateQueries(['my-bookings']);
       queryClient.invalidateQueries('my-bookings');
       
-      if (status === 'confirmed') {
+      // Refresh bookings from API using the dedicated function
+      if (myBusiness?.id) {
+        console.log('[BusinessDashboard] Refreshing bookings after status update...');
+        await loadBookings(myBusiness.id);
+      }
+      
+      if (bookingActionModal.action === 'accept') {
         toast.success(t('bookingAccepted') || 'Booking accepted successfully');
-      } else if (status === 'cancelled') {
+      } else {
         toast.success(t('bookingRejected') || 'Booking rejected');
       }
+      
+      setBookingActionModal({ isOpen: false, booking: null, action: 'accept' });
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Failed to update booking status');
+    } finally {
+      setIsUpdatingBooking(false);
+    }
+  };
+
+  const updateBookingStatus = async (bookingId: string, status: string) => {
+    // Legacy method - redirect to new modal-based approach
+    const booking = bookings.find(b => b.id === bookingId);
+    if (booking) {
+      handleBookingAction(booking, status === 'confirmed' ? 'accept' : 'reject');
     }
   };
 
   const stats = [
     { name: t('totalBookings'), value: String(statsApi?.totalBookings ?? 0), icon: Calendar, change: '+0%', changeType: 'neutral' },
     ...(!isStaff && myBusiness?.showRevenue && (statsApi?.totalRevenue !== undefined) ? [{ name: t('totalRevenue'), value: `$${(statsApi?.totalRevenue || 0).toLocaleString()}`, icon: DollarSign, change: '+0%', changeType: 'neutral' }] : []),
-    { name: t('customers'), value: '0', icon: Users, change: '+0%', changeType: 'neutral' },
+    { name: t('customers'), value: String(statsApi?.totalCustomers ?? 0), icon: Users, change: '+0%', changeType: 'neutral' },
     { name: t('services'), value: String(services.filter(s => s.isActive).length), icon: Building2, change: '+0%', changeType: 'neutral' },
   ];
 
@@ -224,8 +412,8 @@ export const BusinessDashboard: React.FC = () => {
         {stats.map((stat) => (
           <div key={stat.name} className="card p-6">
             <div className="flex items-center">
-              <div className="p-2 bg-primary-100 rounded-lg">
-                <stat.icon className="h-6 w-6 text-primary-600" />
+              <div className="p-2 bg-accent-100 rounded-lg">
+                <stat.icon className="h-6 w-6 text-accent-600" />
               </div>
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-600">{stat.name}</p>
@@ -258,9 +446,14 @@ export const BusinessDashboard: React.FC = () => {
           </button>
         </div>
         
+        {servicesLoading ? (
+          <div className="flex justify-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent-500"></div>
+          </div>
+        ) : (
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-primary-50">
+            <thead className="bg-accent-50">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('serviceName')}</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('price')}</th>
@@ -270,7 +463,14 @@ export const BusinessDashboard: React.FC = () => {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {services.map((service) => (
+              {services.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
+                    <p className="text-sm">{t('noServices') || 'No services found. Add your first service to get started.'}</p>
+                  </td>
+                </tr>
+              ) : (
+              services.map((service) => (
                 <tr key={service.id}>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm font-medium text-gray-900">{service.name}</div>
@@ -289,7 +489,23 @@ export const BusinessDashboard: React.FC = () => {
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
-                    <button className="text-indigo-600 hover:text-indigo-900">
+                    <button 
+                      onClick={() => {
+                        setEditingService(service);
+                        setEditServiceData({
+                          name: service.name,
+                          price: service.price.toString(),
+                          duration: service.duration.toString(),
+                          maxBookingsPerCustomerPerDay: (service.maxBookingsPerCustomerPerDay || 1).toString(),
+                          maxBookingsPerCustomerPerWeek: service.maxBookingsPerCustomerPerWeek?.toString() || '',
+                          bookingCooldownHours: (service.bookingCooldownHours || 0).toString(),
+                          allowMultipleActiveBookings: service.allowMultipleActiveBookings !== false
+                        });
+                        setShowEditService(true);
+                      }}
+                      className="text-indigo-600 hover:text-indigo-900"
+                      title={t('edit') || 'Edit'}
+                    >
                       <Edit className="h-4 w-4" />
                     </button>
                     <button 
@@ -300,10 +516,12 @@ export const BusinessDashboard: React.FC = () => {
                     </button>
                   </td>
                 </tr>
-              ))}
+              ))
+              )}
             </tbody>
           </table>
         </div>
+        )}
       </div>
       )}
 
@@ -312,7 +530,7 @@ export const BusinessDashboard: React.FC = () => {
         <div className="card p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-              <Clock className="h-5 w-5 text-primary-600" />
+              <Clock className="h-5 w-5 text-accent-600" />
               {t('waitlist') || 'Waitlist'} ({waitlist.length})
             </h3>
           </div>
@@ -372,7 +590,7 @@ export const BusinessDashboard: React.FC = () => {
               onClick={() => setBookingFilter('all')}
               className={`px-3 py-1 text-sm rounded-lg transition-colors ${
                 bookingFilter === 'all'
-                  ? 'bg-primary-600 text-white'
+                  ? 'bg-accent-500 text-white'
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
             >
@@ -382,7 +600,7 @@ export const BusinessDashboard: React.FC = () => {
               onClick={() => setBookingFilter('upcoming')}
               className={`px-3 py-1 text-sm rounded-lg transition-colors ${
                 bookingFilter === 'upcoming'
-                  ? 'bg-primary-600 text-white'
+                  ? 'bg-accent-500 text-white'
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
             >
@@ -392,7 +610,7 @@ export const BusinessDashboard: React.FC = () => {
               onClick={() => setBookingFilter('pending')}
               className={`px-3 py-1 text-sm rounded-lg transition-colors ${
                 bookingFilter === 'pending'
-                  ? 'bg-primary-600 text-white'
+                  ? 'bg-accent-500 text-white'
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
             >
@@ -402,7 +620,7 @@ export const BusinessDashboard: React.FC = () => {
               onClick={() => setBookingFilter('done')}
               className={`px-3 py-1 text-sm rounded-lg transition-colors ${
                 bookingFilter === 'done'
-                  ? 'bg-primary-600 text-white'
+                  ? 'bg-accent-500 text-white'
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
             >
@@ -412,7 +630,7 @@ export const BusinessDashboard: React.FC = () => {
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-primary-50">
+            <thead className="bg-accent-50">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('customerName')}</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('serviceName')}</th>
@@ -471,7 +689,7 @@ export const BusinessDashboard: React.FC = () => {
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
                         booking.status === 'confirmed' ? 'bg-green-100 text-green-800' : 
-                        booking.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 'bg-primary-100 text-primary-800'
+                        booking.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 'bg-accent-100 text-accent-800'
                       }`}>
                         {booking.status.charAt(0).toUpperCase() + booking.status.slice(1)}
                       </span>
@@ -480,14 +698,16 @@ export const BusinessDashboard: React.FC = () => {
                       {booking.status === 'pending' && (
                         <>
                           <button 
-                            onClick={() => updateBookingStatus(booking.id, 'confirmed')}
+                            onClick={() => handleBookingAction(booking, 'accept')}
                             className="text-green-600 hover:text-green-900"
+                            title={t('accept') || 'Accept'}
                           >
                             <CheckCircle className="h-4 w-4" />
                           </button>
                           <button 
-                            onClick={() => updateBookingStatus(booking.id, 'cancelled')}
+                            onClick={() => handleBookingAction(booking, 'reject')}
                             className="text-red-600 hover:text-red-900"
+                            title={t('reject') || 'Reject'}
                           >
                             <XCircle className="h-4 w-4" />
                           </button>
@@ -560,6 +780,153 @@ export const BusinessDashboard: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Edit Service Modal - Only for business owners */}
+      {!isStaff && showEditService && editingService && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 my-8 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">{t('editService') || 'Edit Service'}</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{t('serviceName')}</label>
+                <input
+                  type="text"
+                  value={editServiceData.name}
+                  onChange={(e) => setEditServiceData({...editServiceData, name: e.target.value})}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  placeholder="e.g., Haircut & Style"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{t('price')} ($)</label>
+                <input
+                  type="number"
+                  value={editServiceData.price}
+                  onChange={(e) => setEditServiceData({...editServiceData, price: e.target.value})}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  placeholder="65.00"
+                  step="0.01"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{t('duration')} ({t('minutes') || 'minutes'})</label>
+                <input
+                  type="number"
+                  value={editServiceData.duration}
+                  onChange={(e) => setEditServiceData({...editServiceData, duration: e.target.value})}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  placeholder="60"
+                />
+              </div>
+
+              {/* Booking Limitations */}
+              <div className="border-t pt-4 mt-4">
+                <h4 className="text-sm font-semibold text-gray-900 mb-3">{t('bookingLimitations') || 'Booking Limitations'}</h4>
+                
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      {t('maxBookingsPerDay') || 'Max bookings per customer per day'}
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={editServiceData.maxBookingsPerCustomerPerDay}
+                      onChange={(e) => setEditServiceData({...editServiceData, maxBookingsPerCustomerPerDay: e.target.value})}
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      placeholder="1"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">{t('maxBookingsPerDayHelp') || 'e.g., 1 for restaurants (one booking per day)'}</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      {t('maxBookingsPerWeek') || 'Max bookings per customer per week (optional)'}
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={editServiceData.maxBookingsPerCustomerPerWeek}
+                      onChange={(e) => setEditServiceData({...editServiceData, maxBookingsPerCustomerPerWeek: e.target.value})}
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      placeholder="Leave empty for no limit"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      {t('bookingCooldown') || 'Cooldown between bookings (hours)'}
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={editServiceData.bookingCooldownHours}
+                      onChange={(e) => setEditServiceData({...editServiceData, bookingCooldownHours: e.target.value})}
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      placeholder="0"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">{t('bookingCooldownHelp') || 'Minimum hours between bookings (0 = no restriction)'}</p>
+                  </div>
+
+                  <div className="flex items-center">
+                    <input
+                      type="checkbox"
+                      id="allowMultiple"
+                      checked={editServiceData.allowMultipleActiveBookings}
+                      onChange={(e) => setEditServiceData({...editServiceData, allowMultipleActiveBookings: e.target.checked})}
+                      className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                    />
+                    <label htmlFor="allowMultiple" className="ml-2 block text-xs text-gray-700">
+                      {t('allowMultipleActive') || 'Allow multiple active bookings'}
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end space-x-3 mt-6">
+              <button
+                onClick={() => {
+                  setShowEditService(false);
+                  setEditingService(null);
+                  setEditServiceData({ 
+                    name: '', 
+                    price: '', 
+                    duration: '',
+                    maxBookingsPerCustomerPerDay: '1',
+                    maxBookingsPerCustomerPerWeek: '',
+                    bookingCooldownHours: '0',
+                    allowMultipleActiveBookings: true
+                  });
+                }}
+                className="btn btn-outline"
+              >
+                {t('cancel')}
+              </button>
+              <button
+                onClick={handleEditService}
+                className="btn btn-primary"
+              >
+                {t('save') || 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Booking Action Modal */}
+      <BookingActionModal
+        isOpen={bookingActionModal.isOpen}
+        booking={bookingActionModal.booking ? {
+          id: bookingActionModal.booking.id,
+          customerName: bookingActionModal.booking.customerName,
+          serviceName: bookingActionModal.booking.serviceName,
+          appointmentDate: bookingActionModal.booking.appointmentDate,
+        } : null}
+        action={bookingActionModal.action}
+        onConfirm={handleConfirmBookingAction}
+        onCancel={() => setBookingActionModal({ isOpen: false, booking: null, action: 'accept' })}
+        isLoading={isUpdatingBooking}
+      />
     </div>
   );
 };

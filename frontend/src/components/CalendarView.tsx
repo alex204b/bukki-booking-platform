@@ -292,9 +292,9 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     const hours = Array.from({ length: 24 }, (_, i) => i);
 
     return (
-      <div className="bg-white rounded-lg shadow-sm border">
-        {/* Day Header */}
-        <div className="flex items-center justify-between p-4 border-b">
+      <div className="bg-white rounded-lg shadow-sm border h-full flex flex-col">
+        {/* Day Header - Fixed */}
+        <div className="flex items-center justify-between p-4 border-b flex-shrink-0">
           <div className="flex items-center space-x-4">
             <h2 className="text-xl font-semibold text-gray-900">
               {format(currentDate, 'EEEE, MMMM d, yyyy')}
@@ -322,9 +322,9 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           </button>
         </div>
 
-        {/* Day Schedule */}
-        <div className="flex">
-          <div className="w-16 border-r">
+        {/* Day Schedule - Scrollable */}
+        <div className="flex flex-1 overflow-y-auto">
+          <div className="w-16 border-r flex-shrink-0">
             {hours.map(hour => (
               <div key={hour} className="h-16 border-b flex items-center justify-center text-sm text-gray-500">
                 {hour === 0 ? '12 AM' : hour < 12 ? `${hour} AM` : hour === 12 ? '12 PM' : `${hour - 12} PM`}
@@ -335,25 +335,30 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           <div className="flex-1 relative">
             {hours.map(hour => (
               <div key={hour} className="h-16 border-b border-gray-100 relative">
-                {dayBookings
-                  .filter(booking => new Date(booking.appointmentDate).getHours() === hour)
-                  .map(booking => (
-                    <div
-                      key={booking.id}
-                      className={`absolute left-1 right-1 p-2 rounded border-l-4 ${getStatusColor(booking.status)} cursor-pointer hover:shadow-sm`}
-                      style={{
-                        top: `${(new Date(booking.appointmentDate).getMinutes() / 60) * 100}%`,
-                        height: `${(booking.service.duration / 60) * 100}%`,
-                      }}
-                    >
-                      <div className="flex items-center space-x-1 mb-1">
-                        {getStatusIcon(booking.status)}
-                        <span className="text-sm font-medium">{formatTime(booking.appointmentDate)}</span>
+                {/* Grid fills entire height */}
+                <div className="absolute inset-0 border-b border-gray-100"></div>
+                
+                {/* Bookings at bottom edge */}
+                <div className="absolute bottom-0 left-0 right-0 z-10 transform translate-y-full">
+                  {dayBookings
+                    .filter(booking => new Date(booking.appointmentDate).getHours() === hour)
+                    .map(booking => (
+                      <div
+                        key={booking.id}
+                        className={`mx-1 p-2 rounded border-l-4 ${getStatusColor(booking.status)} cursor-pointer hover:shadow-md transition-shadow`}
+                        style={{
+                          minHeight: `${Math.min((booking.service.duration / 60) * 64, 48)}px`,
+                        }}
+                      >
+                        <div className="flex items-center space-x-1 mb-1">
+                          {getStatusIcon(booking.status)}
+                          <span className="text-xs font-medium">{formatTime(booking.appointmentDate)}</span>
+                        </div>
+                        <div className="text-xs font-semibold truncate">{booking.service.name}</div>
+                        <div className="text-xs opacity-75 truncate">{booking.business.name}</div>
                       </div>
-                      <div className="text-sm font-semibold">{booking.service.name}</div>
-                      <div className="text-xs opacity-75">{booking.business.name}</div>
-                    </div>
-                  ))}
+                    ))}
+                </div>
               </div>
             ))}
           </div>

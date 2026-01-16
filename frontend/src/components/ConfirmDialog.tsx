@@ -43,8 +43,8 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
 
           {/* Content */}
           <div className="p-6">
-            <div className="flex items-center justify-center w-12 h-12 mx-auto mb-4 rounded-full bg-orange-100">
-              <AlertCircle className="h-6 w-6 text-orange-600" />
+            <div className="flex items-center justify-center w-12 h-12 mx-auto mb-4 rounded-full bg-accent-100">
+              <AlertCircle className="h-6 w-6 text-accent-600" />
             </div>
             
             <h3 className="text-lg font-semibold text-gray-900 text-center mb-2">
@@ -59,13 +59,13 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
             <div className="flex gap-3">
               <button
                 onClick={onCancel}
-                className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 transition-colors"
+                className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-accent-500 transition-colors"
               >
                 {cancelText}
               </button>
               <button
                 onClick={onConfirm}
-                className="flex-1 px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-md hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 transition-colors"
+                className="flex-1 px-4 py-2 text-sm font-medium text-white bg-accent-500 rounded-md hover:bg-accent-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-accent-500 transition-colors"
               >
                 {confirmText}
               </button>

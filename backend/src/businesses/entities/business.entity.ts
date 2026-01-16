@@ -4,6 +4,7 @@ import { User } from '../../users/entities/user.entity';
 import { Service } from '../../services/entities/service.entity';
 import { Booking } from '../../bookings/entities/booking.entity';
 import { Review } from '../../reviews/entities/review.entity';
+import { Resource } from '../../resources/entities/resource.entity';
 
 export enum BusinessStatus {
   PENDING = 'pending',
@@ -101,7 +102,7 @@ export class Business extends BaseEntity {
   @Column({ nullable: true })
   qrCode: string;
 
-  @Column({ default: 0 })
+  @Column({ type: 'decimal', precision: 3, scale: 1, default: 0 })
   rating: number;
 
   @Column({ default: 0 })
@@ -146,6 +147,17 @@ export class Business extends BaseEntity {
   @Column({ nullable: true })
   verificationNotes?: string;
 
+  // Unsuspension request tracking
+  @Column({ nullable: true })
+  unsuspensionRequestedAt?: Date;
+
+  @Column({ type: 'text', nullable: true })
+  unsuspensionRequestReason?: string;
+
+  // Resource-based booking
+  @Column({ default: false })
+  requiresResources: boolean;
+
   // Relations
   @OneToOne(() => User, user => user.business)
   @JoinColumn()
@@ -159,4 +171,7 @@ export class Business extends BaseEntity {
 
   @OneToMany(() => Review, review => review.business)
   reviews: Review[];
+
+  @OneToMany(() => Resource, resource => resource.business)
+  resources: Resource[];
 }

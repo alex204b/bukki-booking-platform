@@ -65,7 +65,7 @@ export const BusinessDetail: React.FC = () => {
   if (businessLoading) {
     return (
       <div className="flex justify-center py-12">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-accent-500"></div>
       </div>
     );
   }
@@ -103,7 +103,7 @@ export const BusinessDetail: React.FC = () => {
                 <div className="flex items-center mb-4">
                   <Star className="h-5 w-5 text-yellow-400 fill-current" />
                   <span className="text-lg font-medium text-gray-900 ml-1">
-                    {business.rating.toFixed(1)}
+                    {Number(business.rating || 0).toFixed(1)}
                   </span>
                   <span className="text-gray-500 ml-2">
                     ({business.reviewCount} reviews)
@@ -125,7 +125,7 @@ export const BusinessDetail: React.FC = () => {
               {business.phone && (
                 <div className="flex items-center text-gray-600">
                   <Phone className="h-5 w-5 mr-2" />
-                  <a href={`tel:${business.phone}`} className="hover:text-primary-600">
+                  <a href={`tel:${business.phone}`} className="hover:text-accent-600">
                     {business.phone}
                   </a>
                 </div>
@@ -134,7 +134,7 @@ export const BusinessDetail: React.FC = () => {
               {business.email && (
                 <div className="flex items-center text-gray-600">
                   <span className="mr-2">📧</span>
-                  <a href={`mailto:${business.email}`} className="hover:text-primary-600">
+                  <a href={`mailto:${business.email}`} className="hover:text-accent-600">
                     {business.email}
                   </a>
                 </div>
@@ -147,7 +147,7 @@ export const BusinessDetail: React.FC = () => {
                     href={business.website} 
                     target="_blank" 
                     rel="noopener noreferrer"
-                    className="hover:text-primary-600"
+                    className="hover:text-accent-600"
                   >
                     Visit Website
                   </a>
@@ -191,7 +191,7 @@ export const BusinessDetail: React.FC = () => {
                     </div>
                   </div>
                   <div className="text-right">
-                    <p className="text-2xl font-bold text-primary-600">
+                    <p className="text-2xl font-bold text-accent-500">
                       {formatPrice(service.price)}
                     </p>
                   </div>
@@ -204,7 +204,7 @@ export const BusinessDetail: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center text-sm text-gray-500">
                     <Star className="h-4 w-4 text-yellow-400 fill-current mr-1" />
-                    <span>{service.rating.toFixed(1)}</span>
+                    <span>{Number(service.rating || 0).toFixed(1)}</span>
                     <span className="ml-1">({service.reviewCount} reviews)</span>
                   </div>
                   

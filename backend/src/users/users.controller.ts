@@ -39,6 +39,23 @@ export class UsersController {
     return this.usersService.findAllPaginated(paginationDto, role);
   }
 
+  @Get('search')
+  @ApiOperation({ summary: 'Search for users by email (Business owners only)' })
+  @ApiResponse({ status: 200, description: 'User found' })
+  @ApiQuery({ name: 'email', required: true, type: String })
+  async searchByEmail(
+    @Query('email') email: string,
+    @Request() req,
+  ) {
+    // Only business owners and employees can search for users
+    if (req.user.role !== UserRole.BUSINESS_OWNER && req.user.role !== UserRole.EMPLOYEE) {
+      throw new Error('Unauthorized');
+    }
+    
+    const user = await this.usersService.findByEmail(email);
+    return user ? [user] : [];
+  }
+
   @Get('profile')
   @ApiOperation({ summary: 'Get current user profile' })
   @ApiResponse({ status: 200, description: 'Profile retrieved successfully' })

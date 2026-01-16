@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from 'react-query';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider } from './contexts/AuthContext';
 import { I18nProvider } from './contexts/I18nContext';
+import { SocketProvider } from './contexts/SocketContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import MotifBackground from './components/MotifBackground';
 import DecorativeBackground from './components/DecorativeBackground';
@@ -36,6 +37,7 @@ import { CreateOffer } from './pages/CreateOffer';
 import InfoPage from './pages/InfoPage';
 import { TermsOfService } from './pages/TermsOfService';
 import { PrivacyPolicy } from './pages/PrivacyPolicy';
+import ResponsiveExample from './components/ResponsiveExample';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -59,8 +61,9 @@ function App() {
       <QueryClientProvider client={queryClient}>
         <I18nProvider>
           <AuthProvider>
-            <Router>
-          <div className="min-h-screen bg-background">
+            <SocketProvider>
+              <Router>
+          <div className="min-h-screen bg-white">
             <MotifBackground density="low" />
             <DecorativeBackground 
               density="medium" 
@@ -87,7 +90,16 @@ function App() {
                   </Layout>
                 </ProtectedRoute>
               } />
-              
+
+              {/* Responsive Design Example - For Testing */}
+              <Route path="/responsive-example" element={
+                <ProtectedRoute>
+                  <Layout>
+                    <ResponsiveExample />
+                  </Layout>
+                </ProtectedRoute>
+              } />
+
               {/* Protected Routes */}
               <Route path="/" element={
                 <ProtectedRoute>
@@ -280,7 +292,8 @@ function App() {
               }}
             />
           </div>
-            </Router>
+              </Router>
+            </SocketProvider>
           </AuthProvider>
         </I18nProvider>
       </QueryClientProvider>

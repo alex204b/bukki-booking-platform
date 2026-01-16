@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { Repository, In, DataSource } from 'typeorm';
+import { InjectDataSource } from '@nestjs/typeorm';
 import * as QRCode from 'qrcode';
 import { Booking, BookingStatus } from './entities/booking.entity';
 import { Service } from '../services/entities/service.entity';
@@ -27,6 +28,8 @@ export class BookingsService {
     private userRepository: Repository<User>,
     @InjectRepository(BusinessMember)
     private businessMemberRepository: Repository<BusinessMember>,
+    @InjectDataSource()
+    private dataSource: DataSource,
     private reviewsService: ReviewsService,
     private emailService: EmailService,
     private trustScoreService: TrustScoreService,
@@ -34,27 +37,116 @@ export class BookingsService {
     private messagesService: MessagesService,
   ) {}
 
+  async getBusinessBookings(businessId: string): Promise<Booking[]> {
+    console.log(`[BookingsService] getBusinessBookings for businessId: ${businessId}`);
+
+    const bookings = await this.bookingRepository.find({
+      where: {
+        business: { id: businessId }
+      },
+      relations: ['customer', 'business', 'service'],
+      order: { appointmentDate: 'DESC' },
+    });
+
+    console.log(`[BookingsService] Found ${bookings.length} bookings for business ${businessId}`);
+    return bookings;
+  }
+
+  async debugGetRawBookings(businessId: string): Promise<any> {
+    console.log(`[BookingsService] DEBUG: Getting raw bookings for businessId: ${businessId}`);
+
+    // Get all bookings without filters
+    const allBookings = await this.dataSource.query(
+      `SELECT id, "businessId", "customerId", status, "appointmentDate", "createdAt" FROM bookings WHERE "deletedAt" IS NULL LIMIT 100`
+    );
+
+    console.log(`[BookingsService] DEBUG: Total bookings in database: ${allBookings.length}`);
+
+    // Get bookings for this specific business
+    const businessBookings = await this.dataSource.query(
+      `SELECT b.id, b."businessId", b."customerId", b.status, b."appointmentDate",
+              c."firstName" as "customerFirstName", c."lastName" as "customerLastName",
+              s.name as "serviceName", bus.name as "businessName"
+       FROM bookings b
+       LEFT JOIN users c ON b."customerId" = c.id
+       LEFT JOIN services s ON b."serviceId" = s.id
+       LEFT JOIN businesses bus ON b."businessId" = bus.id
+       WHERE b."businessId" = $1 AND b."deletedAt" IS NULL`,
+      [businessId]
+    );
+
+    console.log(`[BookingsService] DEBUG: Bookings for business ${businessId}: ${businessBookings.length}`);
+
+    // Get all distinct businessIds in bookings table
+    const distinctBusinessIds = await this.dataSource.query(
+      `SELECT DISTINCT "businessId", COUNT(*) as count FROM bookings WHERE "deletedAt" IS NULL GROUP BY "businessId"`
+    );
+
+    return {
+      totalBookings: allBookings.length,
+      businessBookingsCount: businessBookings.length,
+      businessBookings: businessBookings,
+      allBookings: allBookings.slice(0, 10), // First 10 for reference
+      distinctBusinessIds: distinctBusinessIds,
+      searchedBusinessId: businessId,
+    };
+  }
+
   async create(createBookingDto: any, customerId: string): Promise<Booking | Booking[]> {
-    const { 
-      serviceId, 
-      appointmentDate, 
-      customFieldValues, 
+    const {
+      serviceId,
+      appointmentDate,
+      appointmentEndDate, // Optional: for custom duration (multi-slot selection)
+      resourceId,
+      partySize,
+      customFieldValues,
       notes,
       isRecurring,
       recurrencePattern,
       recurrenceEndDate,
     } = createBookingDto;
 
-    // Require verified email before booking
-    const customer = await this.userRepository.findOne({ where: { id: customerId } });
-    if (!customer || customer.emailVerified !== true) {
-      throw new BadRequestException('Please verify your email before making a booking.');
+    // Handle customer email (for business owners creating bookings)
+    let actualCustomerId = customerId;
+    
+    // Check if customerId is actually an email address
+    if (customerId.includes('@')) {
+      const email = customerId;
+      
+      // Try to find existing customer by email
+      let existingCustomer = await this.userRepository.findOne({ where: { email } });
+      
+      if (existingCustomer) {
+        actualCustomerId = existingCustomer.id;
+        console.log(`[BookingsService] Found existing customer: ${email} -> ${actualCustomerId}`);
+      } else {
+        // Customer doesn't exist - create a minimal customer account
+        const newCustomer = this.userRepository.create({
+          email,
+          firstName: email.split('@')[0],
+          lastName: 'Customer',
+          role: 'customer' as any,
+          emailVerified: false,
+          password: null, // No password - they'll need to reset if they want to login
+        });
+        
+        const savedCustomer = await this.userRepository.save(newCustomer);
+        actualCustomerId = savedCustomer.id;
+        console.log(`[BookingsService] Created new customer: ${email} -> ${actualCustomerId}`);
+      }
     }
+
+    // Get customer
+    const customer = await this.userRepository.findOne({ where: { id: actualCustomerId } });
+    if (!customer) {
+      throw new BadRequestException('Customer not found.');
+    }
+    // Email verification is optional - allows phone bookings by business owners
 
     // Get service and business details
     const service = await this.serviceRepository.findOne({
       where: { id: serviceId },
-      relations: ['business'],
+      relations: ['business', 'business.owner', 'resources'],
     });
 
     if (!service) {
@@ -73,73 +165,142 @@ export class BookingsService {
 
     // Check daily booking limit for this user and business (max 2 per day)
     const business = service.business;
+
+    // Resource validation and selection
+    let selectedResource: any = null;
+
+    // Check if business requires resources
+    if (business.requiresResources) {
+      const resourceCount = await this.dataSource.query(
+        'SELECT COUNT(*) as count FROM resources WHERE "businessId" = $1 AND "deletedAt" IS NULL',
+        [business.id]
+      );
+
+      if (parseInt(resourceCount[0]?.count) === 0) {
+        throw new BadRequestException(
+          'This business has not completed resource setup. Please contact them directly.'
+        );
+      }
+    }
+
+    // Validate resource selection
+    if (service.requireResourceSelection && !resourceId) {
+      throw new BadRequestException(
+        'Please select a staff member or resource for this service.'
+      );
+    }
+
+    if (resourceId) {
+      const resourceResult = await this.dataSource.query(
+        `SELECT * FROM resources
+         WHERE id = $1
+         AND "businessId" = $2
+         AND "isActive" = true
+         AND "deletedAt" IS NULL`,
+        [resourceId, business.id]
+      );
+
+      if (!resourceResult || resourceResult.length === 0) {
+        throw new BadRequestException('Selected resource is not available.');
+      }
+
+      selectedResource = resourceResult[0];
+
+      // Validate table capacity
+      if (selectedResource.type === 'table' && partySize) {
+        if (!selectedResource.capacity || selectedResource.capacity < partySize) {
+          throw new BadRequestException(
+            `Selected table can only accommodate ${selectedResource.capacity} people.`
+          );
+        }
+      }
+    }
+
+    // Auto-assign table if needed
     const appointmentStart = new Date(appointmentDate);
-    
-    // Get the start and end of the selected date (not today)
-    const selectedDateStart = new Date(appointmentStart);
-    selectedDateStart.setHours(0, 0, 0, 0);
-    const selectedDateEnd = new Date(appointmentStart);
-    selectedDateEnd.setHours(23, 59, 59, 999);
+    // Use provided end date or calculate from service duration
+    const appointmentEnd = appointmentEndDate 
+      ? new Date(appointmentEndDate)
+      : new Date(appointmentStart.getTime() + service.duration * 60000);
 
-    const userBookingsOnSelectedDate = await this.bookingRepository
-      .createQueryBuilder('booking')
-      .leftJoin('booking.customer', 'customer')
-      .leftJoin('booking.business', 'business')
-      .where('customer.id = :customerId', { customerId })
-      .andWhere('business.id = :businessId', { businessId: business.id })
-      .andWhere('booking.appointmentDate >= :selectedDateStart', { selectedDateStart })
-      .andWhere('booking.appointmentDate <= :selectedDateEnd', { selectedDateEnd })
-      .andWhere('booking.status IN (:...statuses)', { statuses: ['pending', 'confirmed'] })
-      .getCount();
+    if (service.resourceType === 'table' && !resourceId && partySize) {
+      selectedResource = await this.findAvailableTable(
+        business.id,
+        appointmentStart,
+        appointmentEnd,
+        partySize
+      );
 
-    if (userBookingsOnSelectedDate >= 2) {
-      throw new BadRequestException(`You have reached the maximum number of bookings (2) for this business on ${appointmentStart.toLocaleDateString()}.`);
+      if (!selectedResource) {
+        throw new BadRequestException(
+          `No tables available for ${partySize} people at this time.`
+        );
+      }
     }
 
-    // Check if the time slot is available - check for overlapping bookings
-    const appointmentEnd = new Date(appointmentStart.getTime() + service.duration * 60000);
-    // Check for exact time slot conflicts - simpler approach
-    const existingBooking = await this.bookingRepository.findOne({
-      where: {
-        service: { id: serviceId },
-        appointmentDate: appointmentStart,
-        status: In(['pending', 'confirmed'])
-      },
-      relations: ['service', 'customer', 'business']
-    });
+    // Validate booking limitations based on service rules
+    await this.validateBookingLimitations(service, customerId, business.id, appointmentStart);
 
-    if (existingBooking) {
-      throw new BadRequestException('This exact time slot is already booked');
-    }
+    // Check resource conflicts
+    if (selectedResource) {
+      const resourceConflict = await this.bookingRepository
+        .createQueryBuilder('booking')
+        .where('booking.resourceId = :resourceId', { resourceId: selectedResource.id })
+        .andWhere('booking.status IN (:...statuses)', {
+          statuses: ['pending', 'confirmed']
+        })
+        .andWhere('booking.appointmentDate < :endTime', { endTime: appointmentEnd })
+        .andWhere('booking.appointmentEndDate > :startTime', { startTime: appointmentStart })
+        .getOne();
 
-    // Also check for overlapping bookings
-    const overlappingBookings = await this.bookingRepository
-      .createQueryBuilder('booking')
-      .leftJoinAndSelect('booking.service', 'service')
-      .leftJoinAndSelect('booking.customer', 'customer')
-      .leftJoinAndSelect('booking.business', 'business')
-      .where('service.id = :serviceId', { serviceId })
-      .andWhere('booking.status IN (:...statuses)', { statuses: ['pending', 'confirmed'] })
-      .andWhere('booking.appointmentDate >= :startOfDay', { 
-        startOfDay: new Date(appointmentStart.getFullYear(), appointmentStart.getMonth(), appointmentStart.getDate(), 0, 0, 0)
-      })
-      .andWhere('booking.appointmentDate < :endOfDay', { 
-        endOfDay: new Date(appointmentStart.getFullYear(), appointmentStart.getMonth(), appointmentStart.getDate() + 1, 0, 0, 0)
-      })
-      .getMany();
-    
-    // Check for overlaps manually
-    const hasOverlap = overlappingBookings.some(booking => {
-      const bookingStart = new Date(booking.appointmentDate);
-      const bookingEnd = new Date(bookingStart.getTime() + booking.service.duration * 60000);
-      
-      // Check for overlap
-      return (appointmentStart < bookingEnd && appointmentEnd > bookingStart);
-    });
+      if (resourceConflict) {
+        throw new BadRequestException(
+          'This resource is already booked for the selected time.'
+        );
+      }
+    } else {
+      // Fallback: Check for service time slot conflicts (for non-resource bookings)
+      const existingBooking = await this.bookingRepository.findOne({
+        where: {
+          service: { id: serviceId },
+          appointmentDate: appointmentStart,
+          status: In(['pending', 'confirmed'])
+        },
+        relations: ['service', 'customer', 'business']
+      });
 
-    
-    if (hasOverlap) {
-      throw new BadRequestException('This time slot overlaps with an existing booking');
+      if (existingBooking) {
+        throw new BadRequestException('This exact time slot is already booked');
+      }
+
+      // Also check for overlapping bookings
+      const overlappingBookings = await this.bookingRepository
+        .createQueryBuilder('booking')
+        .leftJoinAndSelect('booking.service', 'service')
+        .leftJoinAndSelect('booking.customer', 'customer')
+        .leftJoinAndSelect('booking.business', 'business')
+        .where('service.id = :serviceId', { serviceId })
+        .andWhere('booking.status IN (:...statuses)', { statuses: ['pending', 'confirmed'] })
+        .andWhere('booking.appointmentDate >= :startOfDay', {
+          startOfDay: new Date(appointmentStart.getFullYear(), appointmentStart.getMonth(), appointmentStart.getDate(), 0, 0, 0)
+        })
+        .andWhere('booking.appointmentDate < :endOfDay', {
+          endOfDay: new Date(appointmentStart.getFullYear(), appointmentStart.getMonth(), appointmentStart.getDate() + 1, 0, 0, 0)
+        })
+        .getMany();
+
+      // Check for overlaps manually
+      const hasOverlap = overlappingBookings.some(booking => {
+        const bookingStart = new Date(booking.appointmentDate);
+        const bookingEnd = new Date(bookingStart.getTime() + booking.service.duration * 60000);
+
+        // Check for overlap
+        return (appointmentStart < bookingEnd && appointmentEnd > bookingStart);
+      });
+
+      if (hasOverlap) {
+        throw new BadRequestException('This time slot overlaps with an existing booking');
+      }
     }
 
     // Handle recurring bookings
@@ -159,72 +320,188 @@ export class BookingsService {
       );
     }
 
-    // Create single booking
-    const booking = this.bookingRepository.create({
-      appointmentDate: appointmentStart,
-      appointmentEndDate: appointmentEnd,
-      customFieldValues,
-      notes,
-      isRecurring: false,
-      customer: { id: customerId },
-      business: { id: service.business.id },
-      service: { id: serviceId },
-    });
-
-    // Auto-accept if business configured
-    if (business.autoAcceptBookings) {
-      (booking as any).status = BookingStatus.CONFIRMED;
-    }
-    const savedBooking = await this.bookingRepository.save(booking);
-
-    // Send push notification to business owner about new booking
+    // Create single booking using raw SQL to ensure persistence
+    console.log(`[BookingsService] Creating booking...`);
+    console.log(`[BookingsService] Customer ID: ${customerId}, Business ID: ${service.business.id}, Service ID: ${serviceId}`);
+    console.log(`[BookingsService] Appointment Date: ${appointmentStart}, End Date: ${appointmentEnd}`);
+    
+    const bookingStatus = business.autoAcceptBookings ? BookingStatus.CONFIRMED : BookingStatus.PENDING;
+    const now = new Date();
+    
     try {
-      if (business.owner?.id) {
-        await this.pushNotificationService.sendToUser(
-          business.owner.id,
-          {
-            title: 'New Booking Request',
-            body: `${customer.firstName} ${customer.lastName} requested ${service.name}`,
-            data: {
-              type: 'booking_created',
-              bookingId: savedBooking.id,
-              businessId: business.id,
+      // CRITICAL: Use DataSource directly to ensure INSERT commits to database
+      const result = await this.dataSource.query(
+        `INSERT INTO bookings (
+          "appointmentDate",
+          "appointmentEndDate",
+          status,
+          "paymentStatus",
+          "totalAmount",
+          "customFieldValues",
+          notes,
+          "isRecurring",
+          "resourceId",
+          "partySize",
+          "customerId",
+          "businessId",
+          "serviceId",
+          "createdAt",
+          "updatedAt"
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+        )
+        RETURNING id, "createdAt", "updatedAt"`,
+        [
+          appointmentStart,
+          appointmentEnd,
+          bookingStatus,
+          'pending',
+          service.price || 0,
+          customFieldValues ? JSON.stringify(customFieldValues) : null,
+          notes || null,
+          false,
+          selectedResource?.id || null,
+          partySize || null,
+          customerId,
+          service.business.id,
+          serviceId,
+          now,
+          now,
+        ]
+      );
+
+      console.log(`[BookingsService] ✅ INSERT successful!`);
+      console.log(`[BookingsService] Result:`, result);
+
+      if (!result || result.length === 0) {
+        console.error(`[BookingsService] ❌ INSERT returned no result`);
+        throw new Error('Failed to create booking - no result returned');
+      }
+
+      const savedBookingId = result[0].id;
+      console.log(`[BookingsService] Inserted booking ID: ${savedBookingId}`);
+      console.log(`[BookingsService] Booking created with businessId: ${service.business.id} (type: ${typeof service.business.id})`);
+
+      // Verify the booking was actually saved
+      console.log(`[BookingsService] Verifying booking was saved...`);
+      const verification = await this.dataSource.query(
+        `SELECT id, "businessId", "businessId"::text as "businessIdText", "customerId", status FROM bookings WHERE id = $1`,
+        [savedBookingId]
+      );
+
+      if (!verification || verification.length === 0) {
+        console.error(`[BookingsService] ❌ CRITICAL: Booking not found after INSERT!`);
+        throw new Error('Booking was not saved to database');
+      }
+
+      console.log(`[BookingsService] ✅ Verification successful! Booking found in database`);
+      console.log(`[BookingsService] Verified booking businessId: ${verification[0].businessId} (text: ${verification[0].businessIdText})`);
+      console.log(`[BookingsService] Expected businessId: ${service.business.id}`);
+      console.log(`[BookingsService] BusinessId match: ${verification[0].businessId === service.business.id || verification[0].businessIdText === service.business.id}`);
+      
+      // Get the saved booking with relations
+      const savedBooking = await this.findOne(savedBookingId);
+      
+      if (!savedBooking) {
+        console.error(`[BookingsService] ❌ Booking not found via TypeORM after INSERT`);
+        // Return the raw data if TypeORM can't find it
+        return verification[0] as any;
+      }
+
+      console.log(`[BookingsService] ✅ Booking created successfully: ${savedBookingId}`);
+      
+      // Send push notification to business owner about new booking
+      try {
+        if (business.owner?.id) {
+          await this.pushNotificationService.sendToUser(
+            business.owner.id,
+            {
+              title: 'New Booking Request',
+              body: `${customer.firstName} ${customer.lastName} requested ${service.name}`,
+              data: {
+                type: 'booking_created',
+                bookingId: savedBookingId,
+                businessId: business.id,
+              },
+              clickAction: `/business-dashboard?booking=${savedBookingId}`,
             },
-            clickAction: `/business-dashboard?booking=${savedBooking.id}`,
-          },
-          'bookingUpdates',
+            'bookingUpdates',
+          );
+        }
+      } catch (error) {
+        console.error('Failed to send push notification for new booking:', error);
+        // Don't throw - notification failure shouldn't break booking creation
+      }
+
+      // Notify business owner and active members via email
+      try {
+        const b = await this.businessRepository.findOne({ where: { id: service.business.id }, relations: ['owner'] });
+        const recipients: string[] = [];
+        if (b?.owner?.email) recipients.push(b.owner.email);
+        // Include ACTIVE staff emails
+        const activeMembers = await this.businessMemberRepository.find({
+          where: { business: { id: service.business.id }, status: BusinessMemberStatus.ACTIVE } as any,
+          relations: ['user'],
+        });
+        for (const m of activeMembers) {
+          if (m.user?.email) recipients.push(m.user.email);
+        }
+        await this.emailService.sendNewBookingNotification(recipients, {
+          businessName: b?.name || 'Your Business',
+          serviceName: service.name,
+          appointmentDate: appointmentStart.toLocaleString(),
+        });
+      } catch {}
+
+      // Generate QR code for the booking
+      let qrCodeData = null;
+      try {
+        qrCodeData = await this.generateBookingQRCode(savedBookingId);
+        await this.dataSource.query(
+          `UPDATE bookings SET "qrCode" = $1, "updatedAt" = $2 WHERE id = $3`,
+          [qrCodeData, new Date(), savedBookingId]
         );
+        console.log(`[BookingsService] QR code generated and saved`);
+      } catch (error) {
+        console.error(`[BookingsService] Failed to generate QR code:`, error);
+        // Don't throw - QR code failure shouldn't break booking creation
       }
-    } catch (error) {
-      console.error('Failed to send push notification for new booking:', error);
-      // Don't throw - notification failure shouldn't break booking creation
+
+      // Send confirmation email to customer with QR code
+      try {
+        const fullBooking = await this.findOne(savedBookingId);
+        await this.emailService.sendBookingConfirmation(
+          customer.email,
+          {
+            customer: {
+              firstName: customer.firstName,
+              lastName: customer.lastName,
+            },
+            service: {
+              name: service.name,
+              duration: service.duration,
+            },
+            business: {
+              name: service.business.name,
+              address: service.business.address,
+              phone: service.business.phone,
+            },
+            appointmentDate: appointmentStart,
+            totalAmount: service.price || 0,
+          },
+        );
+        console.log(`[BookingsService] Confirmation email sent to ${customer.email}`);
+      } catch (error) {
+        console.error(`[BookingsService] Failed to send confirmation email:`, error);
+        // Don't throw - email failure shouldn't break booking creation
+      }
+
+      return savedBooking;
+    } catch (error: any) {
+      console.error(`[BookingsService] ❌ Error creating booking:`, error);
+      console.error(`[BookingsService] Error stack:`, error.stack);
+      throw error;
     }
-
-    // Notify business owner and active members via email
-    try {
-      const b = await this.businessRepository.findOne({ where: { id: service.business.id }, relations: ['owner'] });
-      const recipients: string[] = [];
-      if (b?.owner?.email) recipients.push(b.owner.email);
-      // Include ACTIVE staff emails
-      const activeMembers = await this.businessMemberRepository.find({
-        where: { business: { id: service.business.id }, status: BusinessMemberStatus.ACTIVE } as any,
-        relations: ['user'],
-      });
-      for (const m of activeMembers) {
-        if (m.user?.email) recipients.push(m.user.email);
-      }
-      await this.emailService.sendNewBookingNotification(recipients, {
-        businessName: b?.name || 'Your Business',
-        serviceName: service.name,
-        appointmentDate: appointmentStart.toLocaleString(),
-      });
-    } catch {}
-
-    // Generate QR code for the booking
-    const qrCodeData = await this.generateBookingQRCode(savedBooking.id);
-    await this.bookingRepository.update(savedBooking.id, { qrCode: qrCodeData });
-
-    return this.findOne(savedBooking.id);
   }
 
   async findAll(userId?: string, userRole?: string): Promise<Booking[]> {
@@ -239,25 +516,6 @@ export class BookingsService {
         where: { customer: { id: userId } },
         relations: ['customer', 'business', 'service'],
         order: { appointmentDate: 'DESC' },
-        select: {
-          customer: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            phone: true,
-          },
-          business: {
-            id: true,
-            name: true,
-            category: true,
-          },
-          service: {
-            id: true,
-            name: true,
-            duration: true,
-          },
-        },
       });
       
       // Then get bookings for their business
@@ -305,25 +563,6 @@ export class BookingsService {
         where: { business: { id: In(businessIds) } } as any,
         relations: ['customer', 'business', 'service'],
         order: { appointmentDate: 'DESC' },
-        select: {
-          customer: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            phone: true,
-          },
-          business: {
-            id: true,
-            name: true,
-            category: true,
-          },
-          service: {
-            id: true,
-            name: true,
-            duration: true,
-          },
-        },
       });
     }
     
@@ -339,25 +578,6 @@ export class BookingsService {
       where,
       relations: ['customer', 'business', 'service'],
       order: { appointmentDate: 'DESC' },
-      select: {
-        customer: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          email: true,
-          phone: true,
-        },
-        business: {
-          id: true,
-          name: true,
-          category: true,
-        },
-        service: {
-          id: true,
-          name: true,
-          duration: true,
-        },
-      },
     });
   }
 
@@ -368,102 +588,307 @@ export class BookingsService {
     businessId?: string,
     status?: BookingStatus,
   ): Promise<PaginatedResult<Booking>> {
+    console.log(`[BookingsService] findAllPaginated called`);
+    console.log(`[BookingsService] userId: ${userId}, userRole: ${userRole}, businessId: ${businessId}, status: ${status}`);
+    
     const { limit = 20, offset = 0, sortBy = 'appointmentDate', sortOrder = 'DESC' } = paginationDto || {};
+    const validSortBy = ['appointmentDate', 'createdAt', 'status'].includes(sortBy) ? sortBy : 'appointmentDate';
+    const validSortOrder = sortOrder === 'ASC' ? 'ASC' : 'DESC';
 
-    // Build base query
-    const queryBuilder = this.bookingRepository
-      .createQueryBuilder('booking')
-      .leftJoinAndSelect('booking.customer', 'customer')
-      .leftJoinAndSelect('booking.business', 'business')
-      .leftJoinAndSelect('booking.service', 'service');
-
-    // Apply role-based filtering
-    if (userRole === 'customer') {
-      queryBuilder.where('customer.id = :userId', { userId });
-    } else if (userRole === 'business_owner') {
-      // Get business IDs owned by user
-      const ownedBusiness = await this.businessRepository.findOne({
-        where: { owner: { id: userId } },
-      });
-
-      if (ownedBusiness) {
-        queryBuilder.where(
-          '(customer.id = :userId OR business.id = :businessId)',
-          { userId, businessId: ownedBusiness.id }
+    try {
+      // First, verify bookings exist in database
+      const testQuery = await this.dataSource.query(`SELECT COUNT(*) as count FROM bookings WHERE "deletedAt" IS NULL`);
+      console.log(`[BookingsService] Total bookings in database: ${testQuery[0]?.count || 0}`);
+      
+      // If businessId is provided, check if there are bookings for that business
+      if (businessId) {
+        console.log(`[BookingsService] Checking bookings for businessId: ${businessId} (type: ${typeof businessId})`);
+        
+        // First, check ALL bookings to see what businessIds exist
+        const allBusinessIds = await this.dataSource.query(
+          `SELECT DISTINCT "businessId", COUNT(*) as count FROM bookings WHERE "deletedAt" IS NULL GROUP BY "businessId"`
         );
-      } else {
-        queryBuilder.where('customer.id = :userId', { userId });
+        console.log(`[BookingsService] All businessIds in bookings table:`, allBusinessIds);
+        
+        // Check with exact match
+        const businessBookingsCount = await this.dataSource.query(
+          `SELECT COUNT(*) as count FROM bookings WHERE "businessId" = $1 AND "deletedAt" IS NULL`,
+          [businessId]
+        );
+        console.log(`[BookingsService] Bookings for business ${businessId}: ${businessBookingsCount[0]?.count || 0}`);
+        
+        // Check with text comparison (in case of UUID format issues)
+        const businessBookingsCountText = await this.dataSource.query(
+          `SELECT COUNT(*) as count FROM bookings WHERE "businessId"::text = $1 AND "deletedAt" IS NULL`,
+          [businessId]
+        );
+        console.log(`[BookingsService] Bookings for business (text match) ${businessId}: ${businessBookingsCountText[0]?.count || 0}`);
+        
+        // Also check a sample booking to see the structure
+        const sampleBooking = await this.dataSource.query(
+          `SELECT id, "businessId", "businessId"::text as "businessIdText", "customerId", status, "appointmentDate" FROM bookings WHERE "deletedAt" IS NULL LIMIT 5`,
+          []
+        );
+        if (sampleBooking && sampleBooking.length > 0) {
+          console.log(`[BookingsService] Sample bookings (first 5):`, sampleBooking);
+          console.log(`[BookingsService] Looking for businessId: ${businessId}`);
+          const matching = sampleBooking.filter((b: any) => b.businessId === businessId || b.businessIdText === businessId);
+          console.log(`[BookingsService] Matching bookings in sample:`, matching.length);
+        } else {
+          console.log(`[BookingsService] ⚠️ No bookings found in database at all!`);
+        }
       }
-    } else if (userRole === 'employee') {
-      // Get business IDs where user is an active member
-      const employeeMemberships = await this.businessMemberRepository.find({
-        where: {
-          user: { id: userId },
-          status: BusinessMemberStatus.ACTIVE
-        } as any,
-        relations: ['business'],
+      
+      // Build WHERE conditions
+      const whereConditions: string[] = [];
+      const queryParams: any[] = [];
+      let paramIndex = 1;
+
+      // If businessId is explicitly provided, use ONLY that filter (skip role-based filtering)
+      if (businessId) {
+        console.log(`[BookingsService] businessId filter provided: ${businessId} (type: ${typeof businessId}) - filtering by business only`);
+        // Use UUID comparison - PostgreSQL handles this correctly
+        whereConditions.push(`b."businessId" = $${paramIndex++}::uuid`);
+        queryParams.push(businessId);
+        console.log(`[BookingsService] Added WHERE condition: b."businessId" = $${paramIndex - 1}::uuid with value: ${businessId}`);
+      } else {
+        // Role-based filtering (only when businessId is NOT provided)
+        if (userRole === 'customer' && userId) {
+          whereConditions.push(`b."customerId" = $${paramIndex++}`);
+          queryParams.push(userId);
+        } else if (userRole === 'business_owner' && userId) {
+          // Get business owned by user
+          const ownedBusiness = await this.dataSource.query(
+            `SELECT id FROM businesses WHERE "ownerId" = $1 LIMIT 1`,
+            [userId]
+          );
+          
+          console.log(`[BookingsService] Business owner - owned business:`, ownedBusiness);
+          
+          if (ownedBusiness && ownedBusiness.length > 0) {
+            const userBusinessId = ownedBusiness[0].id;
+            console.log(`[BookingsService] Business owner's business ID: ${userBusinessId}`);
+            // Show bookings for their business OR bookings they made as customers
+            whereConditions.push(`(b."customerId" = $${paramIndex++} OR b."businessId" = $${paramIndex++})`);
+            queryParams.push(userId, userBusinessId);
+            console.log(`[BookingsService] Added business owner filter: customer OR business bookings`);
+          } else {
+            console.log(`[BookingsService] Business owner has no business, showing only customer bookings`);
+            whereConditions.push(`b."customerId" = $${paramIndex++}`);
+            queryParams.push(userId);
+          }
+        } else if (userRole === 'employee' && userId) {
+          // Get businesses where user is an active member
+          const memberships = await this.dataSource.query(
+            `SELECT "businessId" FROM "business_members" WHERE "userId" = $1 AND status = $2`,
+            [userId, BusinessMemberStatus.ACTIVE]
+          );
+          
+          if (memberships && memberships.length > 0) {
+            const businessIds = memberships.map((m: any) => m.businessId);
+            if (businessIds.length === 1) {
+              whereConditions.push(`b."businessId" = $${paramIndex++}`);
+              queryParams.push(businessIds[0]);
+            } else {
+              // Use IN clause for multiple business IDs
+              const placeholders = businessIds.map((_, i) => `$${paramIndex + i}`).join(', ');
+              whereConditions.push(`b."businessId" IN (${placeholders})`);
+              queryParams.push(...businessIds);
+              paramIndex += businessIds.length;
+            }
+          } else {
+            // No businesses, return empty result
+            console.log(`[BookingsService] Employee has no business memberships`);
+            return createPaginatedResponse([], 0, limit, offset);
+          }
+        }
+        // For super_admin, no additional filtering
+      }
+
+      // Apply status filter if provided
+      if (status) {
+        whereConditions.push(`b.status = $${paramIndex++}`);
+        queryParams.push(status);
+      }
+
+      // Exclude soft-deleted bookings
+      whereConditions.push(`b."deletedAt" IS NULL`);
+
+      const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+
+      // Build the main query - use simpler approach without json_build_object to avoid issues
+      const bookingsQuery = `
+        SELECT
+          b.*,
+          c.id as "customer_id",
+          c."firstName" as "customer_firstName",
+          c."lastName" as "customer_lastName",
+          c.email as "customer_email",
+          c.phone as "customer_phone",
+          bus.id as "business_id",
+          bus.name as "business_name",
+          bus.category as "business_category",
+          bus.images as "business_images",
+          bus.address as "business_address",
+          bus.city as "business_city",
+          s.id as "service_id",
+          s.name as "service_name",
+          s.duration as "service_duration"
+        FROM bookings b
+        LEFT JOIN users c ON b."customerId" = c.id
+        LEFT JOIN businesses bus ON b."businessId" = bus.id
+        LEFT JOIN services s ON b."serviceId" = s.id
+        ${whereClause}
+        ORDER BY b."${validSortBy}" ${validSortOrder}
+        LIMIT $${paramIndex++} OFFSET $${paramIndex++}
+      `;
+
+      queryParams.push(limit, offset);
+
+      // Get total count
+      const countQuery = `
+        SELECT COUNT(*) as total
+        FROM bookings b
+        ${whereClause}
+      `;
+      const countParams = queryParams.slice(0, -2); // Remove limit and offset
+
+      console.log(`[BookingsService] Executing bookings query...`);
+      console.log(`[BookingsService] WHERE clause:`, whereClause);
+      console.log(`[BookingsService] Query params:`, queryParams);
+      console.log(`[BookingsService] Full query:`, bookingsQuery.replace(/\s+/g, ' ').substring(0, 200));
+      
+      const [bookings, countResult] = await Promise.all([
+        this.dataSource.query(bookingsQuery, queryParams).catch((err) => {
+          console.error(`[BookingsService] ❌ SQL Error in bookings query:`, err);
+          console.error(`[BookingsService] Error details:`, {
+            message: err.message,
+            code: err.code,
+            detail: err.detail,
+            hint: err.hint,
+          });
+          throw err;
+        }),
+        this.dataSource.query(countQuery, countParams).catch((err) => {
+          console.error(`[BookingsService] ❌ SQL Error in count query:`, err);
+          throw err;
+        }),
+      ]);
+      
+      console.log(`[BookingsService] Raw bookings result:`, bookings.length, 'rows');
+      if (bookings.length > 0) {
+        console.log(`[BookingsService] Sample booking:`, {
+          id: bookings[0].id,
+          businessId: bookings[0].businessId,
+          customerId: bookings[0].customerId,
+          status: bookings[0].status,
+          appointmentDate: bookings[0].appointmentDate,
+        });
+      }
+
+      const total = parseInt(countResult[0]?.total || '0', 10);
+      
+      // Transform flat result into nested structure
+      const parsedBookings = bookings.map((booking: any) => {
+        // Build nested objects from flat columns
+        const parsed: any = {
+          ...booking,
+          customer: booking.customer_id ? {
+            id: booking.customer_id,
+            firstName: booking.customer_firstName,
+            lastName: booking.customer_lastName,
+            email: booking.customer_email,
+            phone: booking.customer_phone,
+          } : null,
+          business: booking.business_id ? {
+            id: booking.business_id,
+            name: booking.business_name,
+            category: booking.business_category,
+            images: booking.business_images || [],
+            address: booking.business_address,
+            city: booking.business_city,
+          } : null,
+          service: booking.service_id ? {
+            id: booking.service_id,
+            name: booking.service_name,
+            duration: booking.service_duration,
+          } : null,
+        };
+        
+        // Remove flat column names
+        delete parsed.customer_id;
+        delete parsed.customer_firstName;
+        delete parsed.customer_lastName;
+        delete parsed.customer_email;
+        delete parsed.customer_phone;
+        delete parsed.business_id;
+        delete parsed.business_name;
+        delete parsed.business_category;
+        delete parsed.business_images;
+        delete parsed.business_address;
+        delete parsed.business_city;
+        delete parsed.service_id;
+        delete parsed.service_name;
+        delete parsed.service_duration;
+        
+        // Parse JSON columns if they exist as strings
+        if (parsed.customFieldValues && typeof parsed.customFieldValues === 'string') {
+          try {
+            parsed.customFieldValues = JSON.parse(parsed.customFieldValues);
+          } catch (e) {
+            console.warn(`[BookingsService] Failed to parse customFieldValues:`, e);
+          }
+        }
+        if (parsed.paymentDetails && typeof parsed.paymentDetails === 'string') {
+          try {
+            parsed.paymentDetails = JSON.parse(parsed.paymentDetails);
+          } catch (e) {
+            console.warn(`[BookingsService] Failed to parse paymentDetails:`, e);
+          }
+        }
+        
+        return parsed;
       });
 
-      if (employeeMemberships.length > 0) {
-        const businessIds = employeeMemberships.map(m => m.business.id);
-        queryBuilder.where('business.id IN (:...businessIds)', { businessIds });
+      console.log(`[BookingsService] ✅ Found ${parsedBookings.length} booking(s), total: ${total}`);
+      
+      // Log detailed info about each booking
+      if (parsedBookings.length > 0) {
+        console.log(`[BookingsService] First booking details:`, {
+          id: parsedBookings[0].id,
+          businessId: parsedBookings[0].businessId,
+          business: parsedBookings[0].business,
+          customer: parsedBookings[0].customer,
+          service: parsedBookings[0].service,
+          status: parsedBookings[0].status,
+        });
       } else {
-        // No businesses, return empty result
-        return createPaginatedResponse([], 0, limit, offset);
+        console.log(`[BookingsService] ⚠️ No bookings returned after processing!`);
+        console.log(`[BookingsService] Raw bookings count: ${bookings.length}`);
+        console.log(`[BookingsService] WHERE clause was: ${whereClause}`);
+        console.log(`[BookingsService] Query params were:`, queryParams);
+        if (businessId) {
+          console.log(`[BookingsService] Checking if bookings exist for businessId: ${businessId}`);
+          const directCheck = await this.dataSource.query(
+            `SELECT id, "businessId", status FROM bookings WHERE "businessId" = $1 AND "deletedAt" IS NULL LIMIT 5`,
+            [businessId]
+          );
+          console.log(`[BookingsService] Direct query result:`, directCheck);
+        }
       }
+      
+      return createPaginatedResponse(parsedBookings, total, limit, offset);
+    } catch (error: any) {
+      console.error(`[BookingsService] ❌ Error in findAllPaginated:`, error);
+      console.error(`[BookingsService] Error stack:`, error.stack);
+      throw error;
     }
-    // For super_admin, no additional filtering needed
-
-    // Apply additional filters
-    if (businessId) {
-      queryBuilder.andWhere('business.id = :businessId', { businessId });
-    }
-
-    if (status) {
-      queryBuilder.andWhere('booking.status = :status', { status });
-    }
-
-    // Apply sorting
-    queryBuilder.orderBy(`booking.${sortBy}`, sortOrder);
-
-    // Get total count
-    const total = await queryBuilder.getCount();
-
-    // Apply pagination
-    queryBuilder.skip(offset).take(limit);
-
-    // Execute query
-    const bookings = await queryBuilder.getMany();
-
-    return createPaginatedResponse(bookings, total, limit, offset);
   }
 
   async findOne(id: string): Promise<Booking> {
     const booking = await this.bookingRepository.findOne({
       where: { id },
       relations: ['customer', 'business', 'service'],
-      select: {
-        customer: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          email: true,
-          phone: true,
-        },
-        business: {
-          id: true,
-          name: true,
-          category: true,
-          address: true,
-          phone: true,
-        },
-        service: {
-          id: true,
-          name: true,
-          duration: true,
-          description: true,
-        },
-      },
     });
 
     if (!booking) {
@@ -1045,5 +1470,153 @@ export class BookingsService {
     }
 
     return bookings;
+  }
+
+  /**
+   * Validates booking limitations based on service rules
+   */
+  private async validateBookingLimitations(
+    service: Service,
+    customerId: string,
+    businessId: string,
+    appointmentDate: Date,
+  ): Promise<void> {
+    const statuses = ['pending', 'confirmed'];
+
+    // Check if customer can have multiple active bookings for this service
+    if (!service.allowMultipleActiveBookings) {
+      const existingActiveBooking = await this.bookingRepository
+        .createQueryBuilder('booking')
+        .leftJoin('booking.service', 'service')
+        .leftJoin('booking.customer', 'customer')
+        .where('customer.id = :customerId', { customerId })
+        .andWhere('service.id = :serviceId', { serviceId: service.id })
+        .andWhere('booking.status IN (:...statuses)', { statuses })
+        .andWhere('booking.appointmentDate >= :now', { now: new Date() })
+        .getOne();
+
+      if (existingActiveBooking) {
+        throw new BadRequestException(
+          `You already have an active booking for this service. Please complete or cancel it before making a new booking.`
+        );
+      }
+    }
+
+    // Check daily booking limit (per service)
+    if (service.maxBookingsPerCustomerPerDay > 0) {
+      const selectedDateStart = new Date(appointmentDate);
+      selectedDateStart.setHours(0, 0, 0, 0);
+      const selectedDateEnd = new Date(appointmentDate);
+      selectedDateEnd.setHours(23, 59, 59, 999);
+
+      const userBookingsOnSelectedDate = await this.bookingRepository
+        .createQueryBuilder('booking')
+        .leftJoin('booking.customer', 'customer')
+        .leftJoin('booking.service', 'service')
+        .where('customer.id = :customerId', { customerId })
+        .andWhere('service.id = :serviceId', { serviceId: service.id })
+        .andWhere('booking.appointmentDate >= :selectedDateStart', { selectedDateStart })
+        .andWhere('booking.appointmentDate <= :selectedDateEnd', { selectedDateEnd })
+        .andWhere('booking.status IN (:...statuses)', { statuses })
+        .getCount();
+
+      if (userBookingsOnSelectedDate >= service.maxBookingsPerCustomerPerDay) {
+        const limitMsg = service.maxBookingsPerCustomerPerDay === 1
+          ? 'You can only book this service once per day'
+          : `You have reached the maximum number of bookings (${service.maxBookingsPerCustomerPerDay}) for this service on ${appointmentDate.toLocaleDateString()}`;
+        throw new BadRequestException(limitMsg);
+      }
+    }
+
+    // Check weekly booking limit (per service)
+    if (service.maxBookingsPerCustomerPerWeek && service.maxBookingsPerCustomerPerWeek > 0) {
+      const weekStart = new Date(appointmentDate);
+      const dayOfWeek = weekStart.getDay();
+      const diff = weekStart.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1); // Adjust for Sunday
+      weekStart.setDate(diff);
+      weekStart.setHours(0, 0, 0, 0);
+
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekStart.getDate() + 6);
+      weekEnd.setHours(23, 59, 59, 999);
+
+      const userBookingsThisWeek = await this.bookingRepository
+        .createQueryBuilder('booking')
+        .leftJoin('booking.customer', 'customer')
+        .leftJoin('booking.service', 'service')
+        .where('customer.id = :customerId', { customerId })
+        .andWhere('service.id = :serviceId', { serviceId: service.id })
+        .andWhere('booking.appointmentDate >= :weekStart', { weekStart })
+        .andWhere('booking.appointmentDate <= :weekEnd', { weekEnd })
+        .andWhere('booking.status IN (:...statuses)', { statuses })
+        .getCount();
+
+      if (userBookingsThisWeek >= service.maxBookingsPerCustomerPerWeek) {
+        throw new BadRequestException(
+          `You have reached the maximum number of bookings (${service.maxBookingsPerCustomerPerWeek}) for this service this week.`
+        );
+      }
+    }
+
+    // Check cooldown period between bookings
+    if (service.bookingCooldownHours > 0) {
+      const cooldownStart = new Date();
+      const cooldownEnd = new Date(cooldownStart.getTime() + service.bookingCooldownHours * 60 * 60 * 1000);
+
+      const recentBooking = await this.bookingRepository
+        .createQueryBuilder('booking')
+        .leftJoin('booking.customer', 'customer')
+        .leftJoin('booking.service', 'service')
+        .where('customer.id = :customerId', { customerId })
+        .andWhere('service.id = :serviceId', { serviceId: service.id })
+        .andWhere('booking.appointmentDate >= :cooldownStart', { cooldownStart })
+        .andWhere('booking.appointmentDate <= :cooldownEnd', { cooldownEnd })
+        .andWhere('booking.status IN (:...statuses)', { statuses })
+        .orderBy('booking.appointmentDate', 'DESC')
+        .getOne();
+
+      if (recentBooking) {
+        const nextAvailable = new Date(recentBooking.appointmentDate.getTime() + service.bookingCooldownHours * 60 * 60 * 1000);
+        throw new BadRequestException(
+          `You must wait ${service.bookingCooldownHours} hours between bookings for this service. Next available: ${nextAvailable.toLocaleString()}`
+        );
+      }
+    }
+  }
+
+  private async findAvailableTable(
+    businessId: string,
+    startTime: Date,
+    endTime: Date,
+    partySize: number
+  ): Promise<any> {
+    const tables = await this.dataSource.query(
+      `SELECT * FROM resources
+       WHERE "businessId" = $1
+       AND type = 'table'
+       AND "isActive" = true
+       AND capacity >= $2
+       AND "deletedAt" IS NULL
+       ORDER BY capacity ASC, "sortOrder" ASC`,
+      [businessId, partySize]
+    );
+
+    for (const table of tables) {
+      const conflict = await this.bookingRepository
+        .createQueryBuilder('booking')
+        .where('booking.resourceId = :resourceId', { resourceId: table.id })
+        .andWhere('booking.status IN (:...statuses)', {
+          statuses: ['pending', 'confirmed']
+        })
+        .andWhere('booking.appointmentDate < :endTime', { endTime })
+        .andWhere('booking.appointmentEndDate > :startTime', { startTime })
+        .getCount();
+
+      if (conflict === 0) {
+        return table;
+      }
+    }
+
+    return null;
   }
 }

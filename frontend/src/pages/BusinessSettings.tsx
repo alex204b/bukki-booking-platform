@@ -194,6 +194,21 @@ export const BusinessSettings: React.FC = () => {
     }
   );
 
+  const requestUnsuspensionMutation = useMutation(
+    (reason: string) => businessService.requestUnsuspension(business?.id || '', reason),
+    {
+      onSuccess: () => {
+        toast.success('Unsuspension request submitted successfully. An admin will review it shortly.');
+        setShowUnsuspendForm(false);
+        setUnsuspendReason('');
+        queryClient.invalidateQueries('my-business');
+      },
+      onError: (error: any) => {
+        toast.error(error.response?.data?.message || 'Failed to submit request');
+      },
+    }
+  );
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     updateSettingsMutation.mutate({ maxBookingsPerUserPerDay: maxBookings, autoAcceptBookings: autoAccept });
@@ -202,7 +217,7 @@ export const BusinessSettings: React.FC = () => {
   if (isLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent-500"></div>
       </div>
     );
   }
@@ -256,7 +271,24 @@ export const BusinessSettings: React.FC = () => {
               </div>
             </div>
 
-            {!showUnsuspendForm ? (
+            {business?.unsuspensionRequestedAt ? (
+              <div className="space-y-3">
+                <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded">
+                  <p className="text-yellow-800 font-semibold">⏳ Request Pending</p>
+                  <p className="text-yellow-700 text-sm mt-1">
+                    You submitted an unsuspension request on {new Date(business.unsuspensionRequestedAt).toLocaleDateString()} at {new Date(business.unsuspensionRequestedAt).toLocaleTimeString()}.
+                  </p>
+                  {business.unsuspensionRequestReason && (
+                    <p className="text-yellow-700 text-sm mt-2">
+                      <strong>Your reason:</strong> {business.unsuspensionRequestReason}
+                    </p>
+                  )}
+                  <p className="text-yellow-700 text-sm mt-2">
+                    An admin will review your request shortly. You can submit a new request after 24 hours.
+                  </p>
+                </div>
+              </div>
+            ) : !showUnsuspendForm ? (
               <div className="space-y-3">
                 <p className="text-gray-700">
                   If you believe this suspension was made in error or you have resolved
@@ -294,14 +326,12 @@ export const BusinessSettings: React.FC = () => {
                         toast.error('Please provide a reason for unsuspension');
                         return;
                       }
-                      toast.success('Unsuspension request submitted. An admin will review it shortly.');
-                      setShowUnsuspendForm(false);
-                      setUnsuspendReason('');
+                      requestUnsuspensionMutation.mutate(unsuspendReason);
                     }}
-                    disabled={!unsuspendReason.trim()}
+                    disabled={!unsuspendReason.trim() || requestUnsuspensionMutation.isLoading}
                     className="btn btn-primary disabled:opacity-50"
                   >
-                    Submit Request
+                    {requestUnsuspensionMutation.isLoading ? 'Submitting...' : 'Submit Request'}
                   </button>
                   <button
                     onClick={() => {
@@ -399,9 +429,9 @@ export const BusinessSettings: React.FC = () => {
                   onChange={(e) => setAutoAccept(e.target.checked)}
                   disabled={!isEditing}
                 />
-                {t('autoAcceptBookings') || 'Automatically accept booking requests'}
+                {t('Auto accept bookings') || 'Automatically accept booking requests'}
               </label>
-              <p className="text-sm text-gray-600 mt-1">{t('autoAcceptHint') || 'If enabled, new booking requests are auto-confirmed.'}</p>
+              
             </div>
 
             <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
@@ -695,7 +725,7 @@ const ImageManagementSection: React.FC<{ businessId: string }> = ({ businessId }
     <div className="bg-white rounded-lg shadow-sm border p-6 mt-8">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
-          <ImageIcon className="h-5 w-5 text-primary-600" />
+          <ImageIcon className="h-5 w-5 text-accent-600" />
           <h2 className="text-xl font-semibold text-gray-900">{t('imageManagement') || 'Image Management'}</h2>
         </div>
       </div>
@@ -718,8 +748,8 @@ const ImageManagementSection: React.FC<{ businessId: string }> = ({ businessId }
               file:mr-4 file:py-2 file:px-4
               file:rounded-md file:border-0
               file:text-sm file:font-semibold
-              file:bg-primary-50 file:text-primary-700
-              hover:file:bg-primary-100"
+              file:bg-accent-50 file:text-accent-700
+              hover:file:bg-accent-100"
           />
           <button
             onClick={handleUpload}
@@ -888,7 +918,7 @@ const PromotionalOffersSection: React.FC<{ businessId: string }> = ({ businessId
                   </span>
                   <button
                     onClick={selectAll}
-                    className="text-sm text-primary-600 hover:text-primary-700"
+                    className="text-sm text-accent-600 hover:text-accent-700"
                   >
                     {selectedCustomers.length === pastCustomers.length ? 'Deselect All' : 'Select All'}
                   </button>
@@ -903,7 +933,7 @@ const PromotionalOffersSection: React.FC<{ businessId: string }> = ({ businessId
                         type="checkbox"
                         checked={selectedCustomers.includes(customer.id)}
                         onChange={() => toggleCustomer(customer.id)}
-                        className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                        className="rounded border-gray-300 text-accent-600 focus:ring-accent-500"
                       />
                       <div>
                         <div className="font-medium text-sm text-gray-900">

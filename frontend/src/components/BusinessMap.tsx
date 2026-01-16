@@ -82,7 +82,7 @@ export const BusinessMap: React.FC<BusinessMapProps> = ({
                 <div className="flex items-center mb-2">
                   <span className="text-yellow-500">★</span>
                   <span className="text-sm font-medium ml-1">
-                    {business.rating.toFixed(1)} ({business.reviewCount} reviews)
+                    {Number(business.rating || 0).toFixed(1)} ({business.reviewCount} reviews)
                   </span>
                 </div>
                 <p className="text-xs text-gray-500 capitalize">

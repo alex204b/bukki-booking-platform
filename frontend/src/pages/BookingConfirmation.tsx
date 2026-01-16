@@ -40,7 +40,7 @@ export const BookingConfirmation: React.FC = () => {
     if (calendarUrl) {
       window.open(calendarUrl, '_blank');
     } else {
-      toast.error('Calendar URL not available');
+      toast.error(t('calendarUrlNotAvailable'));
     }
   };
 
@@ -56,9 +56,9 @@ export const BookingConfirmation: React.FC = () => {
       a.click();
       document.body.removeChild(a);
       window.URL.revokeObjectURL(url);
-      toast.success('Calendar file downloaded');
+      toast.success(t('calendarFileDownloaded'));
     } catch (error: any) {
-      toast.error('Failed to download calendar file');
+      toast.error(t('failedToDownloadCalendar'));
     }
   };
 
@@ -76,7 +76,7 @@ export const BookingConfirmation: React.FC = () => {
     } else {
       // Fallback: copy to clipboard
       navigator.clipboard.writeText(window.location.href);
-      toast.success('Booking link copied to clipboard');
+      toast.success(t('bookingLinkCopied'));
     }
   };
 
@@ -92,10 +92,10 @@ export const BookingConfirmation: React.FC = () => {
     return (
       <div className="container mx-auto px-4 py-8">
         <div className="card p-8 text-center">
-          <h2 className="text-2xl font-bold text-gray-900 mb-4">Booking Not Found</h2>
-          <p className="text-gray-600 mb-6">The booking you're looking for doesn't exist or has been removed.</p>
+          <h2 className="text-2xl font-bold text-gray-900 mb-4">{t('bookingNotFound')}</h2>
+          <p className="text-gray-600 mb-6">{t('bookingNotFoundMessage')}</p>
           <Link to="/my-bookings" className="btn btn-primary">
-            View My Bookings
+            {t('viewMyBookings')}
           </Link>
         </div>
       </div>
@@ -111,31 +111,33 @@ export const BookingConfirmation: React.FC = () => {
     <div className="container mx-auto px-4 py-8 max-w-4xl">
       {/* Success Header */}
       <div className="text-center mb-8">
-        <div className="inline-flex items-center justify-center w-20 h-20 bg-green-100 rounded-full mb-4">
+        <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-green-100 to-green-50 rounded-full mb-4 shadow-lg">
           <CheckCircle className="h-10 w-10 text-green-600" />
         </div>
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">
-          {isConfirmed ? 'Booking Confirmed!' : isPending ? 'Booking Requested!' : 'Booking Details'}
+        <h1 className="text-3xl font-bold bg-gradient-to-r from-gray-900 to-gray-700 bg-clip-text text-transparent mb-2">
+          {isConfirmed ? t('bookingConfirmed') : isPending ? t('bookingRequested') : t('bookingDetails')}
         </h1>
         <p className="text-gray-600">
           {isConfirmed 
-            ? 'Your booking has been confirmed. We look forward to seeing you!'
+            ? t('bookingConfirmedMessage')
             : isPending
-            ? 'Your booking request has been submitted. You\'ll be notified once it\'s confirmed.'
-            : 'View your booking details below.'}
+            ? t('bookingRequestedMessage')
+            : t('viewBookingDetailsMessage')}
         </p>
       </div>
 
       <div className="grid md:grid-cols-2 gap-6">
         {/* Booking Details Card */}
-        <div className="card p-6 space-y-6">
-          <h2 className="text-xl font-semibold text-gray-900">Booking Details</h2>
+        <div className="card p-6 space-y-6 border-2 border-[#330007] shadow-sm hover:shadow-md transition-shadow">
+          <h2 className="text-xl font-semibold text-gray-900">{t('bookingDetails')}</h2>
           
           <div className="space-y-4">
             <div className="flex items-start gap-3">
-              <Calendar className="h-5 w-5 text-primary-600 mt-0.5" />
+              <div className="p-2 bg-gradient-to-br from-orange-100 to-orange-50 rounded-lg">
+                <Calendar className="h-5 w-5 text-[#E7001E]" />
+              </div>
               <div>
-                <p className="text-sm text-gray-600">Date & Time</p>
+                <p className="text-sm text-gray-600">{t('dateAndTime')}</p>
                 <p className="font-medium text-gray-900">
                   {new Date(booking.appointmentDate).toLocaleString()}
                 </p>
@@ -143,27 +145,33 @@ export const BookingConfirmation: React.FC = () => {
             </div>
 
             <div className="flex items-start gap-3">
-              <Clock className="h-5 w-5 text-primary-600 mt-0.5" />
+              <div className="p-2 bg-gradient-to-br from-orange-100 to-orange-50 rounded-lg">
+                <Clock className="h-5 w-5 text-[#E7001E]" />
+              </div>
               <div>
-                <p className="text-sm text-gray-600">Duration</p>
+                <p className="text-sm text-gray-600">{t('duration')}</p>
                 <p className="font-medium text-gray-900">
-                  {booking.service?.duration || 30} minutes
+                  {booking.service?.duration || 30} {t('minutes')}
                 </p>
               </div>
             </div>
 
             <div className="flex items-start gap-3">
-              <User className="h-5 w-5 text-primary-600 mt-0.5" />
+              <div className="p-2 bg-gradient-to-br from-orange-100 to-orange-50 rounded-lg">
+                <User className="h-5 w-5 text-[#E7001E]" />
+              </div>
               <div>
-                <p className="text-sm text-gray-600">Service</p>
+                <p className="text-sm text-gray-600">{t('service')}</p>
                 <p className="font-medium text-gray-900">{booking.service?.name}</p>
               </div>
             </div>
 
             <div className="flex items-start gap-3">
-              <MapPin className="h-5 w-5 text-primary-600 mt-0.5" />
+              <div className="p-2 bg-gradient-to-br from-orange-100 to-orange-50 rounded-lg">
+                <MapPin className="h-5 w-5 text-[#E7001E]" />
+              </div>
               <div>
-                <p className="text-sm text-gray-600">Business</p>
+                <p className="text-sm text-gray-600">{t('business')}</p>
                 <p className="font-medium text-gray-900">{booking.business?.name}</p>
                 {booking.business?.address && (
                   <p className="text-sm text-gray-600 mt-1">{booking.business.address}</p>
@@ -173,18 +181,20 @@ export const BookingConfirmation: React.FC = () => {
 
             {booking.business?.phone && (
               <div className="flex items-start gap-3">
-                <Phone className="h-5 w-5 text-primary-600 mt-0.5" />
+                <div className="p-2 bg-gradient-to-br from-orange-100 to-orange-50 rounded-lg">
+                  <Phone className="h-5 w-5 text-[#E7001E]" />
+                </div>
                 <div>
-                  <p className="text-sm text-gray-600">Phone</p>
-                  <a href={`tel:${booking.business.phone}`} className="font-medium text-primary-600 hover:underline">
+                  <p className="text-sm text-gray-600">{t('phone')}</p>
+                  <a href={`tel:${booking.business.phone}`} className="font-medium text-[#E7001E] hover:underline">
                     {booking.business.phone}
                   </a>
                 </div>
               </div>
             )}
 
-            <div className="pt-4 border-t">
-              <p className="text-sm text-gray-600 mb-2">Status</p>
+            <div className="pt-4 border-t-2 border-[#330007]">
+              <p className="text-sm text-gray-600 mb-2">{t('status')}</p>
               <span className={`inline-flex px-3 py-1 rounded-full text-sm font-medium ${
                 isConfirmed 
                   ? 'bg-green-100 text-green-800'
@@ -199,59 +209,59 @@ export const BookingConfirmation: React.FC = () => {
         </div>
 
         {/* Actions Card */}
-        <div className="card p-6 space-y-4">
-          <h2 className="text-xl font-semibold text-gray-900">Quick Actions</h2>
+        <div className="card p-6 space-y-4 border-2 border-[#330007] shadow-sm hover:shadow-md transition-shadow">
+          <h2 className="text-xl font-semibold text-gray-900">{t('quickActions')}</h2>
           
           <div className="space-y-3">
             {canShowQR && (
               <button
                 onClick={() => setShowQRCode(!showQRCode)}
-                className="w-full btn btn-outline flex items-center justify-center gap-2"
+                className="w-full px-4 py-2.5 border-2 border-[#330007] rounded-lg hover:border-[#E7001E] hover:bg-red-50 transition-all flex items-center justify-center gap-2 text-gray-700 hover:text-[#E7001E] font-medium"
               >
                 <QrCode className="h-5 w-5" />
-                {showQRCode ? 'Hide' : 'Show'} QR Code
+                {showQRCode ? t('hide') : t('show')} {t('qrCode')}
               </button>
             )}
 
             <button
               onClick={handleAddToCalendar}
-              className="w-full btn btn-outline flex items-center justify-center gap-2"
+              className="w-full px-4 py-2.5 border-2 border-[#330007] rounded-lg hover:border-[#E7001E] hover:bg-red-50 transition-all flex items-center justify-center gap-2 text-gray-700 hover:text-[#E7001E] font-medium"
             >
               <Calendar className="h-5 w-5" />
-              Add to Google Calendar
+              {t('addToGoogleCalendar')}
             </button>
 
             <button
               onClick={handleDownloadICal}
-              className="w-full btn btn-outline flex items-center justify-center gap-2"
+              className="w-full px-4 py-2.5 border-2 border-[#330007] rounded-lg hover:border-[#E7001E] hover:bg-red-50 transition-all flex items-center justify-center gap-2 text-gray-700 hover:text-[#E7001E] font-medium"
             >
               <Download className="h-5 w-5" />
-              Download Calendar File
+              {t('downloadCalendarFile')}
             </button>
 
             <button
               onClick={handleShare}
-              className="w-full btn btn-outline flex items-center justify-center gap-2"
+              className="w-full px-4 py-2.5 border-2 border-[#330007] rounded-lg hover:border-[#E7001E] hover:bg-red-50 transition-all flex items-center justify-center gap-2 text-gray-700 hover:text-[#E7001E] font-medium"
             >
               <Share2 className="h-5 w-5" />
-              Share Booking
+              {t('shareBooking')}
             </button>
 
             {booking.business?.id && (
               <Link
                 to={`/chat/${booking.business.id}`}
-                className="w-full btn btn-outline flex items-center justify-center gap-2"
+                className="w-full px-4 py-2.5 border-2 border-[#330007] rounded-lg hover:border-[#E7001E] hover:bg-red-50 transition-all flex items-center justify-center gap-2 text-gray-700 hover:text-[#E7001E] font-medium"
               >
                 <MessageCircle className="h-5 w-5" />
-                Message Business
+                {t('messageBusiness')}
               </Link>
             )}
 
             <Link
               to="/my-bookings"
-              className="w-full btn btn-primary"
+              className="w-full px-4 py-2.5 bg-[#E7001E] text-white rounded-lg hover:bg-[#c70019] transition-colors flex items-center justify-center gap-2 font-medium shadow-sm"
             >
-              View All Bookings
+              {t('viewAllBookings')}
             </Link>
           </div>
 
@@ -274,7 +284,7 @@ export const BookingConfirmation: React.FC = () => {
                   />
                 )}
                 <p className="text-sm text-gray-600 text-center">
-                  Show this QR code to the business when you arrive
+                  {t('showQRCodeMessage')}
                 </p>
               </div>
             </div>
@@ -283,13 +293,32 @@ export const BookingConfirmation: React.FC = () => {
       </div>
 
       {/* Important Notes */}
-      <div className="card p-6 mt-6 bg-blue-50 border border-blue-200">
-        <h3 className="font-semibold text-gray-900 mb-2">Important Information</h3>
-        <ul className="space-y-2 text-sm text-gray-700">
-          <li>• Please arrive 5 minutes before your appointment time</li>
-          <li>• Bring your QR code or booking confirmation</li>
-          <li>• If you need to cancel or reschedule, please do so at least 24 hours in advance</li>
-          <li>• Contact the business directly if you have any questions</li>
+      <div className="card p-6 mt-6 bg-gradient-to-br from-orange-50 via-red-50 to-pink-50 border-2 border-[#330007] shadow-sm">
+        <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+          <div className="p-1.5 bg-gradient-to-br from-orange-100 to-red-100 rounded-lg">
+            <svg className="w-5 h-5 text-[#E7001E]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          {t('importantInformation')}
+        </h3>
+        <ul className="space-y-2.5 text-sm text-gray-700">
+          <li className="flex items-start gap-2">
+            <span className="text-[#E7001E] font-bold mt-0.5">•</span>
+            <span>{t('importantNote1')}</span>
+          </li>
+          <li className="flex items-start gap-2">
+            <span className="text-[#E7001E] font-bold mt-0.5">•</span>
+            <span>{t('importantNote2')}</span>
+          </li>
+          <li className="flex items-start gap-2">
+            <span className="text-[#E7001E] font-bold mt-0.5">•</span>
+            <span>{t('importantNote3')}</span>
+          </li>
+          <li className="flex items-start gap-2">
+            <span className="text-[#E7001E] font-bold mt-0.5">•</span>
+            <span>{t('importantNote4')}</span>
+          </li>
         </ul>
       </div>
     </div>

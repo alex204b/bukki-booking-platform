@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery } from 'react-query';
+import { useQuery, useQueryClient } from 'react-query';
 import { serviceService, bookingService } from '../services/api';
 import { Calendar, Clock, ArrowLeft, Repeat } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -17,6 +17,7 @@ export const BookingForm: React.FC = () => {
   const { serviceId } = useParams<{ serviceId: string }>();
   const navigate = useNavigate();
   const { t } = useI18n();
+  const queryClient = useQueryClient();
   const [selectedDate, setSelectedDate] = useState('');
   const [selectedTime, setSelectedTime] = useState('');
   const [notes, setNotes] = useState('');
@@ -47,18 +48,21 @@ export const BookingForm: React.FC = () => {
     }
   );
 
-  // Build a quick availability map for the selected date (30-min increments)
+  // Build a quick availability map for the selected date - only show available slots
   const buildSchedule = () => {
     if (!selectedDate || !availableSlots) return [] as { time: string; available: boolean }[];
     
-    // Use the actual available slots from backend
+    // Filter to only show available slots
     const items: { time: string; available: boolean }[] = [];
     
     availableSlots.forEach((slot: any) => {
-      items.push({ 
-        time: slot.time, 
-        available: slot.available 
-      });
+      // Only include slots that are available
+      if (slot.available) {
+        items.push({ 
+          time: slot.time, 
+          available: true 
+        });
+      }
     });
     
     // Sort by time
@@ -101,10 +105,16 @@ export const BookingForm: React.FC = () => {
         recurrenceEndDate: isRecurring && recurrenceEndDate ? new Date(recurrenceEndDate).toISOString() : undefined,
       });
       
+      // Invalidate bookings cache so home page refreshes
+      queryClient.invalidateQueries('my-bookings');
+      
+      // Invalidate available slots cache to refresh the UI
+      queryClient.invalidateQueries(['available-slots', serviceId, selectedDate]);
+
       // Handle recurring bookings (array) or single booking
       const booking = Array.isArray(response.data) ? response.data[0] : response.data;
       const bookingId = booking?.id;
-      
+
       if (bookingId) {
         // Redirect to confirmation page
         navigate(`/booking-confirmation/${bookingId}`);
@@ -131,7 +141,7 @@ export const BookingForm: React.FC = () => {
   if (isLoading) {
     return (
       <div className="flex justify-center py-12">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-accent-500"></div>
       </div>
     );
   }
@@ -208,7 +218,7 @@ export const BookingForm: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setShowWaitlist(!showWaitlist)}
-                  className="text-sm text-primary-600 hover:text-primary-700 font-medium"
+                  className="text-sm text-accent-600 hover:text-accent-700 font-medium"
                 >
                   {t('joinWaitlist') || 'Join Waitlist'}
                 </button>
@@ -270,24 +280,27 @@ export const BookingForm: React.FC = () => {
             )}
 
             <div className="grid grid-cols-4 md:grid-cols-6 gap-2 max-h-none overflow-visible">
-              {buildSchedule().map((slot, index) => (
-                <button
-                  key={index}
-                  type="button"
-                  onClick={() => setSelectedTime(slot.time)}
-                  disabled={!slot.available}
-                  className={`p-2 text-xs rounded-md border ${
-                    selectedTime === slot.time
-                      ? 'border-primary-600 bg-primary-50 text-primary-600'
-                      : slot.available
-                      ? 'border-gray-300 hover:border-primary-600 hover:bg-primary-50'
-                      : 'border-gray-200 bg-gray-50 text-gray-400 cursor-not-allowed'
-                  }`}
-                  title={slot.available ? t('available') : t('unavailable')}
-                >
-                  {slot.time}
-                </button>
-              ))}
+              {buildSchedule().length > 0 ? (
+                buildSchedule().map((slot, index) => (
+                  <button
+                    key={index}
+                    type="button"
+                    onClick={() => setSelectedTime(slot.time)}
+                    className={`p-2 text-xs rounded-md border transition-all ${
+                      selectedTime === slot.time
+                        ? 'border-accent-500 bg-accent-50 text-accent-600 font-semibold'
+                        : 'border-gray-300 hover:border-accent-500 hover:bg-accent-50'
+                    }`}
+                    title={t('available')}
+                  >
+                    {slot.time}
+                  </button>
+                ))
+              ) : (
+                <div className="col-span-full text-center py-8 text-gray-500">
+                  {t('noAvailableSlots') || 'No available time slots for this date'}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -370,7 +383,7 @@ export const BookingForm: React.FC = () => {
                         ...customFieldValues,
                         [field.fieldName]: e.target.checked
                       })}
-                      className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                      className="h-4 w-4 text-accent-600 focus:ring-accent-500 border-gray-300 rounded"
                       required={field.isRequired}
                     />
                     <span className="text-sm text-gray-700">{t('yes')}</span>

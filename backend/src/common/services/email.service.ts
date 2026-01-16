@@ -26,14 +26,25 @@ export class EmailService {
 
     this.transporter = nodemailer.createTransport(smtpConfig);
 
-    // Verify connection configuration
-    this.transporter.verify((error, success) => {
-      if (error) {
-        console.error('SMTP Connection Error:', error);
-      } else {
-        console.log('SMTP Server is ready to take our messages');
-      }
-    });
+    // Verify connection configuration (non-blocking with timeout)
+    // Don't block app startup if SMTP is unreachable
+    if (smtpConfig.auth.user && smtpConfig.auth.pass) {
+      const verificationTimeout = setTimeout(() => {
+        console.warn('⚠️  SMTP verification timed out. Email will be disabled.');
+      }, 5000);
+
+      this.transporter.verify((error, success) => {
+        clearTimeout(verificationTimeout);
+        if (error) {
+          console.warn('⚠️  SMTP Connection Error:', error.message);
+          console.warn('⚠️  Emails will not be sent. Check your SMTP settings.');
+        } else {
+          console.log('✅ SMTP Server is ready to send emails');
+        }
+      });
+    } else {
+      console.warn('⚠️  SMTP credentials not configured. Emails will not be sent.');
+    }
   }
 
   async sendVerificationEmail(email: string, verificationCode: string, firstName: string): Promise<void> {

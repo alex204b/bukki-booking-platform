@@ -22,10 +22,36 @@ export class MessagesController {
   @ApiQuery({ name: 'status', required: false, enum: MessageStatus })
   async getUserMessages(
     @Request() req,
-    @Query() paginationDto: PaginationDto,
-    @Query('status') status?: MessageStatus,
+    @Query() query: any,
+    @Query('status') status?: string,
   ) {
-    return this.messagesService.getUserMessagesPaginated(req.user.id, paginationDto, status);
+    try {
+      // Parse and validate query parameters manually to avoid validation errors
+      const limit = query.limit ? parseInt(query.limit, 10) : 20;
+      const offset = query.offset ? parseInt(query.offset, 10) : 0;
+      const sortBy = query.sortBy || 'createdAt';
+      const sortOrder = query.sortOrder || 'DESC';
+
+      // Validate status if provided
+      let messageStatus: MessageStatus | undefined;
+      if (status) {
+        const validStatuses = Object.values(MessageStatus);
+        if (validStatuses.includes(status as MessageStatus)) {
+          messageStatus = status as MessageStatus;
+        }
+      }
+
+      const paginationDto: PaginationDto = {
+        limit: Math.min(Math.max(limit, 1), 100), // Clamp between 1 and 100
+        offset: Math.max(offset, 0), // Ensure non-negative
+        sortBy,
+        sortOrder: sortOrder as 'ASC' | 'DESC',
+      };
+
+      return this.messagesService.getUserMessagesPaginated(req.user.id, paginationDto, messageStatus);
+    } catch (error: any) {
+      throw error;
+    }
   }
 
   @Get('business/:businessId/past-customers')
@@ -87,29 +113,44 @@ export class MessagesController {
     @Body() body: { content: string; bookingId?: string },
     @Request() req,
   ) {
-    try {
-      console.log('[MessagesController] sendChatMessage called:', {
-        userId: req.user.id,
-        businessId,
-        contentLength: body.content?.length,
-        bookingId: body.bookingId,
-      });
-      const result = await this.messagesService.sendChatMessage(
-        req.user.id,
-        businessId,
-        body.content,
-        body.bookingId,
-      );
-      return result;
-    } catch (error: any) {
-      console.error('[MessagesController] Error in sendChatMessage:', {
-        error: error.message,
-        status: error.status,
-        response: error.response,
-        stack: error.stack,
-      });
-      throw error;
+    // DEBUG: Log request details including full user object
+    console.log('[MessagesController.sendChatMessage] Request received:', {
+      businessId,
+      contentLength: body.content?.length,
+      content: body.content?.substring(0, 50), // First 50 chars for debugging
+      bookingId: body.bookingId,
+      userId: req.user?.id,
+      userEmail: req.user?.email,
+      userName: req.user ? `${req.user.firstName} ${req.user.lastName}` : 'N/A',
+      userRole: req.user?.role,
+      fullUserObject: req.user ? {
+        id: req.user.id,
+        email: req.user.email,
+        firstName: req.user.firstName,
+        lastName: req.user.lastName,
+        role: req.user.role,
+      } : null,
+    });
+
+    if (!req.user || !req.user.id) {
+      console.error('[MessagesController.sendChatMessage] ERROR: No user in request!');
+      throw new ForbiddenException('User not authenticated');
     }
+
+    // CRITICAL: Log the exact senderId being passed to the service
+    const senderIdToUse = req.user.id;
+    console.log('[MessagesController.sendChatMessage] Passing senderId to service:', {
+      senderId: senderIdToUse,
+      senderName: `${req.user.firstName} ${req.user.lastName}`,
+      senderEmail: req.user.email,
+    });
+
+    return this.messagesService.sendChatMessage(
+      senderIdToUse,
+      businessId,
+      body.content,
+      body.bookingId,
+    );
   }
 
   @Get('chat/:businessId/conversation')

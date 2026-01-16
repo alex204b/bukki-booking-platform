@@ -8,6 +8,12 @@ const createRepoMock = () => ({
   create: jest.fn((v) => v),
   save: jest.fn((v) => ({ id: 'u1', ...v })),
   update: jest.fn(),
+  query: jest.fn(),
+  createQueryBuilder: jest.fn(() => ({
+    where: jest.fn().mockReturnThis(),
+    addSelect: jest.fn().mockReturnThis(),
+    getOne: jest.fn().mockResolvedValue(null),
+  })),
 });
 
 describe('AuthService', () => {
@@ -23,7 +29,7 @@ describe('AuthService', () => {
   });
 
   it('register blocks duplicate emails', async () => {
-    userRepo.findOne.mockResolvedValue({ id: 'u1', email: 'a@b.com' } as any);
+    userRepo.findOne.mockResolvedValue({ id: 'u1', email: 'a@b.com', password: 'existinghash' } as any);
     await expect(
       service.register({ email: 'a@b.com', password: 'Password123', firstName: 'A', lastName: 'B' } as any)
     ).rejects.toBeInstanceOf(ConflictException);

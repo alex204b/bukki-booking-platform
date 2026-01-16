@@ -5,10 +5,10 @@ import timeGridPlugin from '@fullcalendar/timegrid';
 import interactionPlugin from '@fullcalendar/interaction';
 // FullCalendar CSS - using CDN link in index.html or inline styles
 import { format, addDays, isToday } from 'date-fns';
-import { Sparkles, Search } from 'lucide-react';
+import { Search } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { businessService, aiService } from '../services/api';
-import { useNavigate } from 'react-router-dom';
+import { CreateBookingModal } from './CreateBookingModal';
+import { useAuth } from '../contexts/AuthContext';
 
 interface Booking {
   id: string;
@@ -43,20 +43,8 @@ const getServiceColor = (category: string, status: string): string => {
   // Status-based opacity
   const opacity = status === 'cancelled' ? '40' : status === 'completed' ? '60' : '100';
   
-  // Category-based colors
-  const colorMap: Record<string, string> = {
-    beauty_salon: '#ec4899', // Pink
-    fitness: '#22c55e', // Green
-    restaurant: '#f59e0b', // Amber
-    healthcare: '#3b82f6', // Blue
-    mechanic: '#6b7280', // Gray
-    tailor: '#8b5cf6', // Purple
-    education: '#06b6d4', // Cyan
-    consulting: '#14b8a6', // Teal
-    other: '#f97316', // Orange
-  };
-  
-  const baseColor = colorMap[category] || '#f97316';
+  // All bookings use #E7001E
+  const baseColor = '#E7001E';
   return `${baseColor}${opacity}`;
 };
 
@@ -66,13 +54,50 @@ export const EnhancedCalendarView: React.FC<EnhancedCalendarViewProps> = ({
   onReschedule,
   onBookingClick,
 }) => {
+  const { user } = useAuth();
   const calendarRef = useRef<FullCalendar>(null);
-  const navigate = useNavigate();
   const [currentView, setCurrentView] = useState<'timeGridWeek' | 'dayGridMonth' | 'timeGridDay'>('timeGridWeek');
-  const [showAIChat, setShowAIChat] = useState(false);
-  const [aiQuery, setAiQuery] = useState('');
-  const [aiSuggestions, setAiSuggestions] = useState<any[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
+  const [showCreateBooking, setShowCreateBooking] = useState(false);
+  const [selectedSlotDate, setSelectedSlotDate] = useState<Date>(new Date());
+  const [businessId, setBusinessId] = useState<string>('');
+  
+  // Detect if user is a business owner and get their business ID
+  const isBusinessOwner = user?.role === 'business_owner' || user?.role === 'employee';
+  
+  useEffect(() => {
+    const fetchBusinessId = async () => {
+      if (!isBusinessOwner) return;
+
+      // Try to get business ID from bookings first
+      if (bookings && bookings.length > 0) {
+        const firstBooking = bookings[0];
+        if (firstBooking.business?.id) {
+          setBusinessId(firstBooking.business.id);
+          return;
+        }
+      }
+
+      // If no bookings, fetch from user's business profile
+      try {
+        const response = await fetch('/api/businesses/my-business', {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          },
+        });
+        
+        if (response.ok) {
+          const business = await response.json();
+          if (business?.id) {
+            setBusinessId(business.id);
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching business ID:', error);
+      }
+    };
+
+    fetchBusinessId();
+  }, [bookings, isBusinessOwner]);
   
   // Update calendar view when currentView changes
   useEffect(() => {
@@ -203,154 +228,6 @@ ${notes ? `Notes: ${notes}` : ''}
     }
   };
 
-  // AI-powered slot suggestion - searches for available businesses
-  const findSmartSlots = async (query: string) => {
-    if (!query.trim()) {
-      setAiSuggestions([]);
-      return;
-    }
-
-    setIsSearching(true);
-    setAiSuggestions([]);
-
-    try {
-      // First, try to parse the query using AI service
-      let serviceType: string | null = null;
-      let parsedServices: Array<{ type: string; name: string; step: number }> = [];
-
-      try {
-        const aiResponse = await Promise.race([
-          aiService.parseQuery(query),
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('AI timeout')), 5000)
-          )
-        ]) as any;
-
-        const data = aiResponse?.data || (aiResponse?.response?.data ? aiResponse.response.data : null);
-        
-        // Check if response contains an error
-        if (data?.error) {
-          throw new Error(data.error);
-        }
-        
-        // Validate AI response
-        if (!data || !Array.isArray(data.services) || data.services.length === 0) {
-          throw new Error('AI did not return any services. Please try rephrasing your query.');
-        }
-        
-        const validServices = data.services.filter((s: any) => s && s.type && s.name);
-        if (validServices.length === 0) {
-          throw new Error('AI returned invalid service data. Please try rephrasing your query.');
-        }
-        
-        parsedServices = validServices;
-        serviceType = validServices[0].type; // Use first service type (AI returns database category directly)
-      } catch (aiError: any) {
-        console.error('[Calendar AI] ❌ AI parsing failed:', aiError);
-        
-        // Extract error message
-        const errorData = aiError.response?.data;
-        let errorMessage = errorData?.error || aiError.message || 'Failed to understand your request.';
-        
-        // Make error message more user-friendly
-        if (errorMessage.includes('not configured') || errorMessage.includes('API key')) {
-          errorMessage = '⚠️ AI service is not configured. Please add GEMINI_API_KEY (recommended) or HUGGINGFACE_API_KEY to your backend .env file. Only ONE is needed.';
-        } else if (errorMessage.includes('timeout') || errorMessage.includes('timed out')) {
-          errorMessage = '⏱️ AI request timed out. Please try again.';
-        } else if (!errorData || (errorData.services && errorData.services.length === 0)) {
-          errorMessage = '❌ No services found. Please try rephrasing your query (e.g., "I need a haircut" or "Find me a restaurant").';
-        }
-        
-        toast.error(errorMessage, { duration: 5000 });
-        setIsSearching(false);
-        setAiSuggestions([]);
-        return;
-      }
-
-      // Search for available businesses
-      let businesses: any[] = [];
-      
-      if (serviceType) {
-        // Search by service type
-        try {
-          const searchResults = await businessService.search('', serviceType, '');
-          businesses = searchResults.data || [];
-        } catch (searchError: any) {
-          console.warn('[Calendar AI] Search failed, using getAll:', searchError.message);
-          try {
-            const allBusinessesRes = await businessService.getAll();
-            const allBusinesses = allBusinessesRes.data || [];
-            const lowerServiceType = serviceType.toLowerCase();
-            businesses = allBusinesses.filter((b: any) => 
-              b.status === 'approved' && 
-              b.isActive && 
-              b.category?.toLowerCase() === lowerServiceType
-            );
-          } catch (getAllError: any) {
-            console.error('[Calendar AI] getAll also failed:', getAllError);
-          }
-        }
-      } else {
-        // General search by query text
-        try {
-          const searchResults = await businessService.search(query, '', '');
-          businesses = searchResults.data || [];
-        } catch (searchError: any) {
-          console.warn('[Calendar AI] General search failed:', searchError.message);
-          try {
-            const allBusinessesRes = await businessService.getAll();
-            const allBusinesses = allBusinessesRes.data || [];
-            const lowerQuery = query.toLowerCase();
-            businesses = allBusinesses.filter((b: any) => 
-              b.status === 'approved' && 
-              b.isActive && 
-              (b.name?.toLowerCase().includes(lowerQuery) ||
-               b.category?.toLowerCase().includes(lowerQuery) ||
-               b.description?.toLowerCase().includes(lowerQuery))
-            );
-          } catch (getAllError: any) {
-            console.error('[Calendar AI] getAll also failed:', getAllError);
-          }
-        }
-      }
-
-      // Create suggestions from found businesses
-      const suggestedSlots = businesses.slice(0, 5).map((business: any) => {
-        // Suggest a date next week
-        const suggestedDate = addDays(new Date(), 7);
-        
-        return {
-          businessId: business.id,
-          business: business.name,
-          service: serviceType ? `${serviceType} service` : 'Service',
-          category: business.category,
-          suggestedDate: suggestedDate,
-          reason: 'Available business found',
-          address: business.address,
-          rating: business.rating || 0,
-        };
-      });
-
-      setAiSuggestions(suggestedSlots);
-      
-      if (suggestedSlots.length === 0) {
-        toast('No businesses found. Try searching for a service type like "haircut", "restaurant", or "mechanic".', { 
-          icon: 'ℹ️',
-          duration: 4000 
-        });
-      } else {
-        toast.success(`Found ${suggestedSlots.length} business${suggestedSlots.length > 1 ? 'es' : ''} for you!`, {
-          duration: 2000
-        });
-      }
-    } catch (error: any) {
-      console.error('[Calendar AI] Error finding slots:', error);
-      toast.error('Failed to search for businesses. Please try again.');
-    } finally {
-      setIsSearching(false);
-    }
-  };
-
   // Navigate to today
   const goToToday = () => {
     if (calendarRef.current) {
@@ -359,16 +236,56 @@ ${notes ? `Notes: ${notes}` : ''}
     }
   };
 
+  // Handle slot click (for business owners to create bookings)
+  const handleDateClick = (info: any) => {
+    if (!isBusinessOwner) {
+      return; // Only business owners can create bookings
+    }
+
+    if (!businessId) {
+      toast.error('Business ID not found. Please ensure you have at least one booking.');
+      return;
+    }
+
+    // Just get the start time - end time will be calculated based on selected service
+    const startDate = new Date(info.dateStr);
+    setSelectedSlotDate(startDate);
+    setShowCreateBooking(true);
+  };
+
+  // Handle booking created
+  const handleBookingCreated = () => {
+    // Refresh the page to show new booking
+    window.location.reload();
+  };
+
   return (
-    <div className="space-y-4 relative">
+    <div className="h-full flex flex-col space-y-2 relative pr-2 pb-2">
       {/* Toolbar */}
-      <div className="flex items-center justify-between bg-white p-4 rounded-lg shadow-sm border">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between bg-white p-2 rounded-lg shadow-sm border border-[#E7001E] flex-shrink-0 gap-2">
+        {/* Hint for business owners */}
+        {isBusinessOwner && businessId && (
+          <div className="text-xs text-gray-600 bg-green-50 border border-green-200 px-3 py-1 rounded-md w-full sm:w-auto">
+            💡 Click on a time slot, select a service, and the duration is calculated automatically
+          </div>
+        )}
+        
         <div className="flex items-center gap-2">
           <button
+            onClick={() => setCurrentView('timeGridDay')}
+            className={`px-2 py-1 text-xs sm:text-sm rounded-md transition-colors ${
+              currentView === 'timeGridDay'
+                ? 'bg-[#E7001E] text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            Day
+          </button>
+          <button
             onClick={() => setCurrentView('timeGridWeek')}
-            className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+            className={`px-2 py-1 text-xs sm:text-sm rounded-md transition-colors ${
               currentView === 'timeGridWeek'
-                ? 'bg-primary-600 text-white'
+                ? 'bg-[#E7001E] text-white'
                 : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
             }`}
           >
@@ -376,56 +293,49 @@ ${notes ? `Notes: ${notes}` : ''}
           </button>
           <button
             onClick={() => setCurrentView('dayGridMonth')}
-            className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+            className={`px-2 py-1 text-xs sm:text-sm rounded-md transition-colors ${
               currentView === 'dayGridMonth'
-                ? 'bg-primary-600 text-white'
+                ? 'bg-[#E7001E] text-white'
                 : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
             }`}
           >
             Month
-          </button>
-          <button
-            onClick={() => setCurrentView('timeGridDay')}
-            className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
-              currentView === 'timeGridDay'
-                ? 'bg-primary-600 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            Day
           </button>
         </div>
 
         <div className="flex items-center gap-2">
           <button
             onClick={goToToday}
-            className="px-3 py-1.5 text-sm bg-primary-100 text-primary-700 rounded-md hover:bg-primary-200 transition-colors"
+            className="px-2 py-1 text-xs sm:text-sm bg-red-100 text-red-700 rounded-md hover:bg-red-200 transition-colors"
           >
             Today
           </button>
           <button
             onClick={jumpToNextOpenSlot}
-            className="px-3 py-1.5 text-sm bg-green-100 text-green-700 rounded-md hover:bg-green-200 transition-colors flex items-center gap-1"
+            className="px-2 py-1 text-xs sm:text-sm bg-green-100 text-green-700 rounded-md hover:bg-green-200 transition-colors flex items-center gap-1"
           >
-            <Search className="h-4 w-4" />
-            Next Open Slot
+            <Search className="h-3 w-3 sm:h-4 sm:w-4" />
+            <span className="hidden sm:inline">Next Open Slot</span>
+            <span className="sm:hidden">Next</span>
           </button>
         </div>
       </div>
 
       {/* FullCalendar */}
-      <div className="bg-white rounded-lg shadow-sm border p-4">
+      <div className="bg-white rounded-lg shadow-sm border border-[#E7001E] p-2 flex-1 min-h-0">
         <FullCalendar
           ref={calendarRef}
           plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
           initialView="timeGridWeek"
           events={events}
           editable={!!onReschedule}
+          selectable={false}
+          dateClick={handleDateClick}
           eventDrop={handleEventDrop}
           eventClick={handleEventClick}
           eventContent={renderEventContent}
           headerToolbar={false}
-          height="auto"
+          height="100%"
           slotDuration="00:15:00"
           slotLabelInterval="00:30"
           slotMinTime="06:00:00"
@@ -440,107 +350,49 @@ ${notes ? `Notes: ${notes}` : ''}
           }}
           nowIndicator={true}
           dayCellClassNames={(arg) => 
-            isToday(arg.date) ? 'bg-yellow-50' : ''
+            isToday(arg.date) ? 'bg-red-50' : ''
           }
         />
+        <style>{`
+          .fc-timegrid-col.fc-day-today .fc-timegrid-col-frame {
+            background-color: rgb(254 242 242) !important;
+          }
+          .fc-daygrid-day.fc-day-today {
+            background-color: rgb(254 242 242) !important;
+          }
+          .fc-event {
+            background-color: #E7001E !important;
+            border-color: #E7001E !important;
+          }
+          .fc-event .fc-event-title {
+            color: #ffffff !important;
+          }
+          .fc-event-main {
+            background-color: #E7001E !important;
+          }
+          ${isBusinessOwner && businessId ? `
+          .fc-timegrid-slot:hover,
+          .fc-daygrid-day:hover {
+            background-color: rgba(231, 0, 30, 0.05) !important;
+            cursor: pointer;
+          }
+          .fc-timegrid-slot-label:hover {
+            cursor: pointer;
+          }
+          ` : ''}
+        `}</style>
       </div>
 
-      {/* AI Chat Bubble */}
-      <div className="fixed bottom-6 right-6 z-50">
-        <button
-          onClick={() => setShowAIChat(!showAIChat)}
-          className="bg-gradient-to-r from-purple-600 to-pink-600 text-white p-4 rounded-full shadow-lg hover:scale-110 transition-transform"
-          aria-label="AI Assistant"
-        >
-          <Sparkles className="h-6 w-6" />
-        </button>
-
-        {showAIChat && (
-          <div className="absolute bottom-16 right-0 w-80 h-96 bg-white rounded-xl shadow-2xl p-4 flex flex-col">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold text-gray-900 flex items-center gap-2">
-                <Sparkles className="h-5 w-5 text-purple-600" />
-                AI Booking Assistant
-              </h3>
-              <button
-                onClick={() => setShowAIChat(false)}
-                className="text-gray-400 hover:text-gray-600"
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto mb-4 space-y-2">
-              <div className="bg-gray-100 rounded-lg p-3 text-sm text-gray-700">
-                <p className="font-medium mb-1">Try asking:</p>
-                <ul className="list-disc list-inside space-y-1 text-xs">
-                  <li>"Find me a haircut"</li>
-                  <li>"Show me restaurants"</li>
-                  <li>"I need a mechanic"</li>
-                  <li>"Beauty salon near me"</li>
-                </ul>
-              </div>
-
-              {isSearching && (
-                <div className="text-center py-4 text-sm text-gray-500">
-                  Searching for businesses...
-                </div>
-              )}
-
-              {!isSearching && aiSuggestions.length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-sm font-medium text-gray-700">Available Businesses:</p>
-                  {aiSuggestions.map((slot, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => {
-                        if (slot.businessId) {
-                          navigate(`/businesses/${slot.businessId}`);
-                          setShowAIChat(false);
-                        }
-                      }}
-                      className="w-full text-left bg-primary-50 hover:bg-primary-100 rounded-lg p-3 text-sm transition-colors"
-                    >
-                      <div className="font-medium text-gray-900">{slot.business}</div>
-                      <div className="text-xs text-gray-600 mt-1">{slot.category}</div>
-                      {slot.address && (
-                        <div className="text-xs text-gray-500 mt-1">{slot.address}</div>
-                      )}
-                      {slot.rating > 0 && (
-                        <div className="text-xs text-primary-600 mt-1">⭐ {slot.rating.toFixed(1)}</div>
-                      )}
-                      <div className="text-xs text-primary-600 mt-2 font-medium">
-                        Click to book →
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={aiQuery}
-                onChange={(e) => setAiQuery(e.target.value)}
-                onKeyPress={(e) => {
-                  if (e.key === 'Enter') {
-                    findSmartSlots(aiQuery);
-                  }
-                }}
-                placeholder="Ask me anything..."
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-sm"
-              />
-              <button
-                onClick={() => findSmartSlots(aiQuery)}
-                className="px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg hover:opacity-90 transition-opacity"
-              >
-                <Search className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
+      {/* Create Booking Modal (only for business owners) */}
+      {isBusinessOwner && (
+        <CreateBookingModal
+          isOpen={showCreateBooking}
+          onClose={() => setShowCreateBooking(false)}
+          selectedDate={selectedSlotDate}
+          businessId={businessId}
+          onBookingCreated={handleBookingCreated}
+        />
+      )}
     </div>
   );
 };

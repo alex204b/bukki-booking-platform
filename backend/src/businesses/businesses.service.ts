@@ -1,13 +1,14 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
 import { EmailService } from '../common/services/email.service';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
+import { Repository, DataSource } from 'typeorm';
 import * as QRCode from 'qrcode';
 import { Business, BusinessStatus } from './entities/business.entity';
 import { BusinessMember, BusinessMemberStatus } from './entities/business-member.entity';
 import { BusinessContact } from './entities/business-contact.entity';
-import { User } from '../users/entities/user.entity';
+import { User, UserRole } from '../users/entities/user.entity';
 import { MessagesService } from '../messages/messages.service';
+import { RequestsService } from '../requests/requests.service';
 import { PaginationDto, PaginatedResult, createPaginatedResponse } from '../common/dto/pagination.dto';
 
 @Injectable()
@@ -21,8 +22,12 @@ export class BusinessesService {
     private businessContactRepository: Repository<BusinessContact>,
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    @InjectDataSource()
+    private dataSource: DataSource,
     private emailService: EmailService,
     private messagesService: MessagesService,
+    @Inject(forwardRef(() => RequestsService))
+    private requestsService: RequestsService,
   ) {}
 
   async isOwnerOrMember(businessId: string, userId: string): Promise<boolean> {
@@ -225,7 +230,7 @@ export class BusinessesService {
     const where = status ? { status } : {};
     return this.businessRepository.find({
       where,
-      relations: ['owner'],
+      relations: ['owner', 'services'],
       select: {
         id: true,
         name: true,
@@ -278,7 +283,8 @@ export class BusinessesService {
 
     const queryBuilder = this.businessRepository
       .createQueryBuilder('business')
-      .leftJoinAndSelect('business.owner', 'owner');
+      .leftJoinAndSelect('business.owner', 'owner')
+      .leftJoinAndSelect('business.services', 'services');
 
     // Apply status filter if provided
     if (status) {
@@ -303,7 +309,7 @@ export class BusinessesService {
   async findOne(id: string): Promise<Business> {
     const business = await this.businessRepository.findOne({
       where: { id },
-      relations: ['owner'],
+      relations: ['owner', 'services'],
       select: {
         id: true,
         name: true,
@@ -360,6 +366,7 @@ export class BusinessesService {
     return this.businessRepository
       .createQueryBuilder('business')
       .leftJoinAndSelect('business.owner', 'owner')
+      .leftJoinAndSelect('business.services', 'services')
       .where('business.ownerId = :ownerId', { ownerId })
       .getOne();
   }
@@ -457,7 +464,12 @@ export class BusinessesService {
     return savedBusiness;
   }
 
-  async suspend(id: string, reason?: string): Promise<Business> {
+  async suspend(id: string, reason: string, adminId: string): Promise<Business> {
+    // Validate reason is provided
+    if (!reason || !reason.trim()) {
+      throw new BadRequestException('Reason for suspension is required');
+    }
+
     // 1. Load business with owner relation
     const business = await this.businessRepository.findOne({
       where: { id },
@@ -472,7 +484,16 @@ export class BusinessesService {
     business.status = BusinessStatus.SUSPENDED;
     const savedBusiness = await this.businessRepository.save(business);
 
-    // 3. Send suspension email
+    // 3. Create suspension request record in requests table
+    try {
+      await this.requestsService.createSuspensionRequest(id, adminId, reason);
+      console.log(`Suspension request created in requests table for business ${business.name}`);
+    } catch (error) {
+      console.error('Failed to create suspension request record:', error);
+      // Don't fail the suspension if request creation fails
+    }
+
+    // 4. Send suspension email
     if (business.owner && business.owner.email) {
       try {
         await this.emailService.sendBusinessSuspensionEmail(
@@ -487,16 +508,26 @@ export class BusinessesService {
       }
     }
 
-    // 4. Create BUKKi system notification message
+    // 5. Create BUKKi system notification message
     if (business.owner) {
       try {
+        // Create suspension request in requests table
+        const suspensionRequest = await this.requestsService.createSuspensionRequest(
+          id,
+          adminId,
+          reason,
+        );
+
         await this.messagesService.createSystemNotification(
           business.owner.id,
           `Business Suspended: ${business.name}`,
-          reason
-            ? `Your business has been suspended. Reason: ${reason}\n\nYou can request unsuspension from your Business Settings page.`
-            : `Your business has been suspended. Please contact support for details or request unsuspension from your Business Settings page.`,
-          { businessId: id, suspensionReason: reason }
+          `Your business has been suspended. Reason: ${reason}\n\nYou can request unsuspension from your Business Settings page.`,
+          { 
+            type: 'SUSPENSION_REQUEST',
+            requestId: suspensionRequest.id,
+            businessId: id, 
+            suspensionReason: reason 
+          }
         );
         console.log(`System notification created for user ${business.owner.id}`);
       } catch (error) {
@@ -507,7 +538,7 @@ export class BusinessesService {
     return savedBusiness;
   }
 
-  async unsuspend(id: string): Promise<Business> {
+  async unsuspend(id: string, adminId: string): Promise<Business> {
     // 1. Load business with owner relation
     const business = await this.businessRepository.findOne({
       where: { id },
@@ -522,8 +553,22 @@ export class BusinessesService {
       throw new BadRequestException('Business is not suspended');
     }
 
-    // 2. Update status to approved
+    // 2. Update any pending unsuspension requests to approved
+    try {
+      const pendingRequests = await this.requestsService.getPendingRequests();
+      const businessRequests = pendingRequests.filter(r => r.business.id === id && r.requestType === 'unsuspension');
+      for (const req of businessRequests) {
+        await this.requestsService.approveRequest(req.id, adminId, 'Business unsuspended');
+      }
+    } catch (error) {
+      console.error('Failed to update request status:', error);
+      // Don't fail unsuspension if request update fails
+    }
+
+    // 3. Update status to approved and clear request fields
     business.status = BusinessStatus.APPROVED;
+    business.unsuspensionRequestedAt = null;
+    business.unsuspensionRequestReason = null;
     const savedBusiness = await this.businessRepository.save(business);
 
     // 3. Send unsuspension email
@@ -558,6 +603,93 @@ export class BusinessesService {
     return savedBusiness;
   }
 
+  async requestUnsuspension(
+    businessId: string,
+    userId: string,
+    reason: string,
+  ): Promise<Business> {
+    console.log(`[BusinessesService] requestUnsuspension called`);
+    console.log(`[BusinessesService] Business ID: ${businessId}, User ID: ${userId}`);
+    console.log(`[BusinessesService] Reason: ${reason.substring(0, 50)}...`);
+
+    // Use RequestsService to create the request (stores in requests table)
+    console.log(`[BusinessesService] Calling requestsService.createUnsuspensionRequest...`);
+    let request;
+    try {
+      request = await this.requestsService.createUnsuspensionRequest(businessId, userId, reason);
+      console.log(`[BusinessesService] ✅ Request created successfully with ID: ${request.id}`);
+      console.log(`[BusinessesService] Request details:`, {
+        id: request.id,
+        businessId: request.business?.id,
+        requestType: request.requestType,
+        status: request.status,
+        requestedAt: request.requestedAt,
+      });
+    } catch (error: any) {
+      console.error(`[BusinessesService] ❌ ERROR creating request:`, error.message);
+      console.error(`[BusinessesService] Error stack:`, error.stack);
+      throw error;
+    }
+
+    // Verify the request exists in database immediately after creation
+    console.log(`[BusinessesService] Verifying request exists in database...`);
+    try {
+      const verifyRequest = await this.requestsService.getRequestById(request.id);
+      console.log(`[BusinessesService] ✅ Verified request exists in database: ${verifyRequest.id}`);
+    } catch (verifyError: any) {
+      console.error(`[BusinessesService] ❌ CRITICAL: Request not found in database after creation!`);
+      console.error(`[BusinessesService] Request ID that was created: ${request.id}`);
+      console.error(`[BusinessesService] Verify error:`, verifyError.message);
+      // Don't throw here - continue to see if notifications work
+    }
+
+    // Load business for notifications
+    const business = await this.businessRepository.findOne({
+      where: { id: businessId },
+      relations: ['owner'],
+    });
+
+    if (!business) {
+      throw new NotFoundException('Business not found');
+    }
+
+    // Send notification to all super admins
+    try {
+      // Find all super admin users
+      const admins = await this.userRepository.find({
+        where: { role: UserRole.SUPER_ADMIN },
+      });
+
+      console.log(`[BusinessesService] Found ${admins.length} admin(s) to notify`);
+
+      // Send system notification to each admin
+      for (const admin of admins) {
+        await this.messagesService.createSystemNotification(
+          admin.id,
+          `Unsuspension Request: ${business.name}`,
+          `${business.owner.firstName} ${business.owner.lastName} has requested unsuspension for "${business.name}".\n\nReason: ${reason}\n\nPlease review this request in the Admin Dashboard.`,
+          {
+            type: 'UNSUSPENSION_REQUEST',
+            businessId: business.id,
+            businessName: business.name,
+            ownerId: business.owner.id,
+            ownerEmail: business.owner.email,
+            requestId: request.id,
+            requestedAt: request.requestedAt,
+          }
+        );
+      }
+      console.log(`[BusinessesService] ✅ Unsuspension request notifications sent to ${admins.length} admin(s)`);
+    } catch (error) {
+      console.error(`[BusinessesService] ❌ Failed to send admin notifications:`, error);
+    }
+
+    console.log(`[BusinessesService] ✅ Unsuspension request created for business ${business.name} (${business.id}) by ${business.owner.email}`);
+    console.log(`[BusinessesService] Request ID: ${request.id}`);
+
+    return business;
+  }
+
   async searchBusinesses(
     query?: string,
     category?: string,
@@ -573,7 +705,7 @@ export class BusinessesService {
     const qb = this.businessRepository
       .createQueryBuilder('business')
       .leftJoinAndSelect('business.owner', 'owner')
-      .leftJoin('business.services', 'service')
+      .leftJoinAndSelect('business.services', 'service')
       .where('business.status = :status', { status: BusinessStatus.APPROVED })
       .andWhere('business.isActive = :isActive', { isActive: true });
 
@@ -633,9 +765,6 @@ export class BusinessesService {
       qb.orderBy('business.rating', 'DESC'); // Default: by rating
     }
 
-    // Group by business to avoid duplicates from service joins
-    qb.groupBy('business.id').addGroupBy('owner.id');
-
     return qb.getMany();
   }
 
@@ -648,6 +777,7 @@ export class BusinessesService {
     return this.businessRepository
       .createQueryBuilder('business')
       .leftJoinAndSelect('business.owner', 'owner')
+      .leftJoinAndSelect('business.services', 'services')
       .where('business.status = :status', { status: BusinessStatus.APPROVED })
       .andWhere('business.isActive = :isActive', { isActive: true })
       .andWhere('business.latitude BETWEEN :minLat AND :maxLat', {
@@ -673,20 +803,39 @@ export class BusinessesService {
 
   async getBusinessStats(businessId: string): Promise<any> {
     const business = await this.findOne(businessId);
-    
-    // This would typically involve more complex queries
-    // For now, returning basic stats
+
+    // Query bookings for accurate stats
+    const bookingsQuery = await this.dataSource.query(
+      `SELECT
+        COUNT(*) as "totalBookings",
+        COUNT(DISTINCT "customerId") as "totalCustomers",
+        SUM("totalAmount") as "totalRevenue"
+       FROM bookings
+       WHERE "businessId" = $1 AND "deletedAt" IS NULL`,
+      [businessId]
+    );
+
+    // Query services count
+    const servicesQuery = await this.dataSource.query(
+      `SELECT COUNT(*) as count FROM services WHERE "businessId" = $1 AND "deletedAt" IS NULL`,
+      [businessId]
+    );
+
+    const stats = bookingsQuery[0] || { totalBookings: 0, totalCustomers: 0, totalRevenue: 0 };
+
     const base = {
-      totalBookings: business.bookings?.length || 0,
-      totalServices: business.services?.length || 0,
-      averageRating: business.rating,
-      reviewCount: business.reviewCount,
+      totalBookings: parseInt(stats.totalBookings) || 0,
+      totalCustomers: parseInt(stats.totalCustomers) || 0,
+      totalServices: parseInt(servicesQuery[0]?.count || 0),
+      averageRating: business.rating || 0,
+      reviewCount: business.reviewCount || 0,
     } as any;
 
     if (business.showRevenue) {
-      // Placeholder: revenue aggregation would be implemented properly
-      base.totalRevenue = 0;
+      base.totalRevenue = parseFloat(stats.totalRevenue) || 0;
     }
+
+    console.log(`[BusinessesService] Stats for business ${businessId}:`, base);
 
     return base;
   }
@@ -720,13 +869,13 @@ export class BusinessesService {
   async getMyBusinesses(userId: string): Promise<Business[]> {
     // Get businesses where user is an employee
     const memberships = await this.businessMemberRepository.find({
-      where: { 
+      where: {
         user: { id: userId },
-        status: BusinessMemberStatus.ACTIVE 
+        status: BusinessMemberStatus.ACTIVE
       } as any,
-      relations: ['business', 'business.owner'],
+      relations: ['business', 'business.owner', 'business.services'],
     });
-    
+
     return memberships.map(m => m.business);
   }
 

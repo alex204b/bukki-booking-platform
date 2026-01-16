@@ -16,7 +16,34 @@ export class BookingsController {
   @ApiOperation({ summary: 'Create a new booking' })
   @ApiResponse({ status: 201, description: 'Booking created successfully' })
   async create(@Body() createBookingDto: any, @Request() req) {
-    return this.bookingsService.create(createBookingDto, req.user.id);
+    // Business owners and employees can specify a customerId OR customerEmail to create bookings on behalf of customers
+    let customerId: string;
+    
+    if ((req.user.role === 'business_owner' || req.user.role === 'employee') && createBookingDto.customerEmail) {
+      // Backend will handle customer lookup/creation for business owners using email
+      customerId = createBookingDto.customerEmail; // Pass email as string, service will handle it
+    } else if ((req.user.role === 'business_owner' || req.user.role === 'employee') && createBookingDto.customerId) {
+      customerId = createBookingDto.customerId;
+    } else {
+      customerId = req.user.id;
+    }
+    
+    return this.bookingsService.create(createBookingDto, customerId);
+  }
+
+  @Get('business/:businessId')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get all bookings for a specific business' })
+  @ApiResponse({ status: 200, description: 'Bookings retrieved successfully' })
+  async getBusinessBookings(@Param('businessId') businessId: string, @Request() req) {
+    console.log(`[BookingsController] GET /bookings/business/${businessId}`);
+    console.log(`[BookingsController] User: ${req.user.id}, Role: ${req.user.role}`);
+
+    const bookings = await this.bookingsService.getBusinessBookings(businessId);
+    console.log(`[BookingsController] Returning ${bookings.length} bookings`);
+
+    return bookings;
   }
 
   @Get()
@@ -36,13 +63,21 @@ export class BookingsController {
     @Query('businessId') businessId?: string,
     @Query('status') status?: BookingStatus,
   ) {
-    return this.bookingsService.findAllPaginated(
+    console.log(`[BookingsController] GET /bookings`);
+    console.log(`[BookingsController] User ID: ${req.user.id}, Role: ${req.user.role}`);
+    console.log(`[BookingsController] businessId: ${businessId}, status: ${status}`);
+    console.log(`[BookingsController] pagination:`, paginationDto);
+
+    const result = await this.bookingsService.findAllPaginated(
       req.user.id,
       req.user.role,
       paginationDto,
       businessId,
       status,
     );
+
+    console.log(`[BookingsController] Returning ${result.data.length} booking(s), total: ${result.total}`);
+    return result;
   }
 
   @Get('business/:businessId/date/:date')

@@ -31,12 +31,15 @@ describe('BookingsService.create', () => {
     memberRepo = createRepoMock() as any;
 
     // Minimal stubs for collaborators not under test
+    const dataSource: any = { query: jest.fn().mockResolvedValue([]) };
     const reviewsService: any = { createForBooking: jest.fn() };
     const emailService: any = { sendNewBookingNotification: jest.fn() };
-    const trustScoreService: any = { 
-      canMakeBooking: jest.fn().mockResolvedValue({ allowed: true }),
+    const trustScoreService: any = {
+      canMakeBooking: jest.fn().mockReturnValue({ allowed: true }),
       updateTrustScore: jest.fn().mockResolvedValue(undefined),
     };
+    const pushNotificationService: any = { sendNotification: jest.fn() };
+    const messagesService: any = { createNotification: jest.fn() };
 
     service = new BookingsService(
       bookingRepo,
@@ -44,9 +47,12 @@ describe('BookingsService.create', () => {
       businessRepo,
       userRepo,
       memberRepo,
+      dataSource,
       reviewsService,
       emailService,
       trustScoreService,
+      pushNotificationService,
+      messagesService,
     );
   });
 

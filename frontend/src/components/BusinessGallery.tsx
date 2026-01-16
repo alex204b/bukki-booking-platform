@@ -8,6 +8,20 @@ interface BusinessGalleryProps {
 
 export const BusinessGallery: React.FC<BusinessGalleryProps> = ({ images, businessName }) => {
   const [selectedImage, setSelectedImage] = useState<number | null>(null);
+  
+  // Get API base URL for image URLs
+  const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000';
+  
+  // Helper to get full image URL
+  const getImageUrl = (image: string) => {
+    if (!image) return '';
+    if (image.startsWith('http://') || image.startsWith('https://')) {
+      return image;
+    }
+    // Remove leading slash if present to avoid double slashes
+    const cleanPath = image.startsWith('/') ? image : `/${image}`;
+    return `${API_BASE_URL}${cleanPath}`;
+  };
 
   if (!images || images.length === 0) {
     return null;
@@ -45,9 +59,13 @@ export const BusinessGallery: React.FC<BusinessGalleryProps> = ({ images, busine
               onClick={() => openLightbox(index)}
             >
               <img
-                src={image}
+                src={getImageUrl(image)}
                 alt={`${businessName} - Photo ${index + 1}`}
                 className="w-full h-full object-cover"
+                onError={(e) => {
+                  console.error(`Failed to load image: ${getImageUrl(image)}`);
+                  e.currentTarget.style.display = 'none';
+                }}
               />
               <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-opacity" />
             </div>
@@ -96,9 +114,13 @@ export const BusinessGallery: React.FC<BusinessGalleryProps> = ({ images, busine
             onClick={(e) => e.stopPropagation()}
           >
             <img
-              src={images[selectedImage]}
+              src={getImageUrl(images[selectedImage])}
               alt={`${businessName} - Photo ${selectedImage + 1}`}
               className="max-w-full max-h-[90vh] object-contain"
+              onError={(e) => {
+                console.error(`Failed to load image in lightbox: ${getImageUrl(images[selectedImage])}`);
+                e.currentTarget.style.display = 'none';
+              }}
             />
             {images.length > 1 && (
               <div className="text-white text-center mt-4">

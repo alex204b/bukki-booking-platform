@@ -28,7 +28,7 @@ export const BookingReviewPrompt: React.FC<BookingReviewPromptProps> = ({
     {
       enabled: !!booking?.business?.id,
       select: (response) => {
-        const reviews = response.data;
+        const reviews = Array.isArray(response.data) ? response.data : [];
         // For now, we'll check if user has any review for this business
         // In a real implementation, you might want to link reviews to bookings
         return reviews.find((review: any) => review.businessId === booking?.business?.id);

@@ -4,6 +4,7 @@ import { User } from '../../users/entities/user.entity';
 import { Business } from '../../businesses/entities/business.entity';
 import { Service } from '../../services/entities/service.entity';
 import { Review } from '../../reviews/entities/review.entity';
+import { Resource } from '../../resources/entities/resource.entity';
 import { encryptedTransformer } from '../../common/utils/crypto.util';
 
 export enum BookingStatus {
@@ -98,6 +99,13 @@ export class Booking extends BaseEntity {
   @ManyToOne(() => Service, service => service.bookings)
   @JoinColumn()
   service: Service;
+
+  @ManyToOne(() => Resource, { nullable: true })
+  @JoinColumn({ name: 'resourceId' })
+  resource?: Resource;
+
+  @Column({ type: 'int', nullable: true })
+  partySize?: number;
 
   // Note: Reviews are now linked to businesses, not bookings
   // @OneToMany(() => Review, review => review.booking)

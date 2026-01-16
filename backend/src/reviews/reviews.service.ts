@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, ConflictException, ForbiddenException } 
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Review } from './entities/review.entity';
+import { Business } from '../businesses/entities/business.entity';
 import { CreateReviewDto, UpdateReviewDto, ReviewResponseDto } from './dto/review.dto';
 import { PaginationDto, PaginatedResult, createPaginatedResponse } from '../common/dto/pagination.dto';
 
@@ -10,6 +11,8 @@ export class ReviewsService {
   constructor(
     @InjectRepository(Review)
     private reviewRepository: Repository<Review>,
+    @InjectRepository(Business)
+    private businessRepository: Repository<Business>,
   ) {}
 
   async create(createReviewDto: CreateReviewDto, userId: string): Promise<ReviewResponseDto> {
@@ -28,6 +31,10 @@ export class ReviewsService {
     });
 
     const savedReview = await this.reviewRepository.save(review);
+
+    // Update business rating
+    await this.updateBusinessRating(createReviewDto.businessId);
+
     return this.formatReviewResponse(savedReview);
   }
 
@@ -100,6 +107,12 @@ export class ReviewsService {
 
     Object.assign(review, updateReviewDto);
     const updatedReview = await this.reviewRepository.save(review);
+
+    // Update business rating if rating was changed
+    if (updateReviewDto.rating !== undefined) {
+      await this.updateBusinessRating(review.businessId);
+    }
+
     return this.formatReviewResponse(updatedReview);
   }
 
@@ -116,7 +129,11 @@ export class ReviewsService {
       throw new ForbiddenException('You can only delete your own reviews');
     }
 
+    const businessId = review.businessId;
     await this.reviewRepository.remove(review);
+
+    // Update business rating after deletion
+    await this.updateBusinessRating(businessId);
   }
 
   async getBusinessRatingStats(businessId: string): Promise<{
@@ -157,6 +174,32 @@ export class ReviewsService {
       totalReviews: reviews.length,
       ratingDistribution,
     };
+  }
+
+  private async updateBusinessRating(businessId: string): Promise<void> {
+    const reviews = await this.reviewRepository.find({
+      where: { businessId },
+      select: ['rating'],
+    });
+
+    const business = await this.businessRepository.findOne({
+      where: { id: businessId },
+    });
+
+    if (!business) {
+      return;
+    }
+
+    if (reviews.length === 0) {
+      business.rating = 0;
+      business.reviewCount = 0;
+    } else {
+      const totalRating = reviews.reduce((sum, review) => sum + review.rating, 0);
+      business.rating = Math.round((totalRating / reviews.length) * 10) / 10;
+      business.reviewCount = reviews.length;
+    }
+
+    await this.businessRepository.save(business);
   }
 
   private formatReviewResponse(review: Review): ReviewResponseDto {

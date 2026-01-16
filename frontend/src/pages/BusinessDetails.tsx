@@ -88,7 +88,7 @@ export const BusinessDetails: React.FC = () => {
             <p className="text-gray-600 mb-8">{t('businessDoesNotExist')}</p>
             <Link 
               to="/businesses"
-              className="inline-flex items-center gap-2 btn btn-primary"
+              className="inline-flex items-center gap-2 px-4 py-2 text-white bg-[#E7001E] rounded-md hover:bg-[#c50018] transition-colors"
             >
               {t('backToBusinesses')}
             </Link>
@@ -113,12 +113,12 @@ export const BusinessDetails: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8">
+    <div className="min-h-[calc(100vh-4rem)] sm:min-h-[calc(100vh-5rem)] bg-gray-50 pt-8 pb-0">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <div className="mb-8">
           <div className="flex items-center gap-2 text-sm text-gray-600 mb-2">
-                <Link to="/businesses" className="hover:text-primary-600">Businesses</Link>
+                <Link to="/businesses" className="hover:text-accent-600">Businesses</Link>
             <span>/</span>
             <span className="text-gray-900">{business.name}</span>
           </div>
@@ -182,7 +182,7 @@ export const BusinessDetails: React.FC = () => {
                 {renderStars(Math.floor(business.rating || 0))}
               </div>
               <span className="text-sm font-medium text-gray-900">
-                {business.rating?.toFixed(1) || '0.0'}
+                {Number(business.rating || 0).toFixed(1)}
               </span>
             </div>
           </div>
@@ -253,7 +253,7 @@ export const BusinessDetails: React.FC = () => {
                           </div>
                           <Link
                             to={`/book/${service.id}`}
-                            className="ml-4 inline-flex items-center gap-2 btn btn-primary"
+                            className="ml-4 inline-flex items-center gap-2 px-4 py-2 text-white bg-[#E7001E] rounded-md hover:bg-[#c50018] transition-colors"
                           >
                             <Calendar className="h-4 w-4" />
                             Book Now
@@ -277,7 +277,7 @@ export const BusinessDetails: React.FC = () => {
                 <h2 className="text-xl font-semibold text-gray-900">Reviews</h2>
                 <button
                   onClick={() => setShowReviewForm(true)}
-                  className="inline-flex items-center gap-2 btn btn-primary"
+                  className="inline-flex items-center gap-2 px-4 py-2 text-white bg-[#E7001E] rounded-md hover:bg-[#c50018] transition-colors"
                 >
                   <Plus className="h-4 w-4" />
                   Write Review
@@ -320,19 +320,19 @@ export const BusinessDetails: React.FC = () => {
                 {business.phone && (
                   <a
                     href={`tel:${business.phone}`}
-                    className="w-full flex items-center justify-center gap-2 btn btn-primary"
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2 text-white bg-[#E7001E] rounded-md hover:bg-[#c50018] transition-colors"
                   >
                     <Phone className="h-4 w-4" />
-                    {t('callBusiness') || 'Call Business'}
+                    {t('callBusiness')}
                   </a>
                 )}
                 {isBusinessApproved && (
                   <button
                     onClick={() => navigate(`/chat/${business.id}`)}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50"
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2 text-white bg-[#E7001E] rounded-md hover:bg-[#c50018] transition-colors"
                   >
                     <MessageCircle className="h-4 w-4" />
-                    {t('sendMessage') || 'Send Message'}
+                    {t('sendMessage')}
                   </button>
                 )}
                 {business.address && (
@@ -340,10 +340,10 @@ export const BusinessDetails: React.FC = () => {
                     href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(business.address + ', ' + business.city)}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50"
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2 text-white bg-[#E7001E] rounded-md hover:bg-[#c50018] transition-colors"
                   >
                     <MapPin className="h-4 w-4" />
-                    {t('getDirections') || 'Get Directions'}
+                    {t('location')}
                   </a>
                 )}
               </div>

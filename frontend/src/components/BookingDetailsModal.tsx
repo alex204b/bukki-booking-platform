@@ -146,8 +146,8 @@ export const BookingDetailsModal: React.FC<BookingDetailsModalProps> = ({
           {/* Content */}
           <div className="p-6">
             {/* Icon and Title */}
-            <div className="flex items-center justify-center w-12 h-12 mx-auto mb-4 rounded-full bg-orange-100">
-              {React.cloneElement(statusConfig.icon, { className: 'h-6 w-6 text-orange-600' })}
+            <div className="flex items-center justify-center w-12 h-12 mx-auto mb-4 rounded-full bg-red-100">
+              {React.cloneElement(statusConfig.icon, { className: 'h-6 w-6 text-[#E7001E]' })}
             </div>
             
             <h3 className="text-lg font-semibold text-gray-900 text-center mb-2">
@@ -262,10 +262,10 @@ export const BookingDetailsModal: React.FC<BookingDetailsModalProps> = ({
                         onClose();
                         navigate(`/chat/${booking.business.id}`);
                       }}
-                      className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary-600 border border-primary-600 rounded-md hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 transition-colors"
+                      className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[#E7001E] border border-[#E7001E] rounded-md hover:bg-[#c50018] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#E7001E] transition-colors"
                     >
                       <MessageCircle className="h-4 w-4" />
-                      {t('messageBusiness') || 'Message Business'}
+                      {t('messageBusiness')}
                     </button>
                   ) : null;
                 })()
@@ -283,7 +283,7 @@ export const BookingDetailsModal: React.FC<BookingDetailsModalProps> = ({
                 )}
                 <button
                   onClick={onClose}
-                  className="flex-1 px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-md hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 transition-colors"
+                  className="flex-1 px-4 py-2 text-sm font-medium text-white bg-[#E7001E] rounded-md hover:bg-[#c50018] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#E7001E] transition-colors"
                 >
                   {t('close')}
                 </button>

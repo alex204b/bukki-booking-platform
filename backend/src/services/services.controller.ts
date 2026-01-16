@@ -47,7 +47,10 @@ export class ServicesController {
   @ApiOperation({ summary: 'Get services by business' })
   @ApiResponse({ status: 200, description: 'Services retrieved successfully' })
   async findByBusiness(@Param('businessId') businessId: string) {
-    return this.servicesService.findByBusiness(businessId);
+    console.log(`[ServicesController] GET /services/business/${businessId}`);
+    const services = await this.servicesService.findByBusiness(businessId);
+    console.log(`[ServicesController] Returning ${services.length} service(s)`);
+    return services;
   }
 
   @Get(':id')
@@ -61,8 +64,12 @@ export class ServicesController {
   @Get(':id/available-slots')
   @ApiOperation({ summary: 'Get available time slots for a service' })
   @ApiResponse({ status: 200, description: 'Available slots retrieved' })
-  async getAvailableSlots(@Param('id') id: string, @Query('date') date: string) {
-    return this.servicesService.getAvailableSlots(id, date);
+  async getAvailableSlots(
+    @Param('id') id: string,
+    @Query('date') date: string,
+    @Query('partySize') partySize?: number
+  ) {
+    return this.servicesService.getAvailableSlots(id, date, partySize);
   }
 
   @Patch(':id')

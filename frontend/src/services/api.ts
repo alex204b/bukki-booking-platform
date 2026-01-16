@@ -51,31 +51,29 @@ const getApiUrl = () => {
     return 'http://localhost:3000';
   }
   
-  // For mobile browser: if accessing via IP address, use that IP for API
-  if (isMobileBrowser && isIPAddress) {
+  // For ANY browser: if accessing via IP address, use that IP for API
+  // This allows LAN access from other devices
+  if (isIPAddress) {
+    console.log(`[API] Detected IP access: ${currentHost}, using same IP for API`);
     return `http://${currentHost}:3000`;
   }
-  
-  // For mobile browser accessing via localhost, check environment variable
-  if (isMobileBrowser && isLocalhost) {
-    // Try to get IP from environment variable first
+
+  // For localhost access: use environment variable or localhost
+  if (isLocalhost) {
     const envUrl = process.env.REACT_APP_API_URL;
+
+    // Use env URL if it exists and is not localhost
     if (envUrl && !envUrl.includes('localhost') && !envUrl.includes('127.0.0.1')) {
+      console.log('[API] Using API URL from environment:', envUrl);
       return envUrl;
     }
-    
-    // Fallback: show helpful error message
-    console.error('[API] Mobile browser detected but no IP address configured.');
-    console.error('[API] Please set REACT_APP_API_URL environment variable to your computer\'s IP address.');
-    console.error('[API] Example: REACT_APP_API_URL=http://192.168.1.100:3000');
-    console.error('[API] Or access the app via: http://YOUR_COMPUTER_IP:3001');
-    console.error('[API] To find your IP: ipconfig (Windows) or ifconfig (Mac/Linux)');
-    
-    // Return localhost as fallback (will fail, but at least we tried)
+
+    // Default to localhost for local development
+    console.log('[API] Using localhost for local development');
     return 'http://localhost:3000';
   }
-  
-  // For desktop web browser, use environment variable or localhost
+
+  // Fallback: use environment variable or localhost
   return process.env.REACT_APP_API_URL || 'http://localhost:3000';
 };
 
@@ -313,6 +311,7 @@ export const businessService = {
   reject: (id: string, reason?: string) => api.post(`/businesses/${id}/reject`, { reason }),
   suspend: (id: string, reason?: string) => api.post(`/businesses/${id}/suspend`, { reason }),
   unsuspend: (id: string) => api.post(`/businesses/${id}/unsuspend`),
+  requestUnsuspension: (id: string, reason: string) => api.post(`/businesses/${id}/request-unsuspension`, { reason }),
   getStats: (id: string) => api.get(`/businesses/${id}/stats`),
   // Team members
   inviteMember: (id: string, email: string) => api.post(`/businesses/${id}/members`, { email }),

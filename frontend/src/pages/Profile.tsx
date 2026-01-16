@@ -1,17 +1,19 @@
 import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { userService, businessService } from '../services/api';
-import { User, Mail, Phone, MapPin, Save, Edit3 } from 'lucide-react';
+import { userService, businessService, favoritesService } from '../services/api';
+import { User, Mail, Phone, MapPin, Save, Edit3, Heart, Star, ExternalLink } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { TrustScore } from '../components/TrustScore';
 import { TrustScoreBreakdown } from '../components/TrustScoreBreakdown';
 import { NotificationSettings } from '../components/NotificationSettings';
 import { useI18n } from '../contexts/I18nContext';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
+import { useNavigate } from 'react-router-dom';
 
 export const Profile: React.FC = () => {
   const { user } = useAuth();
   const { t } = useI18n();
+  const navigate = useNavigate();
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -42,6 +44,16 @@ export const Profile: React.FC = () => {
     { select: (res) => res.data }
   );
 
+  // Fetch favorite businesses
+  const { data: favorites, isLoading: favoritesLoading } = useQuery(
+    'favorites',
+    () => favoritesService.getAll(),
+    { 
+      select: (res) => res.data,
+      enabled: !!user
+    }
+  );
+
   const acceptInviteMutation = useMutation(
     (businessId: string) => businessService.acceptInvite(businessId, user?.email || ''),
     {
@@ -50,6 +62,19 @@ export const Profile: React.FC = () => {
         queryClient.invalidateQueries('my-invites');
       },
       onError: (e: any) => { toast.error(e.response?.data?.message || t('failedToAcceptInvitation')); }
+    }
+  );
+
+  const removeFavoriteMutation = useMutation(
+    (businessId: string) => favoritesService.remove(businessId),
+    {
+      onSuccess: () => {
+        toast.success(t('removedFromFavorites') || 'Removed from favorites');
+        queryClient.invalidateQueries('favorites');
+      },
+      onError: () => {
+        toast.error(t('failedToRemoveFavorite') || 'Failed to remove favorite');
+      }
     }
   );
 
@@ -100,9 +125,9 @@ export const Profile: React.FC = () => {
       </div>
 
       {/* Profile Header */}
-      <div className="card p-6">
+      <div className="card p-6 border-[#E7001E]">
         <div className="flex items-center space-x-4">
-          <div className="h-20 w-20 rounded-full bg-primary-100 flex items-center justify-center">
+          <div className="h-20 w-20 rounded-full bg-red-100 flex items-center justify-center">
             {user?.avatar ? (
               <img
                 src={user.avatar}
@@ -110,7 +135,7 @@ export const Profile: React.FC = () => {
                 className="h-20 w-20 rounded-full object-cover"
               />
             ) : (
-              <User className="h-10 w-10 text-primary-600" />
+              <User className="h-10 w-10 text-[#E7001E]" />
             )}
           </div>
           <div>
@@ -134,16 +159,16 @@ export const Profile: React.FC = () => {
       )}
 
       {/* Profile Form */}
-      <form onSubmit={handleSubmit} className="card p-6">
+      <form onSubmit={handleSubmit} className="card p-6 border-[#E7001E]">
         <div className="flex items-center justify-between mb-6">
           <h3 className="text-lg font-semibold text-gray-900">Personal Information</h3>
           {!isEditing ? (
             <button
               type="button"
               onClick={() => setIsEditing(true)}
-              className="btn btn-outline btn-sm"
+              className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-[#E7001E] border border-[#E7001E] rounded-md hover:bg-[#c50018] transition-colors"
             >
-              <Edit3 className="h-4 w-4 mr-2" />
+              <Edit3 className="h-4 w-4" />
               Edit
             </button>
           ) : (
@@ -151,20 +176,20 @@ export const Profile: React.FC = () => {
               <button
                 type="button"
                 onClick={handleCancel}
-                className="btn btn-ghost btn-sm"
+                className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={loading}
-                className="btn btn-primary btn-sm"
+                className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-[#E7001E] border border-[#E7001E] rounded-md hover:bg-[#c50018] transition-colors disabled:opacity-50"
               >
                 {loading ? (
                   <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
                 ) : (
                   <>
-                    <Save className="h-4 w-4 mr-2" />
+                    <Save className="h-4 w-4" />
                     Save
                   </>
                 )}
@@ -328,20 +353,81 @@ export const Profile: React.FC = () => {
         </div>
       </form>
 
+      {/* Favorite Businesses */}
+      <div className="card p-6 border-[#E7001E]">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+              <Heart className="h-5 w-5 text-[#E7001E]" />
+              {t('favoriteBusinesses') || 'Favorite Businesses'}
+            </h3>
+          </div>
+          {favoritesLoading ? (
+            <div className="text-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#E7001E] mx-auto"></div>
+            </div>
+          ) : favorites && favorites.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {favorites.map((fav: any) => (
+                <div key={fav.id} className="border border-[#E7001E] rounded-lg p-4 hover:shadow-md transition-shadow">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <h4 className="font-semibold text-gray-900 mb-1">{fav.business?.name}</h4>
+                      {fav.business?.category && (
+                        <p className="text-sm text-gray-600 mb-2">{fav.business.category}</p>
+                      )}
+                      {fav.business?.rating !== undefined && fav.business?.rating !== null && !isNaN(Number(fav.business.rating)) && (
+                        <div className="flex items-center gap-1 mb-2">
+                          <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
+                          <span className="text-sm font-medium">{Number(fav.business.rating).toFixed(1)}</span>
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => removeFavoriteMutation.mutate(fav.business.id)}
+                      className="p-2 text-[#E7001E] hover:bg-red-50 rounded-full transition-colors"
+                      title={t('removeFromFavorites') || 'Remove from favorites'}
+                    >
+                      <Heart className="h-5 w-5 fill-current" />
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => navigate(`/businesses/${fav.business.id}`)}
+                    className="w-full mt-3 inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[#E7001E] rounded-md hover:bg-[#c50018] transition-colors"
+                  >
+                    {t('viewDetails') || 'View Details'}
+                    <ExternalLink className="h-4 w-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-8">
+              <Heart className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+              <p className="text-gray-500">{t('noFavoriteBusinesses') || 'No favorite businesses yet'}</p>
+              <button
+                onClick={() => navigate('/businesses')}
+                className="mt-4 inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[#E7001E] rounded-md hover:bg-[#c50018] transition-colors"
+              >
+                {t('discoverBusinesses') || 'Discover Businesses'}
+              </button>
+            </div>
+          )}
+        </div>
+
       {/* Pending Invites */}
       {Array.isArray(invites) && invites.length > 0 && (
-        <div className="card p-6">
+        <div className="card p-6 border-[#E7001E]">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">{t('pendingInvites') || 'Pending Business Invites'}</h3>
           <div className="space-y-3">
             {invites.map((inv: any) => (
-              <div key={inv.id} className="flex items-center justify-between border rounded p-3">
+              <div key={inv.id} className="flex items-center justify-between border border-[#E7001E] rounded p-3">
                 <div>
                   <div className="font-medium text-gray-900">{inv.business?.name || t('business')}</div>
                   <div className="text-sm text-gray-500">{inv.email}</div>
                 </div>
                 <button
                   onClick={() => acceptInviteMutation.mutate(inv.business.id)}
-                  className="btn btn-primary btn-sm"
+                  className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-[#E7001E] rounded-md hover:bg-[#c50018] transition-colors"
                 >
                   {t('accept') || 'Accept'}
                 </button>
@@ -352,7 +438,7 @@ export const Profile: React.FC = () => {
       )}
 
       {/* Account Settings */}
-      <div className="card p-6">
+      <div className="card p-6 border-[#E7001E]">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">Account Settings</h3>
         <div className="space-y-4">
           <div className="flex items-center justify-between">
@@ -360,7 +446,7 @@ export const Profile: React.FC = () => {
               <p className="font-medium text-gray-900">Change Password</p>
               <p className="text-sm text-gray-600">Update your account password</p>
             </div>
-            <button className="btn btn-outline btn-sm">
+            <button className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-[#E7001E] border border-[#E7001E] rounded-md hover:bg-[#c50018] transition-colors">
               Change Password
             </button>
           </div>
@@ -369,7 +455,7 @@ export const Profile: React.FC = () => {
       </div>
 
       {/* Push Notification Settings */}
-      <div className="card p-6">
+      <div className="card p-6 border-[#E7001E]">
         <NotificationSettings />
       </div>
     </div>

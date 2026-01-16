@@ -47,29 +47,63 @@ export const MyBookings: React.FC = () => {
   const { data: bookings, isLoading, refetch } = useQuery(
     ['my-bookings', isBusinessOwner, isEmployee, user?.id],
     async () => {
-      // Get all bookings first
+      // Get all bookings - handle paginated response
       const allBookingsRes = await bookingService.getAll();
-      const allBookings = allBookingsRes.data || [];
+      
+      // Handle paginated response structure
+      let allBookings: any[] = [];
+      if (Array.isArray(allBookingsRes.data)) {
+        allBookings = allBookingsRes.data;
+      } else if (allBookingsRes.data?.data && Array.isArray(allBookingsRes.data.data)) {
+        allBookings = allBookingsRes.data.data;
+      } else {
+        console.warn('[MyBookings] Unexpected bookings response format:', allBookingsRes.data);
+        allBookings = [];
+      }
+      
+      console.log('[MyBookings] All bookings received:', allBookings.length);
       
       if (isBusinessOwner) {
-        // For business owners, show bookings for their business
+        // For business owners, show BOTH:
+        // 1. Bookings for their business (work bookings)
+        // 2. Bookings they made as customers (personal bookings)
         try {
           const businessRes = await api.get('/businesses/my-business');
           const business = businessRes.data;
-          if (business?.id) {
-            const businessBookings = allBookings.filter((b: any) => 
-              b.business?.id === business.id || b.businessId === business.id
-            );
-            console.log('[MyBookings] Business owner bookings:', {
-              businessId: business.id,
-              totalBookings: businessBookings.length,
-            });
-            return businessBookings;
-          }
+
+          // Get bookings for their business
+          const businessBookings = business?.id
+            ? allBookings.filter((b: any) =>
+                b.business?.id === business.id || b.businessId === business.id
+              )
+            : [];
+
+          // Get bookings they made as customers (personal bookings)
+          const personalBookings = allBookings.filter((b: any) =>
+            b.customer?.id === user?.id || b.customerId === user?.id
+          );
+
+          // Combine both, removing duplicates
+          const combinedBookings = [...businessBookings, ...personalBookings];
+          const uniqueBookings = combinedBookings.filter((booking, index, self) =>
+            index === self.findIndex((b) => b.id === booking.id)
+          );
+
+          console.log('[MyBookings] Business owner bookings:', {
+            businessId: business?.id,
+            businessBookings: businessBookings.length,
+            personalBookings: personalBookings.length,
+            totalBookings: uniqueBookings.length,
+          });
+
+          return uniqueBookings;
         } catch (error) {
-          console.error('Error fetching business bookings:', error);
+          console.error('[MyBookings] Error fetching business bookings:', error);
+          // Fallback: return personal bookings only
+          return allBookings.filter((b: any) =>
+            b.customer?.id === user?.id || b.customerId === user?.id
+          );
         }
-        return [];
       } else if (isEmployee) {
         // For employees, show BOTH:
         // 1. Bookings for their business (work bookings)
@@ -174,9 +208,9 @@ export const MyBookings: React.FC = () => {
       case 'completed':
         return 'text-blue-600 bg-blue-100';
       case 'no_show':
-        return 'text-gray-600 bg-primary-100';
+        return 'text-gray-600 bg-accent-100';
       default:
-        return 'text-gray-600 bg-primary-100';
+        return 'text-gray-600 bg-accent-100';
     }
   };
 
@@ -248,17 +282,16 @@ export const MyBookings: React.FC = () => {
   if (isLoading) {
     return (
       <div className="flex justify-center py-12">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-accent-500"></div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="h-full flex flex-col space-y-2">
+      <div className="flex items-center justify-between flex-shrink-0">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">{t('myBookings')}</h1>
-          <p className="text-gray-600 mt-2">{t('manageAppointments')}</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">{t('myBookings')}</h1>
         </div>
         
         {/* View Toggle */}
@@ -266,9 +299,9 @@ export const MyBookings: React.FC = () => {
           <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg">
             <button
               onClick={() => setViewMode('calendar')}
-              className={`p-2 rounded-md transition-colors ${
+              className={`p-1.5 rounded-md transition-colors ${
                 viewMode === 'calendar'
-                  ? 'bg-white text-primary-600 shadow-sm'
+                  ? 'bg-white text-[#E7001E] shadow-sm'
                   : 'text-gray-600 hover:text-gray-900'
               }`}
               title={t('calendarView')}
@@ -277,9 +310,9 @@ export const MyBookings: React.FC = () => {
             </button>
             <button
               onClick={() => setViewMode('list')}
-              className={`p-2 rounded-md transition-colors ${
+              className={`p-1.5 rounded-md transition-colors ${
                 viewMode === 'list'
-                  ? 'bg-white text-primary-600 shadow-sm'
+                  ? 'bg-white text-[#E7001E] shadow-sm'
                   : 'text-gray-600 hover:text-gray-900'
               }`}
               title={t('listView')}
@@ -292,7 +325,7 @@ export const MyBookings: React.FC = () => {
 
       {/* Pending Requests Section for Business Owners */}
       {isBusinessOwner && (
-        <div className={`${pendingBookings.length > 0 ? 'bg-yellow-50 border-2 border-yellow-200' : 'bg-gray-50 border border-gray-200'} rounded-lg p-4 sm:p-6 mb-6`}>
+        <div className={`${pendingBookings.length > 0 ? 'bg-yellow-50 border-2 border-yellow-200' : 'bg-gray-50 border border-gray-200'} rounded-lg p-2 sm:p-3 flex-shrink-0`}>
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <AlertCircle className={`h-5 w-5 sm:h-6 sm:w-6 ${pendingBookings.length > 0 ? 'text-yellow-600' : 'text-gray-400'}`} />
@@ -369,7 +402,7 @@ export const MyBookings: React.FC = () => {
       )}
 
       {/* Filter Tabs */}
-      <div className="flex space-x-1 bg-primary-100 p-1 rounded-lg w-fit flex-wrap">
+      <div className="flex space-x-1 bg-red-100 p-1 rounded-lg w-fit flex-wrap flex-shrink-0">
         {[
           { key: 'all', label: t('all') },
           ...(isBusinessOwner ? [{ key: 'pending', label: t('pending') }] : []),
@@ -380,9 +413,9 @@ export const MyBookings: React.FC = () => {
           <button
             key={tab.key}
             onClick={() => setFilter(tab.key as any)}
-            className={`px-3 sm:px-4 py-2 rounded-md text-xs sm:text-sm font-medium transition-colors ${
+            className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded-md text-xs sm:text-sm font-medium transition-colors ${
               filter === tab.key
-                ? 'bg-white text-primary-600 shadow-sm'
+                ? 'bg-white text-red-600 shadow-sm'
                 : 'text-gray-600 hover:text-gray-900'
             }`}
           >
@@ -392,17 +425,18 @@ export const MyBookings: React.FC = () => {
       </div>
 
       {/* Content */}
-      {viewMode === 'calendar' ? (
-        <EnhancedCalendarView
-          bookings={filteredBookings || []}
-          onCancelBooking={handleCancelBooking}
-          onBookingClick={(booking) => setSelectedBooking(booking)}
-          onReschedule={async (bookingId: string, newDate: string) => {
-            // TODO: Implement reschedule API call
-            await bookingService.update(bookingId, { appointmentDate: newDate });
-          }}
-        />
-      ) : (
+      <div className="flex-1 min-h-0">
+        {viewMode === 'calendar' ? (
+          <EnhancedCalendarView
+            bookings={filteredBookings || []}
+            onCancelBooking={handleCancelBooking}
+            onBookingClick={(booking) => setSelectedBooking(booking)}
+            onReschedule={async (bookingId: string, newDate: string) => {
+              // TODO: Implement reschedule API call
+              await bookingService.update(bookingId, { appointmentDate: newDate });
+            }}
+          />
+        ) : (
         /* Bookings List */
         filteredBookings?.length === 0 ? (
           <EmptyBookings onCreateBooking={() => navigate('/businesses')} />
@@ -447,7 +481,7 @@ export const MyBookings: React.FC = () => {
                   </div>
                   
                   {booking.notes && (
-                    <div className="mt-4 p-3 bg-primary-50 rounded-lg">
+                    <div className="mt-4 p-3 bg-accent-50 rounded-lg">
                       <p className="text-sm text-gray-600">
                         <strong>{t('notes')}:</strong> {booking.notes}
                       </p>
@@ -510,7 +544,8 @@ export const MyBookings: React.FC = () => {
           ))}
         </div>
         )
-      )}
+        )}
+      </div>
 
       {/* Review Prompts for Completed Bookings */}
       {bookings?.map((booking: any) => (

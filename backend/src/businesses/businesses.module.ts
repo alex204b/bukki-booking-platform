@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
 import { MulterModule } from '@nestjs/platform-express';
@@ -10,6 +10,7 @@ import { BusinessContact } from './entities/business-contact.entity';
 import { User } from '../users/entities/user.entity';
 import { UsersModule } from '../users/users.module';
 import { MessagesModule } from '../messages/messages.module';
+import { RequestsModule } from '../requests/requests.module';
 import { EmailService } from '../common/services/email.service';
 import { multerConfig } from '../common/config/multer.config';
 
@@ -20,6 +21,7 @@ import { multerConfig } from '../common/config/multer.config';
     MulterModule.register(multerConfig),
     UsersModule,
     MessagesModule,
+    forwardRef(() => RequestsModule),
   ],
   controllers: [BusinessesController],
   providers: [BusinessesService, EmailService],

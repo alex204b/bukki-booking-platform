@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, LessThan, Not, IsNull } from 'typeorm';
+import { Repository, LessThan, Not, IsNull, DataSource } from 'typeorm';
 import { Message, MessageType, MessageStatus } from './entities/message.entity';
 import { User } from '../users/entities/user.entity';
 import { Business } from '../businesses/entities/business.entity';
@@ -25,6 +25,7 @@ export class MessagesService {
     private businessMemberRepository: Repository<BusinessMember>,
     private emailService: EmailService,
     private pushNotificationService: PushNotificationService,
+    private dataSource: DataSource,
   ) {}
 
   /**
@@ -241,8 +242,14 @@ export class MessagesService {
     content: string,
     bookingId?: string,
   ): Promise<Message> {
-    console.log('[sendChatMessage] Starting:', { senderId, businessId, contentLength: content?.length, bookingId });
-    
+    // DEBUG: Log incoming parameters
+    console.log('[sendChatMessage] Called with:', {
+      senderId,
+      businessId,
+      contentLength: content?.length,
+      bookingId,
+    });
+
     // Validate content
     if (!content || !content.trim()) {
       throw new BadRequestException('Message content cannot be empty');
@@ -255,12 +262,10 @@ export class MessagesService {
     });
 
     if (!business) {
-      console.error('[sendChatMessage] Business not found:', businessId);
       throw new NotFoundException('Business not found');
     }
 
     if (!business.owner || !business.owner.id) {
-      console.error('[sendChatMessage] Business owner not found:', { businessId, owner: business.owner });
       throw new BadRequestException('Business owner not found. This business may not be properly configured.');
     }
 
@@ -269,6 +274,13 @@ export class MessagesService {
     if (!sender) {
       throw new NotFoundException('User not found');
     }
+
+    // DEBUG: Log sender info
+    console.log('[sendChatMessage] Sender verified:', {
+      senderId: sender.id,
+      senderName: `${sender.firstName} ${sender.lastName}`,
+      senderEmail: sender.email,
+    });
 
     // Determine recipient:
     // - If sender is business owner/employee, recipient is the customer (we need customerId from booking or previous messages)
@@ -285,14 +297,6 @@ export class MessagesService {
         status: BusinessMemberStatus.ACTIVE,
       } as any,
     }) !== null;
-
-    console.log('[sendChatMessage] User role check:', {
-      senderId: currentSenderId,
-      businessOwnerId,
-      isBusinessOwner,
-      isEmployee,
-      businessId,
-    });
 
     let recipientId: string;
 
@@ -315,65 +319,96 @@ export class MessagesService {
         const conversationId = this.generateConversationId('temp', businessOwnerId);
         
         // Find any message in this conversation to get the customer ID
-        // We'll look for messages where the business owner is involved
-        const conversationMessages = await this.messageRepository.find({
-          where: [
-            { business: { id: businessId }, type: MessageType.CHAT, sender: { id: businessOwnerId } },
-            { business: { id: businessId }, type: MessageType.CHAT, recipient: { id: businessOwnerId } },
-          ] as any,
-          relations: ['sender', 'recipient'],
-          order: { createdAt: 'DESC' },
-          take: 20, // Get more messages to find a valid one
+        // We'll look for messages where the business owner OR current employee is involved
+        // CRITICAL: Use raw SQL to get messages to avoid TypeORM relation issues
+        const conversationQuery = `
+          SELECT m.id, m."senderId", m."recipientId", m."createdAt"
+          FROM messages m
+          WHERE m."businessId" = $1
+            AND m.type = $2
+            AND (
+              m."senderId" = $3 OR m."recipientId" = $3 OR
+              m."senderId" = $4 OR m."recipientId" = $4
+            )
+          ORDER BY m."createdAt" DESC
+          LIMIT 20
+        `;
+        const conversationMessagesRaw = await this.dataSource.query(conversationQuery, [
+          businessId,
+          MessageType.CHAT,
+          businessOwnerId,
+          senderId,
+        ]);
+        
+        console.log('[sendChatMessage] Found previous messages for recipient lookup:', {
+          messageCount: conversationMessagesRaw.length,
+          messages: conversationMessagesRaw.map((m: any) => ({
+            id: m.id,
+            senderId: m.senderId,
+            recipientId: m.recipientId,
+          })),
         });
         
-        // Find a message where the business owner is involved and the other person is NOT the business owner
+        // Find a message where business staff (owner or employee) is involved and extract the customer
         let foundRecipient = false;
-        for (const msg of conversationMessages) {
-          const msgSenderId = String(msg.sender.id);
-          const msgRecipientId = String(msg.recipient.id);
-          const currentSenderId = String(senderId);
-          const ownerId = String(businessOwnerId);
-          
+        const currentSenderId = String(senderId);
+        const ownerId = String(businessOwnerId);
+        
+        for (const msg of conversationMessagesRaw) {
+          const msgSenderId = String(msg.senderId);
+          const msgRecipientId = String(msg.recipientId);
+
           // Skip messages where sender and recipient are the same (corrupted data)
           if (msgSenderId === msgRecipientId) {
-            console.warn('[sendChatMessage] Skipping corrupted message with same sender/recipient:', msg.id);
+            console.log('[sendChatMessage] Skipping corrupted message:', { messageId: msg.id });
             continue;
           }
-          
-          // CRITICAL: Ensure we never set recipient to the business owner
-          // If business owner was the sender, recipient must be the customer (and NOT the owner)
-          if (msgSenderId === ownerId && msgRecipientId !== ownerId && msgRecipientId !== currentSenderId) {
+
+          // If current sender (owner or employee) was the sender, recipient is the customer
+          if (msgSenderId === currentSenderId && msgRecipientId !== ownerId && msgRecipientId !== currentSenderId) {
             recipientId = msgRecipientId;
             foundRecipient = true;
-            console.log('[sendChatMessage] Found recipient from message where owner was sender:', {
+            console.log('[sendChatMessage] Found recipient from previous message where current sender was sender:', {
               recipientId,
               messageId: msg.id,
-              ownerId,
-              currentSenderId,
             });
             break;
           }
-          // If business owner was the recipient, sender must be the customer (and NOT the owner)
-          if (msgRecipientId === ownerId && msgSenderId !== ownerId && msgSenderId !== currentSenderId) {
+          // If current sender (owner or employee) was the recipient, sender is the customer
+          if (msgRecipientId === currentSenderId && msgSenderId !== ownerId && msgSenderId !== currentSenderId) {
             recipientId = msgSenderId;
             foundRecipient = true;
-            console.log('[sendChatMessage] Found recipient from message where owner was recipient:', {
+            console.log('[sendChatMessage] Found recipient from previous message where current sender was recipient:', {
               recipientId,
               messageId: msg.id,
-              ownerId,
-              currentSenderId,
             });
             break;
           }
+          // Fallback: If business owner was involved and current sender is employee
+          if (isEmployee) {
+            if (msgSenderId === ownerId && msgRecipientId !== ownerId && msgRecipientId !== currentSenderId) {
+              recipientId = msgRecipientId;
+              foundRecipient = true;
+              console.log('[sendChatMessage] Found recipient from owner message (employee fallback):', {
+                recipientId,
+                messageId: msg.id,
+              });
+              break;
+            }
+            if (msgRecipientId === ownerId && msgSenderId !== ownerId && msgSenderId !== currentSenderId) {
+              recipientId = msgSenderId;
+              foundRecipient = true;
+              console.log('[sendChatMessage] Found recipient from owner message (employee fallback 2):', {
+                recipientId,
+                messageId: msg.id,
+              });
+              break;
+            }
+          }
         }
-        
+
         // Final validation: ensure recipient is not the business owner
         if (foundRecipient && String(recipientId) === String(businessOwnerId)) {
-          console.error('[sendChatMessage] ERROR: Found recipient is the business owner! Resetting...', {
-            recipientId,
-            businessOwnerId,
-            senderId,
-          });
           foundRecipient = false;
           recipientId = undefined as any;
         }
@@ -391,26 +426,29 @@ export class MessagesService {
           if (!firstBooking || !firstBooking.customer) {
             throw new BadRequestException('Cannot determine recipient. No bookings found for this business. Please start the conversation from the customer side or specify a booking.');
           }
-          
+
           recipientId = firstBooking.customer.id as string;
-          console.log('[sendChatMessage] Using customer from first booking:', recipientId);
         }
       }
     } else {
       // Customer sending to business owner
+      // CRITICAL: Customer is the sender, business owner is the recipient
       recipientId = String(business.owner.id);
-      
+
+      console.log('[sendChatMessage] Customer sending message:', {
+        customerSenderId: senderId,
+        businessOwnerRecipientId: recipientId,
+        businessOwnerId: business.owner.id,
+      });
+
       // Check if customer is trying to message their own business
       if (String(senderId) === String(business.owner.id)) {
-        console.error('[sendChatMessage] Customer is trying to message their own business:', {
-          senderId,
-          businessId,
-          businessOwnerId: business.owner.id,
-        });
         throw new BadRequestException('You cannot message your own business.');
       }
       
-      // Verify customer has a booking with this business
+      // Optional: Verify customer has a booking with this business
+      // Commented out to allow messaging without booking requirement
+      /*
       const hasBooking = await this.bookingRepository.findOne({
         where: {
           customer: { id: senderId },
@@ -426,17 +464,12 @@ export class MessagesService {
         });
         throw new BadRequestException('You can only message businesses you have bookings with. Please make a booking first.');
       }
+      */
+
     }
 
     // CRITICAL: Ensure recipient is always different from sender
     if (String(recipientId) === String(senderId)) {
-      console.error('[sendChatMessage] ERROR: Recipient ID equals Sender ID!', {
-        senderId,
-        recipientId,
-        businessId,
-        isBusinessOwner,
-        isEmployee,
-      });
       throw new BadRequestException('Cannot send message to yourself. Recipient must be different from sender.');
     }
 
@@ -445,50 +478,275 @@ export class MessagesService {
     const customerId = isBusinessOwner || isEmployee ? recipientId : senderId;
     const conversationId = this.generateConversationId(customerId, business.owner.id as string);
 
-    // Create message
-    const message = this.messageRepository.create({
-      sender: { id: senderId } as any,
-      recipient: { id: recipientId } as any,
-      business: { id: businessId } as any,
-      type: MessageType.CHAT,
-      subject: `Chat with ${business.name}`,
-      content,
-      status: MessageStatus.UNREAD,
-      conversationId,
-      bookingId: bookingId || undefined,
-      metadata: bookingId ? { bookingId } : undefined,
+    // CRITICAL: Ensure senderId is the ACTUAL sender (the person calling this function)
+    // Do NOT swap or change senderId under any circumstances
+    const actualSenderId = String(senderId);
+    const actualRecipientId = String(recipientId);
+
+    // CRITICAL: Log before setting actualSenderId/actualRecipientId to catch any swapping
+    console.log('[sendChatMessage] Setting actualSenderId and actualRecipientId:', {
+      originalSenderId: senderId,
+      originalRecipientId: recipientId,
+      actualSenderId,
+      actualRecipientId,
+      senderIsBusinessOwner: String(senderId) === String(business.owner.id),
+      senderIsEmployee: isEmployee,
+      senderIsCustomer: !isBusinessOwner && !isEmployee,
     });
 
-    const savedMessage = await this.messageRepository.save(message);
+    // CRITICAL VALIDATION: Ensure sender and recipient are different
+    if (actualSenderId === actualRecipientId) {
+      console.error('[sendChatMessage] CRITICAL ERROR: Sender and recipient are the same!', {
+        senderId: actualSenderId,
+        recipientId: actualRecipientId,
+      });
+      throw new BadRequestException('Sender and recipient cannot be the same.');
+    }
 
-    // Reload the message with relations to verify it was saved correctly
-    const verifiedMessage = await this.messageRepository.findOne({
-      where: { id: savedMessage.id },
+    // CRITICAL VALIDATION: If sender is customer, recipient MUST be business owner
+    if (!isBusinessOwner && !isEmployee) {
+      if (actualRecipientId !== String(business.owner.id)) {
+        console.error('[sendChatMessage] CRITICAL ERROR: Customer sender but recipient is not business owner!', {
+          senderId: actualSenderId,
+          recipientId: actualRecipientId,
+          businessOwnerId: business.owner.id,
+        });
+        throw new BadRequestException('Customer messages must be sent to business owner.');
+      }
+    }
+
+    // CRITICAL VALIDATION: Verify sender entity ID matches the senderId parameter
+    if (String(sender.id) !== actualSenderId) {
+      console.error('[sendChatMessage] CRITICAL ERROR: Sender entity ID mismatch!', {
+        expectedSenderId: actualSenderId,
+        actualSenderEntityId: sender.id,
+        senderEntityName: `${sender.firstName} ${sender.lastName}`,
+      });
+      throw new BadRequestException('Sender ID mismatch. This should never happen.');
+    }
+
+    // DEBUG: Log before creating message
+    console.log('[sendChatMessage] Creating message with:', {
+      actualSenderId,
+      actualRecipientId,
+      senderEntityId: sender.id,
+      senderName: `${sender.firstName} ${sender.lastName}`,
+      businessId,
+      conversationId,
+    });
+
+    // Verify recipient user exists and load full object
+    const recipient = await this.userRepository.findOne({ where: { id: actualRecipientId } });
+    if (!recipient) {
+      throw new NotFoundException(`Recipient user not found: ${actualRecipientId}`);
+    }
+
+    // CRITICAL VALIDATION: Verify recipient entity ID matches
+    if (String(recipient.id) !== actualRecipientId) {
+      console.error('[sendChatMessage] CRITICAL ERROR: Recipient entity ID mismatch!', {
+        expectedRecipientId: actualRecipientId,
+        actualRecipientEntityId: recipient.id,
+        recipientEntityName: `${recipient.firstName} ${recipient.lastName}`,
+      });
+      throw new BadRequestException('Recipient ID mismatch. This should never happen.');
+    }
+
+    console.log('[sendChatMessage] Recipient verified:', {
+      recipientId: recipient.id,
+      recipientName: `${recipient.firstName} ${recipient.lastName}`,
+    });
+
+    // CRITICAL: Re-verify sender one more time before creating message
+    // Reload sender to ensure we have the latest data
+    const verifiedSender = await this.userRepository.findOne({ where: { id: actualSenderId } });
+    if (!verifiedSender) {
+      throw new NotFoundException(`Sender user not found: ${actualSenderId}`);
+    }
+    if (String(verifiedSender.id) !== actualSenderId) {
+      throw new BadRequestException('Sender verification failed');
+    }
+
+    // CRITICAL: Verify sender name matches expected
+    console.log('[sendChatMessage] Final sender verification:', {
+      verifiedSenderId: verifiedSender.id,
+      verifiedSenderName: `${verifiedSender.firstName} ${verifiedSender.lastName}`,
+      expectedSenderId: actualSenderId,
+      expectedSenderName: `${sender.firstName} ${sender.lastName}`,
+      idsMatch: String(verifiedSender.id) === actualSenderId,
+      namesMatch: `${verifiedSender.firstName} ${verifiedSender.lastName}` === `${sender.firstName} ${sender.lastName}`,
+    });
+
+    // CRITICAL FINAL VALIDATION: Ensure senderId hasn't been modified
+    // Re-check against the original senderId parameter one more time
+    if (String(actualSenderId) !== String(senderId)) {
+      console.error('[sendChatMessage] ❌❌❌ CRITICAL: actualSenderId was modified!', {
+        originalSenderId: senderId,
+        currentActualSenderId: actualSenderId,
+        verifiedSenderId: verifiedSender.id,
+      });
+      throw new BadRequestException('Sender ID was modified during processing. This should never happen.');
+    }
+
+    // CRITICAL: Use raw SQL insert to ensure exact senderId and recipientId are used
+    // This completely bypasses TypeORM's relation resolution
+    console.log('[sendChatMessage] Inserting message with raw SQL:', {
+      originalSenderId: senderId,
+      actualSenderId,
+      actualRecipientId,
+      businessId,
+      conversationId,
+      verifiedSenderName: `${verifiedSender.firstName} ${verifiedSender.lastName}`,
+      verifiedSenderId: verifiedSender.id,
+      senderIdsMatch: String(actualSenderId) === String(senderId) && String(actualSenderId) === String(verifiedSender.id),
+    });
+
+    const metadataJson = bookingId ? JSON.stringify({ bookingId }) : null;
+    
+    // CRITICAL: Column order MUST match database schema:
+    // recipientId, businessId, senderId, type, subject, content, status, conversationId, bookingId, metadata
+    const insertQuery = `
+      INSERT INTO messages (
+        "recipientId", 
+        "businessId", 
+        "senderId", 
+        type, 
+        subject, 
+        content, 
+        status, 
+        "conversationId", 
+        "bookingId", 
+        metadata,
+        "createdAt",
+        "updatedAt"
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())
+      RETURNING id
+    `;
+
+    const sqlParams = [
+      actualRecipientId,        // $1: recipientId - MUST be first to match schema
+      businessId,               // $2: businessId
+      actualSenderId,           // $3: senderId - MUST be third to match schema
+      MessageType.CHAT,         // $4: type
+      `Chat with ${business.name}`, // $5: subject
+      content,                  // $6: content
+      MessageStatus.UNREAD,     // $7: status
+      conversationId,          // $8: conversationId
+      bookingId || null,        // $9: bookingId
+      metadataJson,             // $10: metadata
+    ];
+
+    // CRITICAL: Log exact SQL parameters before execution
+    // NOTE: Column order is recipientId, businessId, senderId (matching DB schema)
+    console.log('[sendChatMessage] SQL Parameters (matching DB column order):', {
+      param1_recipientId: sqlParams[0],  // recipientId (first column in DB)
+      param2_businessId: sqlParams[1],   // businessId
+      param3_senderId: sqlParams[2],     // senderId (third column in DB)
+      param4_type: sqlParams[3],
+      param5_subject: sqlParams[4],
+      param6_content: sqlParams[5]?.substring(0, 50),
+      param7_status: sqlParams[6],
+      param8_conversationId: sqlParams[7],
+      param9_bookingId: sqlParams[8],
+      param10_metadata: sqlParams[9],
+      originalSenderId: senderId,
+      actualSenderId,
+      actualRecipientId,
+      senderIdInParams: sqlParams[2],  // Should be actualSenderId
+      recipientIdInParams: sqlParams[0], // Should be actualRecipientId
+      senderIdsMatch: String(sqlParams[2]) === String(senderId),
+      recipientIdsMatch: String(sqlParams[0]) === String(actualRecipientId),
+    });
+
+    const insertResult = await this.dataSource.query(insertQuery, sqlParams);
+
+    const savedMessageId = insertResult[0]?.id;
+    
+    if (!savedMessageId) {
+      throw new BadRequestException('Failed to save message - no ID returned');
+    }
+
+    console.log('[sendChatMessage] Message inserted with ID:', savedMessageId);
+
+    // CRITICAL: Verify what was actually inserted in the database using raw SQL
+    const verifyQuery = `
+      SELECT id, "senderId", "recipientId", content, "createdAt"
+      FROM messages
+      WHERE id = $1
+    `;
+    const dbResult = await this.dataSource.query(verifyQuery, [savedMessageId]);
+    
+    if (dbResult && dbResult[0]) {
+      const dbSenderId = String(dbResult[0].senderId);
+      const dbRecipientId = String(dbResult[0].recipientId);
+      
+      console.log('[sendChatMessage] Direct database query result:', {
+        messageId: dbResult[0].id,
+        dbSenderId,
+        dbRecipientId,
+        expectedSenderId: actualSenderId,
+        expectedRecipientId: actualRecipientId,
+        senderIdMatches: dbSenderId === actualSenderId,
+        recipientIdMatches: dbRecipientId === actualRecipientId,
+        content: dbResult[0].content,
+      });
+
+      if (dbSenderId !== actualSenderId) {
+        console.error('[sendChatMessage] ❌❌❌ CRITICAL: Database has WRONG senderId!', {
+          expected: actualSenderId,
+          actualInDB: dbSenderId,
+          messageId: savedMessageId,
+        });
+      }
+    }
+
+    // Load the saved message with relations to verify
+    const savedMessage = await this.messageRepository.findOne({
+      where: { id: savedMessageId },
       relations: ['sender', 'recipient'],
     });
 
-    // Debug logging
-    console.log('[sendChatMessage] Message created:', {
-      messageId: savedMessage.id,
-      senderId,
-      senderName: `${sender.firstName} ${sender.lastName}`,
-      recipientId,
-      recipientName: verifiedMessage?.recipient ? `${verifiedMessage.recipient.firstName} ${verifiedMessage.recipient.lastName}` : 'N/A',
-      businessId,
-      conversationId,
-      content: content.substring(0, 50),
-      verifiedSenderId: verifiedMessage?.sender?.id,
-      verifiedRecipientId: verifiedMessage?.recipient?.id,
-      senderMatches: String(verifiedMessage?.sender?.id) === String(senderId),
-      recipientMatches: String(verifiedMessage?.recipient?.id) === String(recipientId),
-    });
+    if (!savedMessage) {
+      throw new BadRequestException('Failed to load saved message');
+    }
 
-    if (verifiedMessage && String(verifiedMessage.sender.id) === String(verifiedMessage.recipient.id)) {
-      console.error('[sendChatMessage] CRITICAL ERROR: Message saved with same sender and recipient!', {
-        messageId: savedMessage.id,
-        senderId: verifiedMessage.sender.id,
-        recipientId: verifiedMessage.recipient.id,
+    // DEBUG: Verify saved message via TypeORM
+    const verifyMessage = savedMessage;
+
+    if (verifyMessage) {
+      const savedSenderId = String(verifyMessage.sender?.id);
+      const savedRecipientId = String(verifyMessage.recipient?.id);
+      
+      console.log('[sendChatMessage] Message saved and verified:', {
+        messageId: verifyMessage.id,
+        savedSenderId,
+        savedSenderName: verifyMessage.sender ? `${verifyMessage.sender.firstName} ${verifyMessage.sender.lastName}` : 'N/A',
+        savedRecipientId,
+        savedRecipientName: verifyMessage.recipient ? `${verifyMessage.recipient.firstName} ${verifyMessage.recipient.lastName}` : 'N/A',
+        content: verifyMessage.content,
+        expectedSenderId: actualSenderId,
+        expectedRecipientId: actualRecipientId,
+        senderMatches: savedSenderId === actualSenderId,
+        recipientMatches: savedRecipientId === actualRecipientId,
       });
+
+      // CRITICAL: If the saved message has wrong sender/recipient, log error
+      if (savedSenderId !== actualSenderId) {
+        console.error('[sendChatMessage] ❌❌❌ CRITICAL ERROR: Saved message has WRONG sender!', {
+          expectedSenderId: actualSenderId,
+          actualSavedSenderId: savedSenderId,
+          messageId: verifyMessage.id,
+        });
+      }
+
+      if (savedRecipientId !== actualRecipientId) {
+        console.error('[sendChatMessage] ❌❌❌ CRITICAL ERROR: Saved message has WRONG recipient!', {
+          expectedRecipientId: actualRecipientId,
+          actualSavedRecipientId: savedRecipientId,
+          messageId: verifyMessage.id,
+        });
+      }
+    } else {
+      console.error('[sendChatMessage] ERROR: Could not verify saved message!');
     }
 
     // Send push notification to recipient
@@ -511,7 +769,6 @@ export class MessagesService {
         'messages',
       );
     } catch (error) {
-      console.error('Failed to send push notification for chat message:', error);
       // Don't throw - notification failure shouldn't break message sending
     }
 
@@ -525,6 +782,8 @@ export class MessagesService {
     userId: string,
     businessId: string,
   ): Promise<Message[]> {
+    console.log('[getConversation] Called with:', { userId, businessId });
+
     // Get business owner ID for conversation ID
     const business = await this.businessRepository.findOne({
       where: { id: businessId },
@@ -545,91 +804,47 @@ export class MessagesService {
       } as any,
     }) !== null;
 
-    // For business owners/employees, we need to find the customer ID from existing messages
-    // For customers, use their own ID
-    let customerId: string;
-    if (isBusinessOwner || isEmployee) {
-      // Find a message in this conversation to get the customer ID
-      const businessOwnerId = business.owner.id as string;
-      const tempConversationId = this.generateConversationId(userId, businessOwnerId);
-      
-      // Try to find any message in this conversation
-      const sampleMessage = await this.messageRepository.findOne({
-        where: [
-          { conversationId: tempConversationId, sender: { id: businessOwnerId } },
-          { conversationId: tempConversationId, recipient: { id: businessOwnerId } },
-        ] as any,
-        relations: ['sender', 'recipient'],
-      });
+    // For business owners/employees, we need to find ALL messages for this business
+    // For customers, find messages between customer and business owner
+    const businessOwnerId = business.owner.id as string;
 
-      if (sampleMessage) {
-        // Get the customer ID (whoever is not the business owner)
-        customerId = sampleMessage.sender.id === businessOwnerId 
-          ? sampleMessage.recipient.id as string
-          : sampleMessage.sender.id as string;
-      } else {
-        // No messages yet, try to find from bookings
-        const booking = await this.bookingRepository.findOne({
-          where: { business: { id: businessId } },
-          relations: ['customer'],
-          order: { appointmentDate: 'DESC' },
-        });
-        customerId = booking?.customer?.id as string || userId;
-      }
+    let messages: Message[];
+
+    if (isBusinessOwner || isEmployee) {
+      // Business owner/employee: Get ALL chat messages for this business
+      messages = await this.messageRepository.find({
+        where: {
+          business: { id: businessId },
+          type: MessageType.CHAT,
+        },
+        relations: ['sender', 'recipient', 'business'],
+        order: { createdAt: 'ASC' },
+      });
     } else {
-      customerId = userId;
+      // Customer: Get messages in their conversation with business owner
+      const conversationId = this.generateConversationId(userId, businessOwnerId);
+
+      messages = await this.messageRepository.find({
+        where: {
+          conversationId,
+          type: MessageType.CHAT,
+        },
+        relations: ['sender', 'recipient', 'business'],
+        order: { createdAt: 'ASC' },
+      });
     }
 
-    // Generate conversation ID using customer ID and business owner ID
-    const conversationId = this.generateConversationId(customerId, business.owner.id as string);
-
-    const messages = await this.messageRepository.find({
-      where: [
-        { conversationId, sender: { id: userId } },
-        { conversationId, recipient: { id: userId } },
-      ] as any,
-      relations: ['sender', 'recipient', 'business'],
-      order: { createdAt: 'ASC' },
-      select: {
-        sender: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          email: true,
-          avatar: true,
-        },
-        recipient: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          email: true,
-          avatar: true,
-        },
-        business: {
-          id: true,
-          name: true,
-        },
-      },
-    });
-
-    // Debug logging
-    console.log('[getConversation] Debug:', {
-      userId,
-      businessId,
-      customerId,
-      businessOwnerId: business.owner.id,
-      conversationId,
-      messageCount: messages.length,
-      messages: messages.map(msg => ({
-        id: msg.id,
+    // DEBUG: Log retrieved messages
+    console.log(`[getConversation] Retrieved ${messages.length} messages`);
+    messages.slice(-3).forEach((msg, idx) => {
+      console.log(`[getConversation] Last ${messages.length - idx} messages - Message ${msg.id}:`, {
         senderId: msg.sender?.id,
         senderName: msg.sender ? `${msg.sender.firstName} ${msg.sender.lastName}` : 'N/A',
         recipientId: msg.recipient?.id,
         recipientName: msg.recipient ? `${msg.recipient.firstName} ${msg.recipient.lastName}` : 'N/A',
-        content: msg.content.substring(0, 30),
-        isUserSender: String(msg.sender?.id) === String(userId),
-        isUserRecipient: String(msg.recipient?.id) === String(userId),
-      })),
+        content: msg.content,
+        createdAt: msg.createdAt,
+      });
     });
 
     return messages;
@@ -693,16 +908,7 @@ export class MessagesService {
       }>();
 
       const businessMessages = conversations.filter((message) => message.business.id === userBusiness.id);
-      
-      // Debug logging
-      console.log('[getConversations] Business owner/employee:', {
-        userId,
-        userRole,
-        businessId: userBusiness.id,
-        totalMessages: conversations.length,
-        businessMessages: businessMessages.length,
-      });
-      
+
       businessMessages.forEach((message) => {
           // Determine the customer (the other user in the conversation)
           const customer = String(message.sender.id) === String(userId) ? message.recipient : message.sender;
@@ -837,13 +1043,15 @@ export class MessagesService {
 
     // Send push notification for system messages
     try {
-      await this.pushNotificationService.sendNotification(
+      await this.pushNotificationService.sendToUser(
         recipientId,
-        subject,
-        content,
+        {
+          title: subject,
+          body: content,
+        },
       );
     } catch (error) {
-      console.error('Failed to send push notification for system message:', error);
+      // Don't throw - notification failure shouldn't break message sending
     }
 
     return savedMessage;

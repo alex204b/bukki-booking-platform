@@ -25,6 +25,10 @@ interface Service {
   duration: number;
   isActive: boolean;
   customFields: FormField[];
+  maxBookingsPerCustomerPerDay?: number;
+  maxBookingsPerCustomerPerWeek?: number;
+  bookingCooldownHours?: number;
+  allowMultipleActiveBookings?: boolean;
 }
 
 interface WorkingHours {

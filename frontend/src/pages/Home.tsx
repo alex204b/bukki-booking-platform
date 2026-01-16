@@ -1,543 +1,565 @@
-import React from 'react';
-import { Link } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
-import { useI18n } from '../contexts/I18nContext';
+import React, { useState } from 'react';
 import { useQuery } from 'react-query';
-import { businessService, bookingService } from '../services/api';
-import { Search, Calendar, Star, MapPin, Clock, ArrowRight, TrendingUp, Building2, Mail, Phone, Facebook, Twitter, Instagram, Linkedin } from 'lucide-react';
-import { GeometricSymbol } from '../components/GeometricSymbols';
-import { Logo, LogoWhite } from '../components/Logo';
+import { useNavigate } from 'react-router-dom';
+import { bookingService, api } from '../services/api';
+import { Calendar, Clock, MapPin, ChevronRight, AlertCircle, ChevronLeft, X, Menu, Filter } from 'lucide-react';
+import { format, isToday, isTomorrow, isFuture, isPast } from 'date-fns';
+import { useAuth } from '../contexts/AuthContext';
+import { EmptyBookings } from '../components/EmptyState';
+import { useI18n } from '../contexts/I18nContext';
 
 export const Home: React.FC = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const { t } = useI18n();
+  const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000';
+  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'confirmed' | 'cancelled' | 'completed'>('all');
+  const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'upcoming' | 'past'>('all');
+  const [currentCardIndex, setCurrentCardIndex] = useState(0);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // Fetch real category counts from API
-  const { data: categoryCounts, isLoading: countsLoading } = useQuery(
-    'category-counts',
-    () => businessService.getCategoryCounts(),
+  const isBusinessOwner = user?.role === 'business_owner';
+  const isEmployee = user?.role === 'employee';
+
+  // Listen for sidebar state changes from Layout component
+  React.useEffect(() => {
+    const handleSidebarChange = (event: any) => {
+      setSidebarOpen(event.detail?.isOpen || false);
+    };
+    window.addEventListener('sidebarStateChange', handleSidebarChange);
+    return () => {
+      window.removeEventListener('sidebarStateChange', handleSidebarChange);
+    };
+  }, []);
+
+  // Get bookings
+  const { data: bookings, isLoading, error } = useQuery(
+    ['my-bookings', user?.id],
+    async () => {
+      console.log('[Home] Fetching bookings for user:', user?.id, 'role:', user?.role);
+
+      const allBookingsRes = await bookingService.getAll();
+
+      let allBookings: any[] = [];
+      if (Array.isArray(allBookingsRes.data)) {
+        allBookings = allBookingsRes.data;
+      } else if (allBookingsRes.data?.data && Array.isArray(allBookingsRes.data.data)) {
+        allBookings = allBookingsRes.data.data;
+      }
+
+      console.log('[Home] All bookings from API:', allBookings.length);
+
+      if (isBusinessOwner) {
+        // For business owners, show BOTH:
+        // 1. Bookings for their business (work bookings)
+        // 2. Bookings they made as customers (personal bookings)
+        try {
+          const businessRes = await api.get('/businesses/my-business');
+          const business = businessRes.data;
+          console.log('[Home] Business owner - business:', business?.id);
+
+          // Get bookings for their business
+          const businessBookings = business?.id
+            ? allBookings.filter((b: any) =>
+                b.business?.id === business.id || b.businessId === business.id
+              )
+            : [];
+
+          // Get bookings they made as customers (personal bookings)
+          const personalBookings = allBookings.filter((b: any) =>
+            b.customer?.id === user?.id || b.customerId === user?.id
+          );
+
+          // Combine both, removing duplicates
+          const combined = [...businessBookings, ...personalBookings];
+          const uniqueBookings = Array.from(new Map(combined.map(b => [b.id, b])).values());
+
+          console.log('[Home] Business owner bookings:', {
+            businessId: business?.id,
+            businessBookings: businessBookings.length,
+            personalBookings: personalBookings.length,
+            totalBookings: uniqueBookings.length,
+          });
+
+          return uniqueBookings;
+        } catch (error) {
+          console.error('[Home] Error fetching business bookings:', error);
+          // Fallback: return personal bookings only
+          return allBookings.filter((b: any) =>
+            b.customer?.id === user?.id || b.customerId === user?.id
+          );
+        }
+      } else if (isEmployee) {
+        try {
+          const businessRes = await api.get('/businesses/my-business');
+          const business = businessRes.data;
+
+          const businessBookings = business?.id
+            ? allBookings.filter((b: any) =>
+                b.business?.id === business.id || b.businessId === business.id
+              )
+            : [];
+
+          const personalBookings = allBookings.filter((b: any) =>
+            b.customer?.id === user?.id || b.customerId === user?.id
+          );
+
+          const combined = [...businessBookings, ...personalBookings];
+          const uniqueBookings = Array.from(new Map(combined.map(b => [b.id, b])).values());
+
+          console.log('[Home] Employee bookings:', uniqueBookings.length, uniqueBookings);
+          return uniqueBookings;
+        } catch (error) {
+          console.error('[Home] Error fetching employee bookings:', error);
+          return allBookings.filter((b: any) =>
+            b.customer?.id === user?.id || b.customerId === user?.id
+          );
+        }
+      } else {
+        // Customer bookings
+        const filtered = allBookings.filter((b: any) =>
+          b.customer?.id === user?.id || b.customerId === user?.id
+        );
+        console.log('[Home] Customer bookings:', filtered.length);
+        return filtered;
+      }
+    },
     {
-      select: (response) => response.data,
+      enabled: !!user,
     }
   );
 
-  // Fetch upcoming bookings for dashboard widget
-  const { data: bookings } = useQuery(
-    'upcoming-bookings',
-    () => bookingService.getAll(),
-    {
-      enabled: user?.role === 'customer',
-      select: (response) => {
-        const now = new Date();
-        return response.data.filter((booking: any) => {
-          const appointmentDate = new Date(booking.appointmentDate);
-          return appointmentDate >= now && booking.status !== 'cancelled';
-        }).slice(0, 3); // Get next 3 upcoming
-      },
+  const formatDate = (date: string) => {
+    const appointmentDate = new Date(date);
+    if (isToday(appointmentDate)) {
+      return `Today, ${format(appointmentDate, 'h:mm a')}`;
+    } else if (isTomorrow(appointmentDate)) {
+      return `Tomorrow, ${format(appointmentDate, 'h:mm a')}`;
+    } else {
+      return format(appointmentDate, 'MMM d, yyyy h:mm a');
     }
-  );
-
-  // Fetch trending/popular businesses
-  const { data: trendingBusinesses } = useQuery(
-    'trending-businesses',
-    () => businessService.getAll(),
-    {
-      select: (response) => {
-        return response.data
-          .filter((b: any) => b.status === 'approved' && b.isActive)
-          .sort((a: any, b: any) => (b.reviewCount || 0) - (a.reviewCount || 0))
-          .slice(0, 6);
-      },
-    }
-  );
-
-  // Map category keys to display names and icons
-  const categoryMap: Record<string, { name: string; icon: string; key: string }> = {
-    beauty_salon: { name: t('categoryBeautySalon'), icon: '💄', key: 'beauty_salon' },
-    restaurant: { name: t('categoryRestaurant'), icon: '🍽️', key: 'restaurant' },
-    mechanic: { name: t('categoryMechanic'), icon: '🔧', key: 'mechanic' },
-    tailor: { name: t('categoryTailor'), icon: '✂️', key: 'tailor' },
-    fitness: { name: t('categoryFitness'), icon: '💪', key: 'fitness' },
-    healthcare: { name: t('categoryHealthcare'), icon: '🏥', key: 'healthcare' },
-    education: { name: t('categoryEducation'), icon: '📚', key: 'education' },
-    consulting: { name: t('categoryConsulting'), icon: '💼', key: 'consulting' },
-    other: { name: t('categoryOther'), icon: '🏢', key: 'other' },
   };
 
-  // Build categories array with real counts - show ALL categories like before
-  const categories = Object.entries(categoryMap)
-    .map(([key, info]) => ({
-      ...info,
-      count: categoryCounts?.[key] || 0,
-    }))
-    // Don't filter - show all categories even if count is 0
-    .sort((a, b) => b.count - a.count); // Sort by count descending
+  const getStatusColor = (status: string) => {
+    switch (status?.toLowerCase()) {
+      case 'confirmed':
+        return 'bg-accent-100 text-accent-700';
+      case 'pending':
+        return 'bg-accent-200 text-accent-800';
+      case 'cancelled':
+        return 'bg-red-100 text-red-700';
+      case 'completed':
+        return 'bg-accent-50 text-accent-600';
+      default:
+        return 'bg-gray-100 text-gray-700';
+    }
+  };
 
-  const features = [
-    {
-      title: t('easyBooking'),
-      description: t('bookAppointmentsInFewClicks'),
-      icon: Calendar,
-    },
-    {
-      title: t('realTimeAvailability'),
-      description: t('seeAvailableSlotsInstantly'),
-      icon: Clock,
-    },
-    {
-      title: t('qrCheckIn'),
-      description: t('quickAndContactlessCheckIn'),
-      icon: Search,
-    },
-    {
-      title: t('locationBased'),
-      description: t('findBusinessesNearYou'),
-      icon: MapPin,
-    },
-  ];
+  // Apply filters
+  const filteredBookings = bookings?.filter((booking: any) => {
+    const appointmentDate = new Date(booking.appointmentDate);
+
+    // Status filter
+    if (statusFilter !== 'all' && booking.status?.toLowerCase() !== statusFilter) {
+      return false;
+    }
+
+    // Date filter
+    if (dateFilter === 'today' && !isToday(appointmentDate)) {
+      return false;
+    }
+    if (dateFilter === 'upcoming' && !isFuture(appointmentDate)) {
+      return false;
+    }
+    if (dateFilter === 'past' && !isPast(appointmentDate)) {
+      return false;
+    }
+
+    return true;
+  }) || [];
+
+  // Navigation handlers
+  const handleNextCard = () => {
+    setCurrentCardIndex((prev) => (prev + 1) % (filteredBookings?.length || 1));
+  };
+
+  const handlePrevCard = () => {
+    setCurrentCardIndex((prev) => (prev - 1 + (filteredBookings?.length || 1)) % (filteredBookings?.length || 1));
+  };
+
+  if (error) {
+    console.error('[Home] Error fetching bookings:', error);
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center px-4">
+        <div className="text-center">
+          <AlertCircle className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">{t('pleaseSignIn') || 'Please Sign In'}</h2>
+          <p className="text-gray-600 mb-6">{t('needToSignInToViewBookings') || 'You need to be signed in to view your bookings'}</p>
+          <button
+            onClick={() => navigate('/login')}
+            className="px-6 py-3 bg-accent-500 text-white rounded-lg hover:bg-accent-600 transition-colors font-medium"
+          >
+            {t('signIn')}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-accent-500"></div>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-0 w-full">
-      {/* Hero Section - Mobile Optimized */}
-      <div className="bg-gradient-to-br from-primary-500 via-primary-600 to-primary-700 p-4 sm:p-6 md:p-10 lg:p-16 text-white relative overflow-hidden shadow-2xl rounded-xl sm:rounded-2xl md:rounded-3xl mx-4 sm:mx-6 lg:mx-6">
-        {/* Animated background elements - smaller on mobile */}
-        <div className="absolute top-2 right-2 sm:top-4 sm:right-4 opacity-20 animate-pulse">
-          <GeometricSymbol variant="sun" size={60} strokeWidth={4} color="white" className="sm:hidden" />
-          <GeometricSymbol variant="sun" size={120} strokeWidth={6} color="white" className="hidden sm:block" />
-        </div>
-        <div className="absolute bottom-2 left-2 sm:bottom-4 sm:left-4 opacity-15 animate-pulse" style={{ animationDelay: '1s' }}>
-          <GeometricSymbol variant="mountain" size={50} strokeWidth={3} color="white" className="sm:hidden" />
-          <GeometricSymbol variant="mountain" size={100} strokeWidth={5} color="white" className="hidden sm:block" />
-        </div>
-        {/* Gradient overlay for depth */}
-        <div className="absolute inset-0 bg-gradient-to-t from-primary-800/20 to-transparent rounded-xl sm:rounded-2xl md:rounded-3xl"></div>
-        <div className="relative z-10 transform transition-all duration-300">
-          <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl xl:text-6xl font-bold mb-2 sm:mb-3 md:mb-4 animate-fade-in">
-            {t('welcomeBack')}, {user?.firstName}! 👋
-          </h1>
-          <p className="text-sm sm:text-base md:text-xl lg:text-2xl xl:text-3xl text-primary-100 mb-2 sm:mb-3 font-medium animate-fade-in" style={{ animationDelay: '0.1s' }}>
-            {t('bookAnyLocalService')} <span className="font-bold bg-white/20 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-lg inline-block text-xs sm:text-sm md:text-base">{t('seconds')}</span>
-          </p>
-          {/* Social Proof Ticker - compact on mobile */}
-          <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-xs sm:text-sm md:text-base lg:text-lg text-primary-100 mb-4 sm:mb-6 md:mb-8 animate-fade-in" style={{ animationDelay: '0.2s' }}>
-            <span className="flex items-center gap-1 sm:gap-2 bg-white/10 px-2 sm:px-3 py-1 sm:py-1.5 rounded-full backdrop-blur-sm">
-              <Star className="h-3 w-3 sm:h-4 sm:w-4 md:h-5 md:w-5 fill-yellow-300 text-yellow-300 animate-pulse" />
-              <span className="font-semibold">4.9</span> <span className="hidden sm:inline">{t('avgRating')}</span>
-            </span>
-            <span className="w-1 h-1 bg-white/60 rounded-full hidden sm:inline"></span>
-            <span className="bg-white/10 px-2 sm:px-3 py-1 sm:py-1.5 rounded-full backdrop-blur-sm">{t('cities')}</span>
-            <span className="w-1 h-1 bg-white/60 rounded-full hidden sm:inline"></span>
-            <span className="bg-white/10 px-2 sm:px-3 py-1 sm:py-1.5 rounded-full backdrop-blur-sm">{t('businessesCount')}</span>
-          </div>
-          <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 md:gap-6 animate-fade-in" style={{ animationDelay: '0.3s' }}>
-            <Link
-              to="/businesses"
-              className="btn bg-white text-primary-600 hover:bg-gray-50 hover:scale-105 font-semibold group px-4 sm:px-6 md:px-8 py-2.5 sm:py-3 md:py-4 text-sm sm:text-base md:text-lg shadow-xl transition-all duration-300 hover:shadow-2xl flex items-center justify-center"
-            >
-              <Search className="mr-2 h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6 group-hover:scale-110 transition-transform" />
-              {t('browseBusinesses')}
-              <ArrowRight className="ml-2 h-4 w-4 sm:h-5 sm:w-5 group-hover:translate-x-1 transition-transform" />
-            </Link>
-            {user?.role === 'customer' && (
-              <Link
-                to="/my-bookings"
-                className="btn btn-outline border-2 border-white text-white hover:bg-white hover:text-primary-600 hover:scale-105 font-semibold px-4 sm:px-6 md:px-8 py-2.5 sm:py-3 md:py-4 text-sm sm:text-base md:text-lg shadow-xl transition-all duration-300 hover:shadow-2xl flex items-center justify-center"
-              >
-                <Calendar className="mr-2 h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6" />
-                {t('myBookings')}
-              </Link>
-            )}
-          </div>
+    <div className="h-screen bg-white overflow-hidden flex flex-col">
+      {/* Header */}
+      <div className={`bg-white px-3 py-2 flex-shrink-0 transition-opacity ${sidebarOpen ? 'lg:opacity-100 opacity-75' : 'opacity-100'}`}>
+        <div className="max-w-7xl mx-auto flex items-center justify-center">
+          <h1 className="text-base sm:text-lg font-bold text-gray-900">{t('myBookings')}</h1>
         </div>
       </div>
 
-      {/* Personal Dashboard Bar - Mobile Optimized */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4 md:gap-6 lg:gap-8 px-4 sm:px-6 lg:px-6 py-4 sm:py-6 md:py-8">
-        {/* Upcoming Bookings Widget */}
-        <div className="card p-3 sm:p-4 md:p-6 lg:p-8 relative hover:shadow-xl transition-all duration-300 group hover:-translate-y-1 border border-gray-100 bg-white">
-          <div className="absolute top-1 right-1 sm:top-2 sm:right-2 opacity-10">
-            <GeometricSymbol variant="cross" size={30} strokeWidth={3} color="#f97316" className="sm:hidden" />
-            <GeometricSymbol variant="cross" size={40} strokeWidth={4} color="#f97316" className="hidden sm:block" />
-          </div>
-          <div className="flex items-start justify-between">
-            <div className="flex items-start">
-              <div className="p-1.5 sm:p-2 bg-primary-100 rounded-lg group-hover:scale-110 transition-transform">
-                <Calendar className="h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6 text-primary-600" />
+      {/* Calendar and Filters Buttons - Fixed Top Right */}
+      {filteredBookings && filteredBookings.length > 0 && (
+        <div className={`fixed top-[68px] right-3 z-[30] flex items-center gap-2 transition-opacity ${sidebarOpen ? 'lg:opacity-100 lg:pointer-events-auto opacity-75 pointer-events-none' : 'opacity-100'}`}>
+          <button
+            onClick={() => navigate('/my-bookings')}
+            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg bg-accent-500 text-white hover:bg-accent-600 transition-colors font-medium"
+            title={t('viewAllBookingsInCalendar') || 'View All Bookings in Calendar'}
+          >
+            <Calendar className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">{t('calendar')}</span>
+          </button>
+          <button
+            onClick={() => setMenuOpen(!menuOpen)}
+            className="p-1.5 transition-colors hover:bg-gray-100 rounded-md"
+            aria-label={t('filters')}
+            title={t('filters')}
+          >
+            {menuOpen ? (
+              <X className="h-4 w-4 text-gray-700" />
+            ) : (
+              <Filter className="h-4 w-4 text-gray-700" />
+            )}
+          </button>
+        </div>
+      )}
+
+      {/* Retractable Sidebar with Filters */}
+      <>
+        {/* Sidebar Panel */}
+        <div
+          className={`fixed top-16 right-0 bottom-0 w-72 sm:w-80 backdrop-blur-md z-[35] transform transition-transform duration-300 ease-in-out ${
+            menuOpen ? 'translate-x-0' : 'translate-x-full'
+          }`}
+          style={{
+            background: 'linear-gradient(to left, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.75))'
+          }}
+        >
+          <div className="h-full overflow-y-auto">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-xl font-bold text-gray-900">{t('filters')}</h2>
+                <button
+                  onClick={() => setMenuOpen(false)}
+                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                  aria-label="Close menu"
+                >
+                  <X className="h-6 w-6 text-gray-700" />
+                </button>
               </div>
-              <div className="ml-2 sm:ml-3 md:ml-4 flex-1">
-                <p className="text-xs sm:text-sm md:text-base lg:text-lg font-medium text-gray-600">{t('upcoming')}</p>
-                <p className="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900">
-                  {bookings?.length || 0}
-                </p>
-                {(!bookings || bookings.length === 0) && (
-                  <Link
-                    to="/businesses"
-                    className="text-xs sm:text-sm md:text-base text-primary-600 hover:text-primary-700 font-medium mt-1 sm:mt-2 inline-flex items-center gap-1 group/link"
+
+              <div className="space-y-6">
+                {/* Status Filter */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">{t('status')}</label>
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => {
+                      setStatusFilter(e.target.value as any);
+                      setCurrentCardIndex(0);
+                    }}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-accent-500"
                   >
-                    {t('findNow')}
-                    <ArrowRight className="h-3 w-3 sm:h-4 sm:w-4 group-hover/link:translate-x-1 transition-transform" />
-                  </Link>
+                    <option value="all">{t('all')}</option>
+                    <option value="pending">{t('pending')}</option>
+                    <option value="confirmed">{t('confirmed')}</option>
+                    <option value="completed">{t('completed')}</option>
+                    <option value="cancelled">{t('cancelled')}</option>
+                  </select>
+                </div>
+
+                {/* Date Filter */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">{t('date')}</label>
+                  <select
+                    value={dateFilter}
+                    onChange={(e) => {
+                      setDateFilter(e.target.value as any);
+                      setCurrentCardIndex(0);
+                    }}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-accent-500"
+                  >
+                    <option value="all">{t('all')}</option>
+                    <option value="today">{t('today')}</option>
+                    <option value="upcoming">{t('upcoming')}</option>
+                    <option value="past">{t('past')}</option>
+                  </select>
+                </div>
+
+                {/* Active Filters Summary */}
+                {(statusFilter !== 'all' || dateFilter !== 'all') && (
+                  <div className="pt-4 border-t border-gray-200">
+                    <h3 className="text-sm font-medium text-gray-700 mb-2">{t('activeFilters') || 'Active Filters'}</h3>
+                    <div className="space-y-2">
+                      {statusFilter !== 'all' && (
+                        <div className="flex items-center justify-between p-2 bg-gray-100 rounded-lg">
+                          <span className="text-sm text-gray-700">
+                            {t('status')}: <strong>{statusFilter}</strong>
+                          </span>
+                          <button
+                            onClick={() => setStatusFilter('all')}
+                            className="p-1 hover:bg-gray-200 rounded"
+                          >
+                            <X className="h-4 w-4 text-gray-600" />
+                          </button>
+                        </div>
+                      )}
+                      {dateFilter !== 'all' && (
+                        <div className="flex items-center justify-between p-2 bg-gray-100 rounded-lg">
+                          <span className="text-sm text-gray-700">
+                            {t('date')}: <strong>{dateFilter}</strong>
+                          </span>
+                          <button
+                            onClick={() => setDateFilter('all')}
+                            className="p-1 hover:bg-gray-200 rounded"
+                          >
+                            <X className="h-4 w-4 text-gray-600" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => {
+                        setStatusFilter('all');
+                        setDateFilter('all');
+                      }}
+                      className="w-full mt-3 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors text-sm font-medium"
+                    >
+                      {t('clearAllFilters') || 'Clear All Filters'}
+                    </button>
+                  </div>
                 )}
               </div>
             </div>
           </div>
         </div>
+      </>
 
-        {/* Favorites Widget */}
-        <div className="card p-3 sm:p-4 md:p-6 lg:p-8 relative hover:shadow-xl transition-all duration-300 group hover:-translate-y-1 border border-gray-100 bg-white">
-          <div className="absolute top-1 right-1 sm:top-2 sm:right-2 opacity-10">
-            <GeometricSymbol variant="star" size={30} strokeWidth={3} color="#22c55e" className="sm:hidden" />
-            <GeometricSymbol variant="star" size={40} strokeWidth={4} color="#22c55e" className="hidden sm:block" />
-          </div>
-          <div className="flex items-start justify-between">
-            <div className="flex items-start">
-              <div className="p-1.5 sm:p-2 bg-success-100 rounded-lg group-hover:scale-110 transition-transform">
-                <Star className="h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6 text-success-600" />
-              </div>
-              <div className="ml-2 sm:ml-3 md:ml-4 flex-1">
-                <p className="text-xs sm:text-sm md:text-base lg:text-lg font-medium text-gray-600">{t('favorites')}</p>
-                <p className="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900">0</p>
-                <Link
-                  to="/businesses"
-                  className="text-xs sm:text-sm md:text-base text-success-600 hover:text-success-700 font-medium mt-1 sm:mt-2 inline-flex items-center gap-1 group/link"
-                >
-                  {t('saveYourSpots')}
-                  <ArrowRight className="h-3 w-3 sm:h-4 sm:w-4 group-hover/link:translate-x-1 transition-transform" />
-                </Link>
-              </div>
-            </div>
+      {/* Bookings Display */}
+      {!bookings || bookings.length === 0 ? (
+        <div className={`flex-1 flex items-center justify-center transition-opacity ${sidebarOpen ? 'lg:opacity-100 lg:pointer-events-auto opacity-75 pointer-events-none' : 'opacity-100'}`}>
+          <EmptyBookings onCreateBooking={() => navigate('/businesses')} />
+        </div>
+      ) : filteredBookings.length === 0 ? (
+        <div className={`flex-1 flex items-center justify-center text-center transition-opacity ${sidebarOpen ? 'lg:opacity-100 lg:pointer-events-auto opacity-75 pointer-events-none' : 'opacity-100'}`}>
+          <div>
+            <AlertCircle className="h-10 w-10 sm:h-12 sm:w-12 text-gray-400 mx-auto mb-2" />
+            <h2 className="text-base sm:text-lg font-bold text-gray-900 mb-1.5 px-4">{t('noBookingsMatchFilters') || 'No bookings match your filters'}</h2>
+            <p className="text-xs sm:text-sm text-gray-600 mb-3 px-4">{t('tryAdjustingFilters') || 'Try adjusting your filters to see more results'}</p>
+            <button
+              onClick={() => {
+                setStatusFilter('all');
+                setDateFilter('all');
+              }}
+              className="px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm bg-accent-500 text-white rounded-lg hover:bg-accent-600 transition-colors font-medium"
+            >
+              {t('clearFilters') || 'Clear Filters'}
+            </button>
           </div>
         </div>
+      ) : (
+        <div className="flex-1 relative w-full max-w-6xl mx-auto flex items-center justify-center overflow-hidden px-2 sm:px-4">
+          {/* Navigation Buttons - Slightly dimmed when sidebar is open on mobile only */}
+          <button
+            onClick={handlePrevCard}
+            className={`absolute left-1 sm:left-2 z-[40] p-1.5 sm:p-2 bg-white rounded-full shadow-lg hover:shadow-xl transition-all hover:scale-110 ${sidebarOpen ? 'lg:opacity-100 lg:pointer-events-auto opacity-75 pointer-events-none' : 'opacity-100'}`}
+            aria-label="Previous card"
+          >
+            <ChevronLeft className="h-4 w-4 sm:h-5 sm:w-5 text-gray-700" />
+          </button>
 
-        {/* My Businesses Widget */}
-        {user?.role === 'business_owner' ? (
-          <div className="card p-3 sm:p-4 md:p-6 lg:p-8 relative hover:shadow-xl transition-all duration-300 group hover:-translate-y-1 border border-gray-100 bg-white">
-            <div className="absolute top-1 right-1 sm:top-2 sm:right-2 opacity-10">
-              <GeometricSymbol variant="diamond" size={30} strokeWidth={3} color="#a855f7" className="sm:hidden" />
-              <GeometricSymbol variant="diamond" size={40} strokeWidth={4} color="#a855f7" className="hidden sm:block" />
-            </div>
-            <div className="flex items-start justify-between">
-              <div className="flex items-start">
-                <div className="p-1.5 sm:p-2 bg-accent-100 rounded-lg group-hover:scale-110 transition-transform">
-                  <Building2 className="h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6 text-accent-600" />
-                </div>
-                <div className="ml-2 sm:ml-3 md:ml-4 flex-1">
-                  <p className="text-xs sm:text-sm md:text-base lg:text-lg font-medium text-gray-600">{t('myBusinesses')}</p>
-                  <p className="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900">1</p>
-                  <Link
-                    to="/business-dashboard"
-                    className="text-xs sm:text-sm md:text-base text-accent-600 hover:text-accent-700 font-medium mt-1 sm:mt-2 inline-flex items-center gap-1 group/link"
-                  >
-                    {t('manage')}
-                    <ArrowRight className="h-3 w-3 sm:h-4 sm:w-4 group-hover/link:translate-x-1 transition-transform" />
-                  </Link>
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="card p-3 sm:p-4 md:p-6 lg:p-8 relative hover:shadow-xl transition-all duration-300 group hover:-translate-y-1 border border-gray-100 bg-white">
-            <div className="absolute top-1 right-1 sm:top-2 sm:right-2 opacity-10">
-              <GeometricSymbol variant="diamond" size={30} strokeWidth={3} color="#a855f7" className="sm:hidden" />
-              <GeometricSymbol variant="diamond" size={40} strokeWidth={4} color="#a855f7" className="hidden sm:block" />
-            </div>
-            <div className="flex items-start justify-between">
-              <div className="flex items-start">
-                <div className="p-1.5 sm:p-2 bg-accent-100 rounded-lg group-hover:scale-110 transition-transform">
-                  <MapPin className="h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6 text-accent-600" />
-                </div>
-                <div className="ml-2 sm:ml-3 md:ml-4 flex-1">
-                  <p className="text-xs sm:text-sm md:text-base lg:text-lg font-medium text-gray-600">{t('nearby')}</p>
-                  <p className="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900">-</p>
-                  <Link
-                    to="/businesses"
-                    className="text-xs sm:text-sm md:text-base text-accent-600 hover:text-accent-700 font-medium mt-1 sm:mt-2 inline-flex items-center gap-1 group/link"
-                  >
-                    {t('explore')}
-                    <ArrowRight className="h-3 w-3 sm:h-4 sm:w-4 group-hover/link:translate-x-1 transition-transform" />
-                  </Link>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+          <button
+            onClick={handleNextCard}
+            className={`absolute right-1 sm:right-2 z-[40] p-1.5 sm:p-2 bg-white rounded-full shadow-lg hover:shadow-xl transition-all hover:scale-110 ${sidebarOpen ? 'lg:opacity-100 lg:pointer-events-auto opacity-75 pointer-events-none' : 'opacity-100'}`}
+            aria-label="Next card"
+          >
+            <ChevronRight className="h-4 w-4 sm:h-5 sm:w-5 text-gray-700" />
+          </button>
 
-      {/* Trending Businesses Section */}
-      {trendingBusinesses && trendingBusinesses.length > 0 && (
-        <div className="px-4 sm:px-6 lg:px-6 py-4 sm:py-6 md:py-8">
-          <div className="flex items-center justify-between mb-4 sm:mb-6">
-            <div className="flex items-center gap-1.5 sm:gap-2">
-              <div className="p-1.5 sm:p-2 bg-primary-100 rounded-lg">
-                <TrendingUp className="h-4 w-4 sm:h-5 sm:w-5 text-primary-600" />
-              </div>
-              <h2 className="text-lg sm:text-2xl md:text-3xl lg:text-4xl font-bold text-gray-900">{t('trendingNearby')}</h2>
-            </div>
-            <Link
-              to="/businesses"
-              className="text-xs sm:text-sm md:text-base lg:text-lg text-primary-600 hover:text-primary-700 font-medium flex items-center gap-1 transition-all duration-300 hover:gap-2 group"
-            >
-              {t('viewAll')}
-              <ArrowRight className="h-3 w-3 sm:h-4 sm:w-4 md:h-5 md:w-5 transition-transform group-hover:translate-x-1" />
-            </Link>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 md:gap-6 overflow-x-auto pb-2">
-            {trendingBusinesses.slice(0, 6).map((business: any) => (
-              <Link
-                key={business.id}
-                to={`/businesses/${business.id}`}
-                className="card p-3 sm:p-4 hover:shadow-xl transition-all duration-300 group hover:-translate-y-1 border border-gray-100 bg-white"
-              >
-                <div className="flex items-start gap-2 sm:gap-3 md:gap-4">
-                  {business.logo ? (
-                    <img
-                      src={business.logo}
-                      alt={business.name}
-                      className="w-12 h-12 sm:w-14 sm:h-14 md:w-16 md:h-16 rounded-lg object-cover flex-shrink-0"
-                    />
-                  ) : (
-                    <div className="w-12 h-12 sm:w-14 sm:h-14 md:w-16 md:h-16 rounded-lg bg-primary-100 flex items-center justify-center flex-shrink-0">
-                      <Building2 className="h-6 w-6 sm:h-7 sm:w-7 md:h-8 md:w-8 text-primary-600" />
-                    </div>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <h3 className="text-sm sm:text-base md:text-lg lg:text-xl font-semibold text-gray-900 truncate group-hover:text-primary-600 transition-colors">
-                      {business.name}
-                    </h3>
-                    <p className="text-xs sm:text-sm md:text-base text-gray-500 capitalize">{business.category?.replace('_', ' ')}</p>
-                    <div className="flex items-center gap-1.5 sm:gap-2 mt-1 sm:mt-2">
-                      {business.rating > 0 && (
-                        <div className="flex items-center gap-0.5 sm:gap-1">
-                          <Star className="h-3 w-3 sm:h-4 sm:w-4 fill-yellow-400 text-yellow-400" />
-                          <span className="text-xs sm:text-sm font-medium">{business.rating.toFixed(1)}</span>
+          {/* Stacked Cards */}
+          <div className="relative w-full h-full flex items-center justify-center">
+            {filteredBookings.map((booking: any, index: number) => {
+              const offset = index - currentCardIndex;
+              const isVisible = Math.abs(offset) <= 4;
+
+              if (!isVisible) return null;
+
+              // Calculate transform and z-index based on position
+              let transform = '';
+              let zIndex = 0;
+              let opacity = 1;
+              let scale = 1;
+
+              if (offset === 0) {
+                // Front card
+                transform = 'translateX(0) translateY(-90px) rotateY(0deg)';
+                zIndex = 30;
+                opacity = 1;
+                scale = 1;
+              } else if (offset > 0) {
+                // Cards to the right (behind)
+                transform = `translateX(${offset * 100}px) translateY(${offset * 50 - 90}px) rotateY(-8deg)`;
+                zIndex = 30 - offset * 10;
+                opacity = 1;
+                scale = 1 - offset * 0.06;
+              } else {
+                // Cards to the left (behind)
+                transform = `translateX(${offset * 100}px) translateY(${Math.abs(offset) * 50 - 90}px) rotateY(8deg)`;
+                zIndex = 30 + offset * 10;
+                opacity = 1;
+                scale = 1 + offset * 0.06;
+              }
+
+              return (
+                <div
+                  key={booking.id}
+                  className="absolute transition-all duration-500 ease-out w-[310px] sm:w-[360px] md:w-[400px]"
+                  style={{
+                    transform: `${transform} scale(${scale})`,
+                    zIndex,
+                    opacity: opacity,
+                    height: 'min(calc(100vh - 220px), 400px)',
+                  }}
+                >
+                  <div
+                    onClick={() => navigate('/my-bookings')}
+                    className="block h-full bg-white rounded-3xl shadow-2xl overflow-hidden hover:shadow-3xl transition-shadow cursor-pointer"
+                  >
+                    {/* Booking Header with Image/Gradient */}
+                    {booking.business?.images && booking.business.images.length > 0 ? (
+                      <div className="relative h-[40%] bg-gray-200 overflow-hidden">
+                        <img
+                          src={`${booking.business.images[0].startsWith('http') ? '' : API_BASE_URL}${booking.business.images[0]}`}
+                          alt={booking.business.name}
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            console.error(`Failed to load business image: ${API_BASE_URL}${booking.business.images[0]}`);
+                            e.currentTarget.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="400" height="300"%3E%3Crect fill="%23f3f4f6" width="400" height="300"/%3E%3C/svg%3E';
+                          }}
+                        />
+                        {/* Status Badge on Image */}
+                        <div className="absolute top-2 right-2">
+                          <div className={`px-2 py-1 rounded-full text-[10px] sm:text-xs font-semibold shadow-lg ${getStatusColor(booking.status)}`}>
+                            {booking.status}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="h-[40%] bg-gradient-to-br from-[#330007] to-[#220005] flex items-center justify-center relative">
+                        <Calendar className="h-12 w-12 sm:h-14 sm:w-14 text-white opacity-30" />
+                        {/* Status Badge on Gradient */}
+                        <div className="absolute top-2 right-2">
+                          <div className={`px-2 py-1 rounded-full text-[10px] sm:text-xs font-semibold shadow-lg ${getStatusColor(booking.status)}`}>
+                            {booking.status}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Booking Info */}
+                    <div className="h-[60%] flex flex-col p-3">
+                      <div className="flex items-start justify-between mb-1.5">
+                        <div className="flex-1 min-w-0 pr-1.5">
+                          <h3 className="text-sm sm:text-base font-bold text-gray-900 mb-0.5 truncate">
+                            {booking.service?.name || 'Service'}
+                          </h3>
+                          <p className="text-[10px] sm:text-xs text-gray-600 font-medium truncate">
+                            {booking.business?.name || 'Business'}
+                          </p>
+                        </div>
+                        <div className="text-base sm:text-lg font-bold text-accent-500 flex-shrink-0">
+                          ${booking.totalAmount || 0}
+                        </div>
+                      </div>
+
+                      {/* Date & Time */}
+                      <div className="flex items-center text-gray-700 mb-1.5">
+                        <Calendar className="h-3.5 w-3.5 mr-1.5 text-accent-500 flex-shrink-0" />
+                        <span className="font-medium text-xs truncate">{formatDate(booking.appointmentDate)}</span>
+                      </div>
+
+                      {/* Duration */}
+                      <div className="flex items-center text-gray-600 mb-1.5">
+                        <Clock className="h-3.5 w-3.5 mr-1.5 text-gray-400 flex-shrink-0" />
+                        <span className="text-xs">{booking.service?.duration || 0} minutes</span>
+                      </div>
+
+                      {/* Location */}
+                      {booking.business?.address && (
+                        <div className="flex items-start text-gray-600 mb-1.5">
+                          <MapPin className="h-3.5 w-3.5 mr-1.5 text-gray-400 mt-0.5 flex-shrink-0" />
+                          <span className="flex-1 text-[10px] sm:text-xs line-clamp-1">
+                            {booking.business.address}
+                            {booking.business.city && `, ${booking.business.city}`}
+                          </span>
                         </div>
                       )}
-                      {business.reviewCount > 0 && (
-                        <span className="text-xs sm:text-sm text-gray-500">({business.reviewCount} {t('reviews')})</span>
+
+                      {/* Notes */}
+                      {booking.notes && (
+                        <div className="mt-1 p-1.5 bg-gray-50 rounded-lg">
+                          <p className="text-[10px] sm:text-xs text-gray-600 line-clamp-1">
+                            <strong>{t('notes')}:</strong> {booking.notes}
+                          </p>
+                        </div>
                       )}
+
+                      {/* Spacer */}
+                      <div className="flex-1"></div>
+
+                      {/* View Details Button */}
+                      <div className="mt-1.5 pt-2 border-t border-gray-200">
+                        <div className="flex items-center justify-center text-accent-500 text-xs font-semibold hover:text-accent-600 transition-colors">
+                          <span>{t('View Full Details') || 'View Full Details'}</span>
+                          <ChevronRight className="h-3.5 w-3.5 ml-0.5" />
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </Link>
-            ))}
+              );
+            })}
+          </div>
+
+          {/* Card Counter */}
+          <div className="absolute bottom-24 sm:bottom-28 left-1/2 -translate-x-1/2 bg-white px-2.5 py-1 rounded-full shadow-lg z-[40]">
+            <span className="text-[10px] sm:text-xs font-medium text-gray-700">
+              {currentCardIndex + 1} / {filteredBookings.length}
+            </span>
           </div>
         </div>
       )}
-
-      {/* Categories - Horizontal Scrollable Chips */}
-      <div className="px-4 sm:px-6 lg:px-6 py-4 sm:py-6 md:py-8">
-        <div className="flex items-center gap-1.5 sm:gap-2 mb-4 sm:mb-6">
-          <div className="p-1.5 sm:p-2 bg-primary-100 rounded-lg">
-            <Search className="h-4 w-4 sm:h-5 sm:w-5 text-primary-600" />
-          </div>
-          <h2 className="text-lg sm:text-2xl md:text-3xl lg:text-4xl font-bold text-gray-900">{t('browseByCategory')}</h2>
-        </div>
-        {countsLoading ? (
-          <div className="flex gap-3 sm:gap-4 md:gap-6 overflow-x-auto pb-2 -mx-4 sm:-mx-6 lg:-mx-6 px-4 sm:px-6 lg:px-6">
-            {[1, 2, 3, 4, 5, 6].map((i) => (
-              <div key={i} className="flex-shrink-0 w-full sm:w-[calc((100%-1rem)/2)] lg:w-[calc((100%-2rem)/3)] card p-3 sm:p-4 md:p-5 text-center animate-pulse">
-                <div className="h-8 w-8 sm:h-10 sm:w-10 md:h-12 md:w-12 bg-gray-200 rounded mx-auto mb-2 sm:mb-3"></div>
-                <div className="h-4 sm:h-5 bg-gray-200 rounded mb-1 sm:mb-2"></div>
-                <div className="h-3 sm:h-4 bg-gray-200 rounded"></div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="flex gap-3 sm:gap-4 md:gap-6 overflow-x-auto pb-2 scrollbar-hide -mx-4 sm:-mx-6 lg:-mx-6 px-4 sm:px-6 lg:px-6">
-            {categories.map((category) => (
-              <Link
-                key={category.key}
-                to={`/businesses?category=${category.key}`}
-                className="flex-shrink-0 w-full sm:w-[calc((100%-1rem)/2)] lg:w-[calc((100%-2rem)/3)] card p-3 sm:p-4 md:p-5 text-center hover:shadow-xl transition-all duration-300 hover:scale-110 hover:-translate-y-1 border border-gray-100 bg-white"
-              >
-                <div className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl mb-2 sm:mb-3">{category.icon}</div>
-                <h3 className="font-medium text-gray-900 text-sm sm:text-base md:text-lg mb-1 sm:mb-2">{category.name}</h3>
-                <p className="text-xs sm:text-sm md:text-base text-gray-500">
-                  {category.count} {category.count === 1 ? t('spot') : t('spots')}
-                </p>
-              </Link>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Features */}
-      <div className="px-4 sm:px-6 lg:px-6 py-4 sm:py-6 md:py-8">
-        <div className="flex items-center gap-1.5 sm:gap-2 mb-4 sm:mb-6">
-          <div className="p-1.5 sm:p-2 bg-primary-100 rounded-lg">
-            <Star className="h-4 w-4 sm:h-5 sm:w-5 text-primary-600 fill-primary-600" />
-          </div>
-          <h2 className="text-lg sm:text-2xl md:text-3xl lg:text-4xl font-bold text-gray-900">{t('whyChooseBukki')}</h2>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 md:gap-6 pb-4">
-          {features.map((feature, index) => (
-            <div
-              key={feature.title}
-              className="card p-3 sm:p-4 md:p-6 text-center hover:shadow-xl transition-all duration-300 hover:-translate-y-1 border border-gray-100 bg-white group"
-              style={{ animationDelay: `${index * 0.1}s` }}
-            >
-              <div className="p-2 sm:p-3 md:p-4 bg-gradient-to-br from-primary-100 to-primary-50 rounded-full w-fit mx-auto mb-2 sm:mb-3 md:mb-4 group-hover:scale-110 transition-transform duration-300">
-                <feature.icon className="h-5 w-5 sm:h-6 sm:w-6 md:h-8 md:w-8 text-primary-600" />
-              </div>
-              <h3 className="text-sm sm:text-base md:text-lg lg:text-xl font-semibold text-gray-900 mb-1 sm:mb-2 group-hover:text-primary-600 transition-colors">{feature.title}</h3>
-              <p className="text-xs sm:text-sm md:text-base text-gray-600">{feature.description}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Super Admin CTA */}
-      {user?.role === 'super_admin' && (
-        <div className="bg-gradient-to-r from-accent-600 to-accent-800 p-8 text-white mt-0">
-          <div>
-            <h2 className="text-3xl md:text-4xl font-bold mb-4">
-              {t('platformAdministration')}
-            </h2>
-            <p className="text-xl md:text-2xl text-accent-100 mb-6">
-              {t('managePlatform')}
-            </p>
-            <Link
-              to="/admin-dashboard"
-              className="btn bg-white text-accent-600 hover:bg-gray-100 btn-lg text-lg"
-            >
-              {t('adminDashboard')}
-            </Link>
-          </div>
-        </div>
-      )}
-
-      {/* Footer Section - Orange Design */}
-      <footer className="bg-orange-600 overflow-hidden -mx-2 sm:-mx-4 lg:-mx-6 lg:w-[calc(100vw-16rem+3rem)]">
-        <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-6">
-          {/* Owner-onboarding banner */}
-          {user?.role === 'customer' && (
-            <div className="p-4">
-              <div className="flex flex-col items-center justify-between gap-4 sm:flex-row">
-                <div className="flex items-center gap-3 text-white">
-                  <div>
-                    <p className="text-lg md:text-xl font-semibold text-white">{t('ownABusiness')}</p>
-                    <p className="text-base text-white">
-                      {t('addItIn60Seconds')}
-                    </p>
-                  </div>
-                </div>
-
-                <Link
-                  to="/business-onboarding"
-                  className="flex items-center gap-2 rounded-lg bg-white border-2 border-orange-600 px-5 py-2.5 text-base md:text-lg font-semibold text-orange-600 hover:bg-orange-50 transition-all whitespace-nowrap"
-                >
-                  {t('addYourBusiness')}
-                  <ArrowRight className="h-5 w-5" />
-                </Link>
-              </div>
-            </div>
-          )}
-
-          {/* Separator Line */}
-          {user?.role === 'customer' && (
-            <div className="border-t border-white/30 mx-4"></div>
-          )}
-
-          {/* Main Footer Content */}
-          <div className="px-4 py-12 text-white">
-            <div className="grid grid-cols-1 gap-10 md:grid-cols-4">
-              {/* Company Info */}
-              <div className="space-y-4">
-                <h3 className="text-2xl md:text-3xl font-bold text-white">BUKKi</h3>
-                <p className="text-base md:text-lg leading-relaxed text-white/90">
-                  {t('bookAnyLocalServiceFooter')}
-                </p>
-                <div className="flex gap-4">
-                  {[Facebook, Twitter, Instagram, Linkedin].map((Icon, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      className="rounded-full border-2 border-white p-2 transition-all hover:bg-white/20"
-                      aria-label={`Social media link ${i + 1}`}
-                    >
-                      <Icon className="h-6 w-6 text-white" />
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Quick Links */}
-              <div>
-                <h4 className="mb-4 text-lg md:text-xl font-semibold">{t('quickLinks')}</h4>
-                <ul className="space-y-2 text-base">
-                  {[
-                    { to: '/businesses', label: t('browseBusinesses') },
-                    { to: '/my-bookings', label: t('myBookings') },
-                    { to: '/business-onboarding', label: t('addYourBusiness') },
-                    { to: '/profile', label: t('profile') },
-                  ].map((l) => (
-                    <li key={l.to}>
-                      <Link
-                        to={l.to}
-                        className="inline-block text-white hover:text-orange-200 transition-colors"
-                      >
-                        {l.label}
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              {/* Support */}
-              <div>
-                <h4 className="mb-4 text-lg md:text-xl font-semibold">{t('support')}</h4>
-                <ul className="space-y-2 text-base">
-                  {[t('helpCenter'), t('contactUs'), t('privacyPolicy'), t('termsOfService')].map(
-                    (txt) => (
-                      <li key={txt}>
-                        <button
-                          type="button"
-                          className="inline-block text-white hover:text-orange-200 transition-colors"
-                          aria-label={txt}
-                        >
-                          {txt}
-                        </button>
-                      </li>
-                    )
-                  )}
-                </ul>
-              </div>
-
-              {/* Contact */}
-              <div>
-                <h4 className="mb-4 text-lg md:text-xl font-semibold">{t('contact')}</h4>
-                <ul className="space-y-3 text-base">
-                  <li className="flex items-center gap-2 text-white">
-                    <Mail className="h-5 w-5" />
-                    <a href="mailto:support@bukki.com" className="hover:text-orange-200">
-                      support@bukki.com
-                    </a>
-                  </li>
-                  <li className="flex items-center gap-2 text-white">
-                    <Phone className="h-5 w-5" />
-                    <a href="tel:+1234567890" className="hover:text-orange-200">
-                      +1 (234) 567-890
-                    </a>
-                  </li>
-                  <li className="flex items-start gap-2 text-white">
-                    <MapPin className="h-5 w-5 mt-0.5" />
-                    <span className="leading-tight">
-                      123 Business Street
-                      <br />
-                      City, State 12345
-                    </span>
-                  </li>
-                </ul>
-              </div>
-            </div>
-
-            {/* Copyright */}
-            <div className="mt-10 pt-6 text-center text-base text-white/80">
-              © {new Date().getFullYear()} BUKKi. {t('allRightsReserved')}.
-            </div>
-          </div>
-        </div>
-      </footer>
     </div>
   );
 };
+
+export default Home;

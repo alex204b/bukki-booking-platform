@@ -109,7 +109,7 @@ export const NotificationSettings: React.FC = () => {
       case 'ios':
         return <Smartphone className="h-5 w-5 text-blue-600" />;
       case 'web':
-        return <Globe className="h-5 w-5 text-primary-600" />;
+        return <Globe className="h-5 w-5 text-[#E7001E]" />;
       default:
         return <Smartphone className="h-5 w-5 text-gray-600" />;
     }
@@ -131,7 +131,7 @@ export const NotificationSettings: React.FC = () => {
   if (isLoading) {
     return (
       <div className="flex justify-center py-8">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#E7001E]"></div>
       </div>
     );
   }
@@ -148,7 +148,7 @@ export const NotificationSettings: React.FC = () => {
       </div>
 
       {/* Test Notification Button */}
-      <div className="bg-primary-50 border border-primary-200 rounded-lg p-4">
+      <div className="bg-red-50 border border-[#E7001E] rounded-lg p-4">
         <div className="flex items-center justify-between">
           <div>
             <h4 className="font-medium text-gray-900">
@@ -161,7 +161,7 @@ export const NotificationSettings: React.FC = () => {
           <button
             onClick={() => testNotificationMutation.mutate()}
             disabled={testNotificationMutation.isLoading || tokens.length === 0}
-            className="btn btn-primary btn-sm flex items-center gap-2"
+            className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-[#E7001E] rounded-md hover:bg-[#c50018] transition-colors disabled:opacity-50"
           >
             <Send className="h-4 w-4" />
             {t('sendTest') || 'Send Test'}
@@ -243,7 +243,7 @@ export const NotificationSettings: React.FC = () => {
                         onChange={(e) =>
                           handlePreferenceChange(token.token, key, e.target.checked)
                         }
-                        className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                        className="h-4 w-4 text-[#E7001E] focus:ring-[#E7001E] border-gray-300 rounded"
                       />
                     </label>
                   ))}

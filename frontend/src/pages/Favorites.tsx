@@ -84,7 +84,7 @@ export const Favorites: React.FC = () => {
               <div className="flex items-center justify-between">
                 <div className="flex items-center text-sm text-gray-500">
                   <Star className="h-4 w-4 text-yellow-400 fill-current mr-1" />
-                  <span>{business.rating?.toFixed(1) || 'N/A'}</span>
+                  <span>{Number(business.rating || 0).toFixed(1)}</span>
                 </div>
                 <div className="flex items-center text-sm text-gray-500">
                   <Clock className="h-4 w-4 mr-1" />

@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Request, Query, NotFoundException, UnauthorizedException, UseInterceptors, UploadedFiles, UploadedFile } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Request, Query, NotFoundException, UnauthorizedException, BadRequestException, UseInterceptors, UploadedFiles, UploadedFile, Res } from '@nestjs/common';
+import { Response } from 'express';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery, ApiConsumes } from '@nestjs/swagger';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { BusinessesService } from './businesses.service';
@@ -206,13 +207,16 @@ export class BusinessesController {
   @ApiResponse({ status: 200, description: 'Business suspended successfully' })
   async suspend(
     @Param('id') id: string,
-    @Body() body: { reason?: string },
+    @Body() body: { reason: string },
     @Request() req
   ) {
     if (!req.user || req.user.role !== UserRole.SUPER_ADMIN) {
       throw new UnauthorizedException('Only super admins can suspend businesses');
     }
-    return this.businessesService.suspend(id, body.reason);
+    if (!body.reason || body.reason.trim().length === 0) {
+      throw new BadRequestException('Reason for suspension is required');
+    }
+    return this.businessesService.suspend(id, body.reason, req.user.id);
   }
 
   @Post(':id/unsuspend')
@@ -225,7 +229,30 @@ export class BusinessesController {
     if (!req.user || req.user.role !== UserRole.SUPER_ADMIN) {
       throw new UnauthorizedException('Only super admins can unsuspend businesses');
     }
-    return this.businessesService.unsuspend(id);
+    return this.businessesService.unsuspend(id, req.user.id);
+  }
+
+  @Post(':id/request-unsuspension')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Request unsuspension for suspended business (Business owner only)' })
+  @ApiResponse({ status: 200, description: 'Unsuspension request submitted successfully' })
+  async requestUnsuspension(
+    @Param('id') id: string,
+    @Body() body: { reason: string },
+    @Request() req
+  ) {
+    console.log(`[BusinessesController] POST /businesses/${id}/request-unsuspension`);
+    console.log(`[BusinessesController] User ID: ${req.user.id}`);
+    console.log(`[BusinessesController] Reason provided: ${body.reason ? 'Yes' : 'No'}`);
+    
+    if (!body.reason || body.reason.trim().length === 0) {
+      throw new BadRequestException('Reason is required');
+    }
+    
+    const result = await this.businessesService.requestUnsuspension(id, req.user.id, body.reason);
+    console.log(`[BusinessesController] ✅ Request unsuspension completed for business: ${result.name}`);
+    return result;
   }
 
   @Get(':id/stats')
@@ -390,9 +417,34 @@ export class BusinessesController {
       throw new UnauthorizedException('You do not have permission to upload images for this business');
     }
 
-    // Save file paths
+    // Save file paths - store relative paths (frontend will prepend API URL)
     const imagePaths = files.map(file => `/uploads/businesses/${file.filename}`);
+    console.log(`[BusinessesController] Uploaded ${files.length} image(s)`);
+    console.log(`[BusinessesController] Image paths:`, imagePaths);
+    console.log(`[BusinessesController] Files saved to: ${files.map(f => f.path).join(', ')}`);
     return this.businessesService.addImages(id, imagePaths);
+  }
+
+  @Get('test-image/:filename')
+  @ApiOperation({ summary: 'TEST: Check if image file exists and can be served' })
+  async testImage(@Param('filename') filename: string, @Res() res: Response) {
+    const fs = require('fs');
+    const path = require('path');
+    const uploadsPath = path.join(process.cwd(), 'uploads', 'businesses', filename);
+    
+    console.log(`[BusinessesController] Testing image: ${filename}`);
+    console.log(`[BusinessesController] Full path: ${uploadsPath}`);
+    console.log(`[BusinessesController] File exists: ${fs.existsSync(uploadsPath)}`);
+    
+    if (fs.existsSync(uploadsPath)) {
+      return res.sendFile(uploadsPath);
+    } else {
+      return res.status(404).json({ 
+        error: 'Image not found',
+        path: uploadsPath,
+        cwd: process.cwd()
+      });
+    }
   }
 
   @Delete(':id/images/:imageIndex')

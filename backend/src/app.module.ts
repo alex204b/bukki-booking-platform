@@ -24,6 +24,10 @@ import { AuditModule } from './audit/audit.module';
 import { FavoritesModule } from './favorites/favorites.module';
 import { OffersModule } from './offers/offers.module';
 import { AIModule } from './ai/ai.module';
+import { RequestsModule } from './requests/requests.module';
+import { ResourcesModule } from './resources/resources.module';
+import { ChatModule } from './chat/chat.module';
+import { RedisModule } from './redis/redis.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
@@ -35,31 +39,67 @@ import { AppService } from './app.service';
     }),
     ScheduleModule.forRoot(),
     TypeOrmModule.forRoot((() => {
-      const dbUrl = process.env.DATABASE_URL || `postgresql://${process.env.DATABASE_USERNAME || 'postgres'}:${process.env.DATABASE_PASSWORD || 'password'}@${process.env.DATABASE_HOST || 'localhost'}:${process.env.DATABASE_PORT || 5432}/${process.env.DATABASE_NAME || 'booking_platform'}`;
-      const useSSL = process.env.DATABASE_URL ? { rejectUnauthorized: false } : false;
+      const dbUrl = process.env.DATABASE_URL;
 
-      // Extract host from URL for logging (without credentials)
-      let dbHost = 'unknown';
-      try {
-        const urlObj = new URL(dbUrl);
-        dbHost = urlObj.hostname;
-      } catch (e) {
-        dbHost = 'localhost';
+      // If DATABASE_URL is set, use cloud database
+      if (dbUrl) {
+        // Extract host from URL for logging (without credentials)
+        let dbHost = 'unknown';
+        try {
+          const urlObj = new URL(dbUrl);
+          dbHost = urlObj.hostname;
+        } catch (e) {
+          dbHost = 'unknown';
+        }
+
+        console.log('☁️  Database Configuration (CLOUD):');
+        console.log('  ✅ Using Neon.tech cloud database');
+        console.log('  ✅ Hostname:', dbHost);
+        console.log('  ✅ SSL enabled: true');
+        console.log('  ✅ Synchronize: false (migrations only)');
+
+        return {
+          type: 'postgres',
+          url: dbUrl,
+          autoLoadEntities: true,
+          synchronize: false,
+          ssl: {
+            rejectUnauthorized: false,
+          },
+          extra: {
+            // Connection pool settings for cloud database
+            max: 20, // Maximum number of connections in pool
+            min: 2, // Minimum number of connections in pool
+            idleTimeoutMillis: 30000, // Close idle connections after 30 seconds
+            connectionTimeoutMillis: 10000, // Timeout for new connections (10 seconds)
+            // SSL/TLS settings
+            ssl: {
+              rejectUnauthorized: false,
+            },
+          },
+          logging: false,
+          retryAttempts: 3,
+          retryDelay: 3000,
+        };
       }
 
-      console.log('🔍 Database Configuration:');
-      console.log('  DATABASE_URL set:', !!process.env.DATABASE_URL);
-      console.log('  Database host:', dbUrl.includes('neon.tech') ? 'Neon Cloud ☁️' : 'localhost 💻');
-      console.log('  Actual hostname:', dbHost);
-      console.log('  SSL enabled:', !!useSSL);
-      console.log('  Connection URL preview:', dbUrl.substring(0, 20) + '...' + dbUrl.substring(dbUrl.length - 30));
+      // Otherwise, use local database settings
+      console.log('🏠 Database Configuration (LOCAL):');
+      console.log('  ✅ Using local PostgreSQL database');
+      console.log('  ✅ Host:', process.env.DATABASE_HOST || 'localhost');
+      console.log('  ✅ Port:', process.env.DATABASE_PORT || '5432');
+      console.log('  ✅ Database:', process.env.DATABASE_NAME || 'booking_platform');
+      console.log('  ✅ Synchronize: true (auto-sync schema)');
 
       return {
         type: 'postgres',
-        url: dbUrl,
+        host: process.env.DATABASE_HOST || 'localhost',
+        port: parseInt(process.env.DATABASE_PORT || '5432', 10),
+        username: process.env.DATABASE_USERNAME || 'postgres',
+        password: process.env.DATABASE_PASSWORD || 'postgres',
+        database: process.env.DATABASE_NAME || 'booking_platform',
         autoLoadEntities: true,
-        synchronize: process.env.NODE_ENV === 'development',
-        ssl: useSSL,
+        synchronize: true, // Auto-sync for local development
         logging: false,
       };
     })()),
@@ -85,6 +125,10 @@ import { AppService } from './app.service';
     FavoritesModule,
     OffersModule,
     AIModule,
+    RequestsModule,
+    ResourcesModule,
+    RedisModule,
+    ChatModule,
   ],
   controllers: [AppController],
   providers: [AppService],

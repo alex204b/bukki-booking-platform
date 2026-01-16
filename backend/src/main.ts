@@ -6,6 +6,7 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
+import { SanitizationPipe } from './common/pipes/sanitization.pipe';
 
 async function bootstrap() {
   console.log('🚀 Starting application...');
@@ -15,10 +16,26 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
   // Serve static files from uploads directory
-  // In development, __dirname is dist/src, so we need to go up two levels to reach backend root
-  app.useStaticAssets(join(__dirname, '..', '..', 'uploads'), {
+  // Use absolute path to ensure it works in all environments
+  const uploadsPath = join(process.cwd(), 'uploads');
+  console.log(`📁 Serving static files from: ${uploadsPath}`);
+  console.log(`📁 Process CWD: ${process.cwd()}`);
+  console.log(`📁 __dirname: ${__dirname}`);
+  
+  // Check if uploads directory exists and create if needed
+  const fs = require('fs');
+  if (!fs.existsSync(uploadsPath)) {
+    console.warn(`⚠️  Uploads directory does not exist: ${uploadsPath}`);
+    console.warn(`📁 Creating uploads directory...`);
+    fs.mkdirSync(uploadsPath, { recursive: true });
+    fs.mkdirSync(join(uploadsPath, 'businesses'), { recursive: true });
+  }
+  
+  app.useStaticAssets(uploadsPath, {
     prefix: '/uploads/',
   });
+  
+  console.log(`✅ Static files will be served at: http://localhost:${process.env.PORT || 3000}/uploads/`);
 
   // Trust proxy (needed when behind Render/NGINX/Cloudflare) so rate-limit sees real IP
   const httpAdapter = app.getHttpAdapter();
@@ -79,12 +96,15 @@ async function bootstrap() {
     credentials: true,
   });
 
-  // Global validation pipe
-  app.useGlobalPipes(new ValidationPipe({
-    whitelist: true,
-    forbidNonWhitelisted: true,
-    transform: true,
-  }));
+  // Global validation and sanitization pipes
+  app.useGlobalPipes(
+    new SanitizationPipe(), // Sanitize inputs first
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    }),
+  );
 
   // Swagger documentation
   const config = new DocumentBuilder()

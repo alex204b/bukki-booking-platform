@@ -119,7 +119,7 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
               onClick={() => setTimeRange(range as any)}
               className={`px-3 py-1 text-sm font-medium rounded-md ${
                 timeRange === range
-                  ? 'bg-primary-100 text-primary-700'
+                  ? 'bg-accent-100 text-accent-700'
                   : 'text-gray-500 hover:text-gray-700'
               }`}
             >
@@ -133,52 +133,52 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <div className="card p-6">
           <div className="flex items-center">
-            <div className="p-2 bg-blue-100 rounded-lg">
-              <Calendar className="h-6 w-6 text-blue-600" />
+            <div className="p-2 bg-accent-100 rounded-lg">
+              <Calendar className="h-6 w-6 text-accent-600" />
             </div>
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-600">Total Bookings</p>
               <p className="text-2xl font-bold text-gray-900">{analytics.totalBookings}</p>
-              <p className="text-sm text-green-600">+12% from last period</p>
+              <p className="text-sm text-accent-600">+12% from last period</p>
             </div>
           </div>
         </div>
 
         <div className="card p-6">
           <div className="flex items-center">
-            <div className="p-2 bg-green-100 rounded-lg">
-              <CheckCircle className="h-6 w-6 text-green-600" />
+            <div className="p-2 bg-accent-100 rounded-lg">
+              <CheckCircle className="h-6 w-6 text-accent-600" />
             </div>
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-600">Completion Rate</p>
               <p className="text-2xl font-bold text-gray-900">{formatPercentage(analytics.completionRate)}</p>
-              <p className="text-sm text-green-600">+2.1% from last period</p>
+              <p className="text-sm text-accent-600">+2.1% from last period</p>
             </div>
           </div>
         </div>
 
         <div className="card p-6">
           <div className="flex items-center">
-            <div className="p-2 bg-yellow-100 rounded-lg">
-              <DollarSign className="h-6 w-6 text-yellow-600" />
+            <div className="p-2 bg-accent-100 rounded-lg">
+              <DollarSign className="h-6 w-6 text-accent-600" />
             </div>
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-600">Total Revenue</p>
               <p className="text-2xl font-bold text-gray-900">{formatCurrency(analytics.totalRevenue)}</p>
-              <p className="text-sm text-green-600">+8.5% from last period</p>
+              <p className="text-sm text-accent-600">+8.5% from last period</p>
             </div>
           </div>
         </div>
 
         <div className="card p-6">
           <div className="flex items-center">
-            <div className="p-2 bg-purple-100 rounded-lg">
-              <Star className="h-6 w-6 text-purple-600" />
+            <div className="p-2 bg-accent-100 rounded-lg">
+              <Star className="h-6 w-6 text-accent-600" />
             </div>
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-600">Average Rating</p>
               <p className="text-2xl font-bold text-gray-900">{analytics.averageRating.toFixed(1)}</p>
-              <p className="text-sm text-green-600">+0.2 from last period</p>
+              <p className="text-sm text-accent-600">+0.2 from last period</p>
             </div>
           </div>
         </div>
@@ -196,7 +196,7 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
             {bookingTrends.map((trend, index) => (
               <div key={trend.date} className="flex-1 flex flex-col items-center">
                 <div 
-                  className="w-full bg-primary-500 rounded-t"
+                  className="w-full bg-accent-500 rounded-t"
                   style={{ height: `${(trend.count / 25) * 200}px` }}
                 ></div>
                 <p className="text-xs text-gray-500 mt-2">
@@ -219,8 +219,8 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
               <div key={service.serviceName} className="flex items-center justify-between">
                 <div className="flex items-center space-x-3">
                   <div className={`w-3 h-3 rounded-full ${
-                    index === 0 ? 'bg-blue-500' : 
-                    index === 1 ? 'bg-green-500' : 'bg-yellow-500'
+                    index === 0 ? 'bg-accent-500' : 
+                    index === 1 ? 'bg-accent-400' : 'bg-accent-300'
                   }`}></div>
                   <div>
                     <p className="text-sm font-medium text-gray-900">{service.serviceName}</p>
@@ -275,9 +275,9 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
                 <span className="text-sm text-gray-600">Completion Rate</span>
                 <span className="text-sm font-medium text-gray-900">{formatPercentage(analytics.completionRate)}</span>
               </div>
-              <div className="w-full bg-primary-200 rounded-full h-2">
+              <div className="w-full bg-accent-200 rounded-full h-2">
                 <div 
-                  className="bg-green-600 h-2 rounded-full" 
+                  className="bg-accent-600 h-2 rounded-full" 
                   style={{ width: `${analytics.completionRate}%` }}
                 ></div>
               </div>
@@ -287,7 +287,7 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
                 <span className="text-sm text-gray-600">Cancellation Rate</span>
                 <span className="text-sm font-medium text-gray-900">{formatPercentage(analytics.cancellationRate)}</span>
               </div>
-              <div className="w-full bg-primary-200 rounded-full h-2">
+              <div className="w-full bg-accent-200 rounded-full h-2">
                 <div 
                   className="bg-red-600 h-2 rounded-full" 
                   style={{ width: `${analytics.cancellationRate}%` }}

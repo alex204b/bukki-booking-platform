@@ -38,31 +38,40 @@ function generateTimeSlots(workingHours, serviceDuration) {
   console.log('End time:', endTime.toLocaleTimeString());
   console.log('Service duration:', serviceDuration, 'minutes');
   
-  // Generate 30-minute slots throughout the working day
+  // Generate slots based on service duration
   let currentTime = new Date(startTime);
   
   while (currentTime < endTime) {
-    const slotEnd = new Date(currentTime.getTime() + serviceDuration * 60000);
-    
     slots.push({
       time: new Date(currentTime),
       available: true,
     });
     
-    // Move to next 30-minute slot
-    currentTime = new Date(currentTime.getTime() + 30 * 60000);
+    // Move to next slot based on service duration
+    currentTime = new Date(currentTime.getTime() + serviceDuration * 60000);
   }
   
   return slots;
 }
 
-// Test with 28-minute service
-const slots = generateTimeSlots(businessHoursData, 28);
-console.log('\nGenerated', slots.length, 'slots:');
+// Test with 14-minute service (like a haircut)
+const slots = generateTimeSlots(businessHoursData, 14);
+console.log('\nGenerated', slots.length, 'slots for 14-minute service:');
 slots.forEach(slot => {
   console.log(slot.time.toLocaleTimeString());
 });
 
-// Expected: Should generate slots from 09:00 to 16:30 (every 30 minutes)
-// That's: 09:00, 09:30, 10:00, 10:30, 11:00, 11:30, 12:00, 12:30, 13:00, 13:30, 14:00, 14:30, 15:00, 15:30, 16:00, 16:30
-// Total: 16 slots
+// Expected: Should generate slots based on service duration (every 14 minutes)
+// Example: 09:00, 09:14, 09:28, 09:42, 09:56, 10:10, 10:24, etc.
+console.log('\n---');
+
+// Test with 28-minute service
+const slots28 = generateTimeSlots(businessHoursData, 28);
+console.log('\nGenerated', slots28.length, 'slots for 28-minute service:');
+slots28.slice(0, 10).forEach(slot => {
+  console.log(slot.time.toLocaleTimeString());
+});
+console.log('...');
+
+// Expected: Should generate slots based on service duration (every 28 minutes)
+// Example: 09:00, 09:28, 09:56, 10:24, 10:52, etc.

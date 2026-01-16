@@ -4,11 +4,12 @@ const config: CapacitorConfig = {
   appId: 'com.bukki.app',
   appName: 'BUKKi',
   webDir: 'build',
-  server: {
-    // Uncomment for development testing with local server
-    // url: 'http://YOUR_COMPUTER_IP:3000',
-    // cleartext: true
-  },
+  // Commented out for production build testing
+  // Uncomment for development with live reload
+  // server: {
+  //   url: 'http://localhost:3001',
+  //   cleartext: true
+  // },
   android: {
     allowMixedContent: true, // Allow HTTP connections (for local testing)
   },

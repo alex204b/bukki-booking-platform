@@ -66,6 +66,7 @@ coverage/
 *.tmp
 *.temp
 nul
+tmpclaude-*
 
 # AI Assistant
 .claude/
