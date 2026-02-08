@@ -3,12 +3,12 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Feedback } from './entities/feedback.entity';
 import { FeedbackService } from './feedback.service';
 import { FeedbackController } from './feedback.controller';
-import { EmailService } from '../common/services/email.service';
+// EmailService is provided globally by CommonModule
 
 @Module({
   imports: [TypeOrmModule.forFeature([Feedback])],
   controllers: [FeedbackController],
-  providers: [FeedbackService, EmailService],
+  providers: [FeedbackService],
   exports: [FeedbackService],
 })
 export class FeedbackModule {}

@@ -18,8 +18,8 @@ export const EmailVerification: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   
-  // Get email from logged-in user
-  const email = user?.email || location.state?.email || localStorage.getItem('pendingVerificationEmail') || emailInput;
+  // Prioritize email from signup/login flow - NOT from user (may be stale from previous session)
+  const email = location.state?.email || localStorage.getItem('pendingVerificationEmail') || user?.email || emailInput;
 
   const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault();

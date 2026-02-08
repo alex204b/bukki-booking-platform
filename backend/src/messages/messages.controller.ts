@@ -153,6 +153,13 @@ export class MessagesController {
     );
   }
 
+  @Get('chat/conversations')
+  @ApiOperation({ summary: 'Get all conversations for current user' })
+  @ApiResponse({ status: 200, description: 'Conversations retrieved successfully' })
+  async getConversations(@Request() req) {
+    return this.messagesService.getConversations(req.user.id, req.user.role);
+  }
+
   @Get('chat/:businessId/conversation')
   @ApiOperation({ summary: 'Get conversation with a business' })
   @ApiResponse({ status: 200, description: 'Conversation retrieved successfully' })
@@ -163,21 +170,15 @@ export class MessagesController {
     return this.messagesService.getConversation(req.user.id, businessId);
   }
 
-  @Get('chat/conversations')
-  @ApiOperation({ summary: 'Get all conversations for current user' })
-  @ApiResponse({ status: 200, description: 'Conversations retrieved successfully' })
-  async getConversations(@Request() req) {
-    return this.messagesService.getConversations(req.user.id, req.user.role);
-  }
-
   @Patch('chat/:businessId/read')
   @ApiOperation({ summary: 'Mark conversation as read' })
   @ApiResponse({ status: 200, description: 'Conversation marked as read' })
   async markConversationAsRead(
     @Param('businessId') businessId: string,
     @Request() req,
+    @Body() body?: { customerId?: string },
   ) {
-    await this.messagesService.markConversationAsRead(req.user.id, businessId);
+    await this.messagesService.markConversationAsRead(req.user.id, businessId, body?.customerId);
     return { message: 'Conversation marked as read' };
   }
 

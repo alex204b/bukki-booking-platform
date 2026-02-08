@@ -6,6 +6,7 @@ import { MapPin, Phone, Star, Clock, Calendar, ExternalLink } from 'lucide-react
 import toast from 'react-hot-toast';
 import { ReviewDisplay } from '../components/ReviewDisplay';
 import { useI18n } from '../contexts/I18nContext';
+import { useCurrency } from '../contexts/CurrencyContext';
 
 export const BusinessDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -46,12 +47,7 @@ export const BusinessDetail: React.FC = () => {
     ).join(' ');
   };
 
-  const formatPrice = (price: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-    }).format(price);
-  };
+  const { formatPrice, formatPriceRange } = useCurrency();
 
   const formatDuration = (minutes: number) => {
     const hours = Math.floor(minutes / 60);
@@ -74,7 +70,7 @@ export const BusinessDetail: React.FC = () => {
     return (
       <div className="text-center py-12">
         <h2 className="text-2xl font-bold text-gray-900 mb-4">Business not found</h2>
-        <Link to="/businesses" className="btn btn-primary">
+        <Link to="/" className="btn btn-primary">
           Back to Businesses
         </Link>
       </div>
@@ -84,7 +80,7 @@ export const BusinessDetail: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Back Button */}
-      <Link to="/businesses" className="btn btn-ghost">
+      <Link to="/" className="btn btn-ghost">
         ← Back to Businesses
       </Link>
 
@@ -192,7 +188,9 @@ export const BusinessDetail: React.FC = () => {
                   </div>
                   <div className="text-right">
                     <p className="text-2xl font-bold text-accent-500">
-                      {formatPrice(service.price)}
+                      {service.priceMax != null && Number(service.priceMax) > Number(service.price)
+                        ? formatPriceRange(Number(service.price), Number(service.priceMax))
+                        : formatPrice(service.price)}
                     </p>
                   </div>
                 </div>

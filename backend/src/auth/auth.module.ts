@@ -6,7 +6,7 @@ import { ConfigService } from '@nestjs/config';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { VerificationService } from './verification.service';
-import { EmailService } from '../common/services/email.service';
+// EmailService is provided globally by CommonModule
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { LocalStrategy } from './strategies/local.strategy';
 import { UsersModule } from '../users/users.module';
@@ -30,7 +30,7 @@ import { TwoFactorService } from './two-factor.service';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, VerificationService, EmailService, JwtStrategy, LocalStrategy, TwoFactorService],
+  providers: [AuthService, VerificationService, JwtStrategy, LocalStrategy, TwoFactorService],
   exports: [AuthService, VerificationService, TwoFactorService],
 })
 export class AuthModule {}

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { authApi, api } from '../services/api';
+import { authStorage } from '../utils/authStorage';
 import toast from 'react-hot-toast';
 import { pushNotificationService } from '../services/pushNotificationService';
 
@@ -62,13 +63,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   useEffect(() => {
     try {
-      if (typeof localStorage === 'undefined') {
+      if (typeof sessionStorage === 'undefined') {
         setLoading(false);
         return;
       }
 
-      const storedToken = localStorage.getItem('token');
-      const storedUser = localStorage.getItem('user');
+      const storedToken = authStorage.getToken();
+      const storedUser = authStorage.getUser();
 
       if (storedToken && storedUser) {
         try {
@@ -92,8 +93,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           }
         } catch (parseError) {
           // Clear corrupted data
-          localStorage.removeItem('token');
-          localStorage.removeItem('user');
+          authStorage.clear();
         }
       }
     } catch (error) {
@@ -105,6 +105,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const login = async (email: string, password: string) => {
     try {
+      // Clear any existing session FIRST to prevent logging into wrong account
+      setUser(null);
+      setToken(null);
+      authStorage.clear();
+      delete authApi.defaults.headers.common['Authorization'];
+      delete api.defaults.headers.common['Authorization'];
+
       // Normalize email (lowercase and trim)
       const normalizedEmail = email.toLowerCase().trim();
       // Don't trim password - passwords are stored as-is during registration
@@ -117,10 +124,23 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       });
       const { user: userData, token: userToken, requiresVerification } = response.data;
 
+      // Sanity check: ensure we got the user we logged in as (prevent wrong-account bug)
+      const returnedEmail = (userData?.email || '').toLowerCase().trim();
+      if (returnedEmail !== normalizedEmail) {
+        console.error('[FRONTEND LOGIN] Wrong user returned! Expected:', normalizedEmail, 'Got:', returnedEmail);
+        setUser(null);
+        setToken(null);
+        authStorage.clear();
+        delete authApi.defaults.headers.common['Authorization'];
+        delete api.defaults.headers.common['Authorization'];
+        toast.error('Login returned wrong account. Please try again.');
+        throw new Error('Wrong account returned from server');
+      }
+
       setUser(userData);
       setToken(userToken);
-      localStorage.setItem('token', userToken);
-      localStorage.setItem('user', JSON.stringify(userData));
+      authStorage.setToken(userToken);
+      authStorage.setUser(JSON.stringify(userData));
       authApi.defaults.headers.common['Authorization'] = `Bearer ${userToken}`;
       
       // Also set token in the main api instance for authenticated requests
@@ -205,8 +225,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (newUser && userToken) {
         setUser(newUser);
         setToken(userToken);
-        localStorage.setItem('token', userToken);
-        localStorage.setItem('user', JSON.stringify(newUser));
+        authStorage.setToken(userToken);
+        authStorage.setUser(JSON.stringify(newUser));
         authApi.defaults.headers.common['Authorization'] = `Bearer ${userToken}`;
         api.defaults.headers.common['Authorization'] = `Bearer ${userToken}`;
         toast.success('Registration successful!');
@@ -229,8 +249,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
     setUser(null);
     setToken(null);
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+    authStorage.clear();
     delete authApi.defaults.headers.common['Authorization'];
     delete api.defaults.headers.common['Authorization'];
     toast.success('Logged out successfully');

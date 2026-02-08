@@ -126,7 +126,7 @@ export class AuthService {
     };
   }
 
-  async login(loginDto: LoginDto): Promise<{ user: User; token: string; requiresVerification?: boolean }> {
+  async login(loginDto: LoginDto): Promise<{ user: User; token: string; accessToken: string; requiresVerification?: boolean }> {
     const { email, password } = loginDto;
 
     // Normalize email
@@ -228,7 +228,8 @@ export class AuthService {
       const { password: _, ...userWithoutPassword } = user;
       return {
         user: userWithoutPassword as User,
-        token,
+        accessToken: token,
+        token, // Keep for backward compatibility
         requiresVerification: true,
       } as any;
     }
@@ -241,7 +242,8 @@ export class AuthService {
 
     return {
       user: userWithoutPassword as User,
-      token,
+      accessToken: token,
+      token, // Keep for backward compatibility
     };
   }
 

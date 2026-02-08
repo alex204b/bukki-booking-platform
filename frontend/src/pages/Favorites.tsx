@@ -33,7 +33,7 @@ export const Favorites: React.FC = () => {
     return (
       <div className="space-y-6">
         <h1 className="text-3xl font-bold text-gray-900">My Favorites</h1>
-        <EmptyFavorites onBrowse={() => navigate('/businesses')} />
+        <EmptyFavorites onBrowse={() => navigate('/')} />
       </div>
     );
   }

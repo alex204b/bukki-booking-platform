@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
-import { X, Calendar, Clock, User, Phone, Mail, Search } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, Calendar, Clock, User, Phone, Mail, Search, Table2 } from 'lucide-react';
 import { useQuery } from 'react-query';
-import { api } from '../services/api';
+import { api, resourceService } from '../services/api';
 import toast from 'react-hot-toast';
 import { useI18n } from '../contexts/I18nContext';
+import { useCurrency } from '../contexts/CurrencyContext';
 
 interface CreateBookingModalProps {
   isOpen: boolean;
@@ -11,6 +12,10 @@ interface CreateBookingModalProps {
   selectedDate: Date;
   businessId: string;
   onBookingCreated: () => void;
+  /** When true (parallel/restaurant businesses), always show table selector */
+  showTableSelector?: boolean;
+  /** When true (personal_service businesses), show worker/employee selector */
+  showWorkerSelector?: boolean;
 }
 
 export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
@@ -19,17 +24,39 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
   selectedDate,
   businessId,
   onBookingCreated,
+  showTableSelector = false,
+  showWorkerSelector = false,
 }) => {
   const { t } = useI18n();
+  const { formatPrice, formatPriceRange } = useCurrency();
   const [loading, setLoading] = useState(false);
   const [customerEmail, setCustomerEmail] = useState('');
   const [serviceId, setServiceId] = useState('');
   const [notes, setNotes] = useState('');
   const [selectedService, setSelectedService] = useState<any>(null);
-  
+  const [partySize, setPartySize] = useState<number>(2);
+  const [resourceId, setResourceId] = useState<string>('');
+  const [dateStr, setDateStr] = useState('');
+  const [timeStr, setTimeStr] = useState('12:00');
+  const isTableService = showTableSelector || selectedService?.resourceType === 'table' || selectedService?.resourceType === 'TABLE';
+
+  // Sync date/time from selectedDate when modal opens
+  useEffect(() => {
+    if (isOpen && selectedDate) {
+      const d = new Date(selectedDate);
+      setDateStr(d.toISOString().slice(0, 10));
+      setTimeStr(`${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`);
+    }
+  }, [isOpen, selectedDate]);
+
+  // Build selected date from dateStr + timeStr
+  const effectiveDate = dateStr && timeStr
+    ? new Date(`${dateStr}T${timeStr}:00`)
+    : selectedDate;
+
   // Calculate end time based on selected service duration
   const calculatedEndDate = selectedService 
-    ? new Date(selectedDate.getTime() + selectedService.duration * 60000)
+    ? new Date(effectiveDate.getTime() + selectedService.duration * 60000)
     : null;
   
   const durationMinutes = selectedService ? selectedService.duration : 0;
@@ -42,6 +69,26 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
       return response.data;
     },
     { enabled: isOpen && !!businessId }
+  );
+
+  // Fetch tables/resources - when showTableSelector or table service selected
+  const { data: resourcesData } = useQuery(
+    ['resources-tables', businessId],
+    () => resourceService.getAll(businessId).then((r) => r.data),
+    { enabled: isOpen && !!businessId && (showTableSelector || isTableService) }
+  );
+  const tables = (Array.isArray(resourcesData) ? resourcesData : resourcesData?.data || []).filter(
+    (r: any) => (r.type === 'table' || r.type === 'TABLE') && r.isActive !== false
+  );
+
+  // Fetch staff/workers - when showWorkerSelector (personal_service)
+  const { data: staffResourcesData } = useQuery(
+    ['resources-staff', businessId],
+    () => resourceService.getAll(businessId).then((r) => r.data),
+    { enabled: isOpen && !!businessId && showWorkerSelector }
+  );
+  const workers = (Array.isArray(staffResourcesData) ? staffResourcesData : staffResourcesData?.data || []).filter(
+    (r: any) => (r.type === 'staff' || r.type === 'STAFF') && r.isActive !== false
   );
 
 
@@ -58,18 +105,37 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
       return;
     }
 
+    if (showTableSelector && tables.length > 0 && !resourceId) {
+      toast.error(t('pleaseSelectTable') || 'Please select a table');
+      return;
+    }
+
+    if (showWorkerSelector && workers.length > 0 && !resourceId) {
+      toast.error(t('pleaseSelectWorker') || 'Please select a worker');
+      return;
+    }
+
     setLoading(true);
 
     try {
       // Create booking with customer email (backend will handle customer lookup/creation)
       const bookingData: any = {
         serviceId,
-        appointmentDate: selectedDate.toISOString(),
-        notes,
+        appointmentDate: effectiveDate.toISOString(),
+        notes: notes || undefined,
         customerEmail, // Backend will find or create customer
       };
+      if (isTableService && partySize) bookingData.partySize = partySize;
+      if (resourceId) bookingData.resourceId = resourceId;
       
-      await api.post('/bookings', bookingData);
+      console.log('[CreateBookingModal] Creating booking with data:', bookingData);
+      console.log('[CreateBookingModal] Selected date:', selectedDate);
+      console.log('[CreateBookingModal] Service ID:', serviceId);
+      console.log('[CreateBookingModal] Customer email:', customerEmail);
+      
+      const response = await api.post('/bookings', bookingData);
+      
+      console.log('[CreateBookingModal] ✅ Booking created successfully:', response.data);
 
       toast.success(`Booking created! Confirmation email sent to ${customerEmail}`);
       onBookingCreated();
@@ -80,9 +146,47 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
       setServiceId('');
       setSelectedService(null);
       setNotes('');
+      setResourceId('');
     } catch (error: any) {
-      console.error('Error creating booking:', error);
-      toast.error(error.response?.data?.message || 'Failed to create booking');
+      console.error('[CreateBookingModal] ❌ Error creating booking:', error);
+      console.error('[CreateBookingModal] Error response:', JSON.stringify(error.response?.data, null, 2));
+      console.error('[CreateBookingModal] Error status:', error.response?.status);
+      console.error('[CreateBookingModal] Full error object:', error);
+      
+      // Log the actual error message from backend
+      const backendError = error.response?.data;
+      if (backendError) {
+        console.error('[CreateBookingModal] Backend error message:', backendError.message);
+        console.error('[CreateBookingModal] Backend error:', backendError.error);
+        console.error('[CreateBookingModal] Full backend response:', backendError);
+      }
+      
+      // Extract error message - check multiple possible locations
+      let errorMessage = 'Failed to create booking';
+      
+      if (error.response?.data) {
+        const errorData = error.response.data;
+        errorMessage = errorData.message || 
+                      errorData.error || 
+                      errorData.error?.message ||
+                      (typeof errorData === 'string' ? errorData : errorMessage);
+        
+        // Log all error data to help debug
+        console.error('[CreateBookingModal] Complete error data:', {
+          message: errorData.message,
+          error: errorData.error,
+          statusCode: errorData.statusCode,
+          status: error.response.status,
+          fullData: errorData
+        });
+      }
+      
+      // Show detailed error
+      const displayMessage = errorMessage.includes('Failed to create booking') 
+        ? errorMessage 
+        : `Failed to create booking: ${errorMessage}`;
+      
+      toast.error(displayMessage);
     } finally {
       setLoading(false);
     }
@@ -106,20 +210,39 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
-          {/* Selected Date/Time */}
-          <div className="bg-gradient-to-br from-orange-50 to-red-50 border-2 border-[#330007] rounded-lg p-4">
+          {/* Date and Time Selection */}
+          <div className="space-y-4">
             <div className="flex items-center gap-2 text-gray-900 mb-1">
               <Calendar className="h-5 w-5 text-[#E7001E]" />
-              <span className="font-semibold">Selected Time:</span>
+              <span className="font-semibold">{t('selectDateAndTime') || 'Select date and time'}:</span>
             </div>
-            <p className="text-lg font-bold text-[#E7001E] ml-7">
-              {selectedDate.toLocaleString()}
-              {calculatedEndDate && (
-                <span className="text-sm text-gray-600 ml-2">
-                  → {calculatedEndDate.toLocaleTimeString()} ({durationMinutes} min)
-                </span>
-              )}
-            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">{t('date') || 'Date'}</label>
+                <input
+                  type="date"
+                  value={dateStr}
+                  onChange={(e) => setDateStr(e.target.value)}
+                  className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-[#E7001E] focus:border-[#E7001E]"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">{t('time') || 'Time'}</label>
+                <input
+                  type="time"
+                  value={timeStr}
+                  onChange={(e) => setTimeStr(e.target.value)}
+                  className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-[#E7001E] focus:border-[#E7001E]"
+                  required
+                />
+              </div>
+            </div>
+            {calculatedEndDate && (
+              <p className="text-sm text-gray-600">
+                {effectiveDate.toLocaleString()} → {calculatedEndDate.toLocaleTimeString()} ({durationMinutes} min)
+              </p>
+            )}
           </div>
 
           {/* Customer Email */}
@@ -160,11 +283,73 @@ export const CreateBookingModal: React.FC<CreateBookingModalProps> = ({
               <option value="">{t('chooseService') || 'Choose a service...'}</option>
               {services?.map((service: any) => (
                 <option key={service.id} value={service.id}>
-                  {service.name} - {service.duration} min - ${service.price}
+                  {service.name} - {service.duration} min - {service.priceMax != null && Number(service.priceMax) > Number(service.price) ? formatPriceRange(Number(service.price), Number(service.priceMax)) : formatPrice(Number(service.price || 0))}
                 </option>
               ))}
             </select>
           </div>
+
+          {isTableService && (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  {t('partySize') || 'Number of guests'} *
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={partySize}
+                  onChange={(e) => setPartySize(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                  className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-[#E7001E] focus:border-[#E7001E]"
+                  required
+                />
+              </div>
+              {tables.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <Table2 className="h-4 w-4 inline mr-1" />
+                    {t('selectTable') || 'Select table'} *
+                  </label>
+                  <select
+                    value={resourceId}
+                    onChange={(e) => setResourceId(e.target.value)}
+                    required={showTableSelector}
+                    className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-[#E7001E] focus:border-[#E7001E]"
+                  >
+                    <option value="">{t('chooseTable') || 'Choose a table...'}</option>
+                    {tables.map((tbl: any) => (
+                      <option key={tbl.id} value={tbl.id}>
+                        {tbl.name} ({tbl.capacity || 0} {t('seats') || 'seats'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </>
+          )}
+
+          {showWorkerSelector && workers.length > 0 && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                <User className="h-4 w-4 inline mr-1" />
+                {t('assignToWorker') || 'Assign to worker'} *
+              </label>
+              <select
+                value={resourceId}
+                onChange={(e) => setResourceId(e.target.value)}
+                required={showWorkerSelector}
+                className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-[#E7001E] focus:border-[#E7001E]"
+              >
+                <option value="">{t('chooseWorker') || 'Choose a worker...'}</option>
+                {workers.map((w: any) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name || `${w.user?.firstName || ''} ${w.user?.lastName || ''}`.trim() || `Worker ${w.id?.slice(0, 8)}`}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Notes */}
           <div>

@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, ForbiddenException 
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, IsNull } from 'typeorm';
 import { Resource } from './entities/resource.entity';
+import { Business } from '../businesses/entities/business.entity';
 import { CreateResourceDto } from './dto/create-resource.dto';
 import { UpdateResourceDto } from './dto/update-resource.dto';
 
@@ -15,9 +16,7 @@ export class ResourcesService {
   async create(createResourceDto: CreateResourceDto, userId: string): Promise<Resource> {
     // Verify business ownership
     const business = await this.resourceRepository.manager
-      .createQueryBuilder()
-      .select('business')
-      .from('businesses', 'business')
+      .createQueryBuilder(Business, 'business')
       .where('business.id = :businessId', { businessId: createResourceDto.businessId })
       .andWhere('business.deletedAt IS NULL')
       .leftJoin('business.owner', 'owner')
@@ -32,7 +31,19 @@ export class ResourcesService {
       throw new ForbiddenException('You can only create resources for your own business');
     }
 
-    const resource = this.resourceRepository.create(createResourceDto);
+    const resource = this.resourceRepository.create({
+      name: createResourceDto.name,
+      type: createResourceDto.type,
+      isActive: createResourceDto.isActive ?? true,
+      capacity: createResourceDto.capacity,
+      metadata: createResourceDto.metadata,
+      workingHours: createResourceDto.workingHours,
+      sortOrder: createResourceDto.sortOrder ?? 0,
+      business, // set relation so businessId is not null
+      user: createResourceDto.userId
+        ? ({ id: createResourceDto.userId } as any)
+        : undefined,
+    });
     return await this.resourceRepository.save(resource);
   }
 

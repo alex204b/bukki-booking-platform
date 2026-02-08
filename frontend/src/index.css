@@ -99,6 +99,112 @@
   scrollbar-color: #330007 transparent;
 }
 
+/* Profile page - BU\KKI design (DM Sans, Space Mono, burgundy/red palette) */
+.profile-page {
+  --profile-font: 'DM Sans', system-ui, sans-serif;
+  --profile-burgundy: #4A0E0E;
+  --profile-red: #DC143C;
+  --profile-light-gray: #F5F5F5;
+  --profile-medium-gray: #E8E8E8;
+  --profile-dark-gray: #666;
+  --profile-text-dark: #1A1A1A;
+  --profile-border: #E0E0E0;
+  --profile-success: #10B981;
+  --profile-warning: #F59E0B;
+  font-family: 'DM Sans', system-ui, sans-serif;
+}
+
+.profile-page .font-mono,
+.profile-page .profile-mono {
+  font-family: 'Space Mono', monospace;
+}
+
+.profile-hero-card {
+  position: relative;
+  overflow: hidden;
+}
+.profile-hero-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 300px;
+  height: 300px;
+  background: radial-gradient(circle, rgba(220, 20, 60, 0.08) 0%, transparent 70%);
+  border-radius: 50%;
+  filter: blur(60px);
+  pointer-events: none;
+}
+
+.profile-avatar-wrap {
+  position: relative;
+}
+.profile-avatar-wrap::after {
+  content: '';
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  width: 18px;
+  height: 18px;
+  background: var(--profile-success);
+  border-radius: 50%;
+  border: 3px solid white;
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.05);
+}
+
+.profile-section-toggle {
+  transition: all 0.3s ease;
+}
+.profile-section-toggle.active .profile-chevron {
+  transform: rotate(180deg);
+}
+
+.profile-section-content {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.4s ease;
+}
+.profile-section-content.active {
+  max-height: 2000px;
+}
+
+.profile-form-input {
+  transition: all 0.3s ease;
+}
+.profile-form-input:focus {
+  outline: none;
+  border-color: var(--profile-red);
+  background: white;
+  box-shadow: 0 0 0 3px rgba(220, 20, 60, 0.1);
+}
+
+.profile-btn-primary {
+  background: #330007;
+  color: white;
+  border: none;
+  transition: background 0.2s ease;
+}
+.profile-btn-primary:hover {
+  background: #4a0a0f;
+}
+.profile-btn-secondary {
+  background: #330007;
+  color: white;
+  border: none;
+  transition: background 0.2s ease;
+}
+.profile-btn-secondary:hover {
+  background: #4a0a0f;
+  color: white;
+}
+
+.profile-stat-card {
+  transition: all 0.3s ease;
+}
+.profile-stat-card:hover {
+  /* no shadow/transform */
+}
+
 /* Hide scrollbar for category chips */
 .scrollbar-hide {
   -ms-overflow-style: none;
@@ -126,51 +232,63 @@
   opacity: 0;
 }
 
-/* Leaflet Map Popup Styling */
-.leaflet-popup-content-wrapper {
-  border-radius: 12px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-  padding: 0;
+/* Leaflet Map Popup Styling - 3:4 aspect ratio */
+.custom-popup .leaflet-popup-content-wrapper {
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  padding: 0 !important;
   overflow: hidden;
+  width: min(288px, 90vw) !important;
+  max-width: 90vw;
+  aspect-ratio: 3 / 4;
 }
 
-.leaflet-popup-content {
-  margin: 0;
-  min-width: 300px;
-  padding: 20px;
+.custom-popup .leaflet-popup-content {
+  margin: 0 !important;
+  padding: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0;
+  min-height: 0;
 }
 
-.leaflet-popup-tip-container {
+.custom-popup .leaflet-popup-tip-container {
   display: none;
 }
 
+/* Close button overlaid on top of image */
 .custom-popup .leaflet-popup-close-button {
-  font-size: 24px;
-  padding: 4px 8px;
+  font-size: 20px;
+  padding: 4px;
   color: #ffffff;
   background: rgba(0, 0, 0, 0.5);
   border-radius: 50%;
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
-  right: 8px;
-  top: 8px;
-  z-index: 10;
+  right: 6px;
+  top: 6px;
+  z-index: 20;
   transition: all 0.2s;
 }
 
 .custom-popup .leaflet-popup-close-button:hover {
-  background: rgba(0, 0, 0, 0.7);
-  color: #ffffff;
+  background: rgba(0, 0, 0, 0.7) !important;
+  color: #ffffff !important;
 }
 
-/* Fix link colors in map popup */
-.leaflet-popup-content a {
+/* Hide scrollbar in map popup - content should fit without scrolling */
+.custom-popup .leaflet-popup-content-wrapper,
+.custom-popup .leaflet-popup-content {
+  overflow: hidden !important;
+}
+
+.custom-popup .leaflet-popup-content a {
   text-decoration: none;
 }
 
-.leaflet-popup-content a:hover {
+.custom-popup .leaflet-popup-content a:hover {
   text-decoration: none;
 }

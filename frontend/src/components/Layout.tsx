@@ -1,12 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useQuery, useQueryClient } from 'react-query';
 import { api } from '../services/api';
 import {
   Home,
-  Search,
-  Calendar,
   User,
   Settings,
   LogOut,
@@ -18,9 +16,12 @@ import {
   Bell,
   Sparkles,
   Tag,
-  Info
+  Info,
+  ChevronDown,
+  Globe
 } from 'lucide-react';
 import { useI18n } from '../contexts/I18nContext';
+import { useCurrency, CURRENCY_SYMBOLS } from '../contexts/CurrencyContext';
 import Motif from './Motif';
 import { ConfirmDialog } from './ConfirmDialog';
 import { NotificationCenter } from './NotificationCenter';
@@ -30,11 +31,29 @@ interface LayoutProps {
   children: React.ReactNode;
 }
 
+const LANG_OPTIONS = [
+  { code: 'ro' as const, label: 'RO' },
+  { code: 'en' as const, label: 'EN' },
+  { code: 'ru' as const, label: 'RU' },
+] as const;
+
+const CURRENCY_OPTIONS = [
+  { code: 'USD' as const, symbol: '$', label: 'USD' },
+  { code: 'GBP' as const, symbol: '£', label: 'GBP' },
+  { code: 'EUR' as const, symbol: '€', label: 'EUR' },
+  { code: 'RON' as const, symbol: 'lei', label: 'RON' },
+  { code: 'MDL' as const, symbol: 'L', label: 'MDL' },
+] as const;
+
 export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showAIAssistant, setShowAIAssistant] = useState(false);
+  const [langDropdownOpen, setLangDropdownOpen] = useState(false);
+  const [currencyDropdownOpen, setCurrencyDropdownOpen] = useState(false);
+  const langDropdownRef = useRef<HTMLDivElement>(null);
+  const currencyDropdownRef = useRef<HTMLDivElement>(null);
 
   // Emit sidebar state changes as custom events
   React.useEffect(() => {
@@ -42,6 +61,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   }, [sidebarOpen]);
   const { user, logout } = useAuth();
   const { lang, setLang, t } = useI18n();
+  const { currency, setCurrency } = useCurrency();
   const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -90,39 +110,58 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
   const navigation = [
     { name: t('home'), href: '/', icon: Home },
-    { name: t('browseBusinesses'), href: '/businesses', icon: Search },
-    { name: t('appInfo'), href: '/info', icon: Info },
   ];
 
   // Add messages and favorites links for customers
   if (user?.role === 'customer') {
-    navigation.splice(2, 0, { name: t('messages'), href: '/chat-list', icon: Mail });
-    navigation.splice(3, 0, { name: t('favorites') || 'Favorites', href: '/favorites', icon: Heart });
+    navigation.splice(1, 0, { name: t('messages'), href: '/chat-list', icon: Mail });
+    navigation.splice(2, 0, { name: t('favorites') || 'Favorites', href: '/favorites', icon: Heart });
     // Offers removed - customers can view offers in Messages interface
   }
 
   if (user?.role === 'business_owner') {
-    navigation.splice(2, 0, { name: t('businessDashboard'), href: '/business-dashboard', icon: Building2 });
-    navigation.splice(3, 0, { name: t('businessSettings'), href: '/business-settings', icon: Settings });
-    navigation.splice(4, 0, { name: t('messages'), href: '/chat', icon: Mail });
+    navigation.splice(1, 0, { name: t('Dashboard') || 'Dashboard', href: '/business-dashboard', icon: Building2 });
+    navigation.splice(2, 0, { name: t('Settings') || 'Settings', href: '/business-settings', icon: Settings });
+    navigation.splice(3, 0, { name: t('messages'), href: '/chat', icon: Mail });
     // Create Offer removed - it's available in Business Settings
   }
 
   if (user?.role === 'employee') {
-    navigation.splice(2, 0, { name: 'Business Schedule', href: '/business-dashboard', icon: Building2 });
-    navigation.splice(3, 0, { name: t('messages'), href: '/chat-list', icon: Mail });
+    navigation.splice(1, 0, { name: 'Business Schedule', href: '/business-dashboard', icon: Building2 });
+    navigation.splice(2, 0, { name: t('messages'), href: '/chat-list', icon: Mail });
     // Create Offer is not in menu - it's available in Messages interface
   }
 
   if (user?.role === 'super_admin') {
-    navigation.splice(-1, 0, { name: t('adminDashboard'), href: '/admin-dashboard', icon: Shield });
+    navigation.splice(1, 0, { name: t('adminDashboard'), href: '/admin-dashboard', icon: Shield });
   }
+
+  // Add Info page at the end
+  navigation.push({ name: t('appInfo'), href: '/info', icon: Info });
 
   // Close modals when route changes (but keep sidebar state)
   React.useEffect(() => {
     setShowNotifications(false);
     setShowAIAssistant(false);
+    setLangDropdownOpen(false);
+    setCurrencyDropdownOpen(false);
   }, [location.pathname]);
+
+  // Close language/currency dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (langDropdownRef.current && !langDropdownRef.current.contains(e.target as Node)) {
+        setLangDropdownOpen(false);
+      }
+      if (currencyDropdownRef.current && !currencyDropdownRef.current.contains(e.target as Node)) {
+        setCurrencyDropdownOpen(false);
+      }
+    };
+    if (langDropdownOpen || currencyDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [langDropdownOpen, currencyDropdownOpen]);
 
   // Listen for sidebar toggle events from child components
   React.useEffect(() => {
@@ -137,18 +176,69 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
   return (
     <div className="min-h-screen bg-white">
+      {/* Safe-area top bar for phones (under status bar/notch) - matches Login page implementation */}
+      <div
+        className="fixed inset-x-0 top-0 z-50 pointer-events-none md:hidden"
+        style={{
+          height: 'max(env(safe-area-inset-top, 0px), 1.5vh)',
+          backgroundColor: '#330007',
+        }}
+      />
+      
       {/* Sticky Header Logo - extends full width with all top bar content */}
-      <header className="fixed top-0 left-0 right-0 z-50 bg-[#330007] border-b border-[#330007] shadow-md h-16">
-        <div className="w-full h-full px-2 sm:px-3 md:px-5 lg:px-6 flex items-center justify-between gap-2">
-          {/* Left side: Hamburger Menu on mobile */}
+      <header 
+        className="fixed left-0 right-0 z-50 bg-[#330007] border-b border-[#330007] h-16 top-[max(env(safe-area-inset-top,0px),1.5vh)] md:top-0"
+      >
+        <div className="h-full w-full px-2 sm:px-3 md:px-5 lg:px-6 flex items-center justify-between gap-2">
+          {/* Left side: Language dropdown on mobile only */}
           <div className="flex items-center gap-2 sm:gap-3 flex-1">
-            <button
-              onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="lg:hidden p-1.5 sm:p-2 text-white hover:text-gray-200 transition-colors flex-shrink-0"
-              aria-label="Toggle menu"
+            <div
+              ref={langDropdownRef}
+              className="relative lg:hidden"
             >
-              <Menu className="h-5 w-5 sm:h-6 sm:w-6" />
-            </button>
+              <button
+                type="button"
+                onClick={() => setLangDropdownOpen((o) => !o)}
+                className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-white hover:bg-white/10 transition-colors"
+                aria-expanded={langDropdownOpen}
+                aria-haspopup="listbox"
+                aria-label="Select language"
+              >
+                <Globe className="h-4 w-4 sm:h-5 sm:w-5 text-white flex-shrink-0" />
+                <span className="text-xs sm:text-sm font-medium uppercase">{lang}</span>
+                <ChevronDown
+                  className={`h-3.5 w-3.5 sm:h-4 sm:w-4 text-white/80 transition-transform ${
+                    langDropdownOpen ? 'rotate-180' : ''
+                  }`}
+                />
+              </button>
+              {langDropdownOpen && (
+                <div
+                  className="absolute left-0 top-full mt-1 min-w-[120px] py-1 rounded-lg bg-white shadow-lg border border-gray-200 z-[60]"
+                  role="listbox"
+                >
+                  {LANG_OPTIONS.map(({ code, label }) => (
+                    <button
+                      key={code}
+                      type="button"
+                      role="option"
+                      aria-selected={lang === code}
+                      onClick={() => {
+                        setLang(code);
+                        setLangDropdownOpen(false);
+                      }}
+                      className={`w-full flex items-center justify-center px-3 py-2 text-sm font-medium transition-colors ${
+                        lang === code
+                          ? 'bg-[#E7001E] text-white'
+                          : 'text-gray-800 hover:bg-gray-100'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Center: Logo - VISUALLY CENTERED BETWEEN CONTENT */}
@@ -162,8 +252,8 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
           {/* Right side: Language switcher, AI Assistant, Notifications, Account name */}
           <div className="flex items-center gap-x-0.5 sm:gap-x-1 md:gap-x-2 lg:gap-x-4 flex-1 justify-end">
-            {/* Language switcher RO|EN|RU */}
-            <div className="flex items-center text-[10px] xs:text-xs sm:text-sm text-white select-none whitespace-nowrap flex-shrink-0">
+            {/* Language switcher RO|EN|RU - Hidden on mobile (lg and up only) */}
+            <div className="hidden lg:flex items-center text-[10px] xs:text-xs sm:text-sm text-white select-none whitespace-nowrap flex-shrink-0">
               <button
                 className={`px-0.5 sm:px-1 ${lang === 'ro' ? 'font-semibold opacity-100' : 'opacity-80 hover:opacity-100'} transition-opacity cursor-pointer`}
                 onClick={() => setLang('ro')}
@@ -181,6 +271,54 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
             </div>
             
             <div className="flex items-center gap-x-1 sm:gap-x-2 flex-shrink-0">
+              {/* Currency dropdown */}
+              <div ref={currencyDropdownRef} className="relative">
+                <button
+                  type="button"
+                  onClick={() => setCurrencyDropdownOpen((o) => !o)}
+                  className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-white hover:bg-white/10 transition-colors"
+                  aria-expanded={currencyDropdownOpen}
+                  aria-haspopup="listbox"
+                  aria-label="Select currency"
+                  title={`Currency: ${currency}`}
+                >
+                  <span className="text-sm font-semibold tabular-nums">
+                    {CURRENCY_SYMBOLS[currency]}
+                  </span>
+                  <ChevronDown
+                    className={`h-3.5 w-3.5 text-white/80 transition-transform ${
+                      currencyDropdownOpen ? 'rotate-180' : ''
+                    }`}
+                  />
+                </button>
+                {currencyDropdownOpen && (
+                  <div
+                    className="absolute right-0 top-full mt-1 min-w-[140px] py-1 rounded-lg bg-white shadow-lg border border-gray-200 z-[60]"
+                    role="listbox"
+                  >
+                    {CURRENCY_OPTIONS.map(({ code, symbol, label }) => (
+                      <button
+                        key={code}
+                        type="button"
+                        role="option"
+                        aria-selected={currency === code}
+                        onClick={() => {
+                          setCurrency(code);
+                          setCurrencyDropdownOpen(false);
+                        }}
+                        className={`w-full flex items-center gap-2 px-3 py-2 text-sm font-medium transition-colors ${
+                          currency === code
+                            ? 'bg-[#330007] text-white'
+                            : 'text-gray-800 hover:bg-gray-100'
+                        }`}
+                      >
+                        <span className="text-base font-bold w-6 text-left">{symbol}</span>
+                        <span>{label}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               {/* AI Assistant Button */}
               <button
                 onClick={() => setShowAIAssistant(true)}
@@ -235,30 +373,12 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
       {/* Mobile sidebar */}
       <div className={`fixed inset-0 z-[45] lg:hidden ${sidebarOpen ? 'block' : 'hidden'}`}>
         <div className="fixed inset-0 bg-gray-600 bg-opacity-75 z-[45]" onClick={() => setSidebarOpen(false)} />
-        <div className="fixed top-16 bottom-0 left-0 flex w-52 flex-col backdrop-blur-md z-[46]" style={{
+        <div className="fixed bottom-0 left-0 flex w-52 flex-col backdrop-blur-md z-[46]" style={{
+          top: 'calc(64px + max(env(safe-area-inset-top, 0px), 1.5vh))',
           background: 'linear-gradient(to right, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.75))'
         }}>
           <div className="flex h-10 items-center justify-between px-2.5">
             <h1 className="text-lg font-bold text-[#E7001E]">BUKKi</h1>
-          </div>
-          {/* Mobile language switcher RO|EN|RU */}
-          <div className="px-2.5 pb-1.5">
-            <div className="inline-flex items-center text-[10px] text-gray-700 select-none">
-              <button
-                className={`px-0.5 ${lang === 'ro' ? 'text-accent-600 font-semibold' : 'hover:text-accent-600'}`}
-                onClick={() => setLang('ro')}
-              >RO</button>
-              <span className="px-0.5 text-gray-400">|</span>
-              <button
-                className={`px-0.5 ${lang === 'en' ? 'text-accent-600 font-semibold' : 'hover:text-accent-600'}`}
-                onClick={() => setLang('en')}
-              >EN</button>
-              <span className="px-0.5 text-gray-400">|</span>
-              <button
-                className={`px-0.5 ${lang === 'ru' ? 'text-accent-600 font-semibold' : 'hover:text-accent-600'}`}
-                onClick={() => setLang('ru')}
-              >RU</button>
-            </div>
           </div>
           <nav className="flex-1 space-y-0.5 px-1.5 py-1.5">
             {navigation.map((item) => {
@@ -309,9 +429,12 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
       <>
         {/* Desktop Sidebar - slides in from left, positioned below header */}
         <div
-          className={`hidden lg:fixed lg:left-0 lg:top-16 lg:bottom-0 lg:flex lg:flex-col z-40 ${
+          className={`hidden lg:fixed lg:left-0 lg:bottom-0 lg:flex lg:flex-col z-40 ${
             sidebarOpen ? 'w-56' : 'w-14'
           }`}
+          style={{
+            top: 'calc(64px + max(env(safe-area-inset-top, 0px), 1.5vh))',
+          }}
         >
           <div className="flex flex-col flex-grow backdrop-blur-md" style={{
             background: 'linear-gradient(to right, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.75))'
@@ -405,10 +528,15 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
       </>
 
       {/* Main content - always centered, sidebar overlays */}
-      <div className={`pt-16 ${sidebarOpen ? 'lg:ml-56' : 'lg:ml-14'} ${sidebarOpen ? 'lg:pointer-events-auto pointer-events-none' : ''} h-screen overflow-hidden`}>
-        {/* Page content */}
-        <main className="h-full bg-white overflow-auto">
-          <div className="w-full h-full">
+      <div 
+        className={`${sidebarOpen ? 'lg:ml-56' : 'lg:ml-14'} ${sidebarOpen ? 'lg:pointer-events-auto pointer-events-none' : ''} h-screen overflow-hidden`}
+        style={{
+          paddingTop: 'calc(64px + env(safe-area-inset-top, 0px))',
+        }}
+      >
+        {/* Page content - for Chat, use overflow-hidden and full height so messages fill the screen */}
+        <main className={`h-full overflow-auto bg-[#f9fafb] ${location.pathname.startsWith('/chat') || location.pathname === '/messages' ? 'overflow-hidden pb-[calc(3.5rem+env(safe-area-inset-bottom,0px))] lg:pb-0' : ''}`}>
+          <div className={`w-full ${location.pathname.startsWith('/chat') || location.pathname === '/messages' || location.pathname === '/' || location.pathname === '/my-bookings' ? 'h-full min-h-0' : ''}`}>
             {children}
           </div>
         </main>
@@ -437,6 +565,32 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
           }} 
         />
       )}
+
+      {/* Mobile Bottom Navigation */}
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-40 lg:hidden" style={{
+        paddingBottom: 'env(safe-area-inset-bottom, 0px)'
+      }}>
+        <nav className="flex items-center justify-around px-1 py-2">
+          {navigation.map((item) => {
+            const isActive = location.pathname === item.href;
+            return (
+              <Link
+                key={item.name}
+                to={item.href}
+                className={`flex flex-col items-center justify-center px-2 py-1.5 rounded-lg transition-colors flex-1 ${
+                  isActive
+                    ? 'text-[#E7001E]'
+                    : 'text-gray-600'
+                }`}
+                onClick={() => setSidebarOpen(false)}
+              >
+                <item.icon className="h-5 w-5 mb-0.5" />
+                <span className="text-[9px] font-medium text-center leading-tight">{item.name}</span>
+              </Link>
+            );
+          })}
+        </nav>
+      </div>
 
       {/* AI Assistant */}
       <AIAssistant 

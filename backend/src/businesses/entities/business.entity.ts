@@ -45,10 +45,10 @@ export class Business extends BaseEntity {
   @Column()
   city: string;
 
-  @Column()
+  @Column({ nullable: true })
   state: string;
 
-  @Column()
+  @Column({ nullable: true })
   zipCode: string;
 
   @Column()
@@ -114,8 +114,14 @@ export class Business extends BaseEntity {
   @Column({ default: false })
   showRevenue: boolean;
 
-  @Column({ default: false })
+  @Column({ default: true })
   autoAcceptBookings: boolean;
+
+  @Column({ type: 'varchar', length: 50, default: 'personal_service' })
+  businessType: 'personal_service' | 'parallel';
+
+  @Column({ type: 'varchar', length: 50, default: 'auto', nullable: true })
+  bookingAssignment: 'auto' | 'manual' | null;
 
   @Column({ type: 'int', default: 2 })
   maxBookingsPerUserPerDay: number;

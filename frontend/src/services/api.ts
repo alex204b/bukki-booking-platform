@@ -1,20 +1,82 @@
 import axios from 'axios';
+import * as authStorageModule from '../utils/authStorage';
 
-// For mobile devices, use the computer's IP address instead of localhost
+const authStorage = authStorageModule.authStorage;
+
+// Dynamic import for Capacitor (works in both web and native contexts)
+let Capacitor: any = null;
+try {
+  // Try to get Capacitor from window first (available in native apps)
+  if (typeof window !== 'undefined' && (window as any).Capacitor) {
+    Capacitor = (window as any).Capacitor;
+  } else {
+    // Fallback to require (works in build context)
+    Capacitor = require('@capacitor/core').Capacitor;
+  }
+} catch (e) {
+  // Capacitor not available (web context or not installed)
+  console.log('[API] Capacitor not available, assuming web context');
+}
+
+// ============================================================
+// MOBILE APP IP ADDRESS CONFIGURATION
+// ============================================================
+// For mobile apps, we need to use your computer's IP address
 // Get your IP with: ipconfig (Windows) or ifconfig (Mac/Linux)
 // Look for "IPv4 Address" under your WiFi adapter
+// Change this to your computer's IP address when testing on mobile
+// Current IPv4: 192.168.1.19
+const MOBILE_API_IP = '192.168.1.137';
+const MOBILE_API_URL = `http://${MOBILE_API_IP}:3000`;
+// ============================================================
+
 const getApiUrl = () => {
   // Safety check - ensure window and navigator are available
   if (typeof window === 'undefined' || typeof navigator === 'undefined') {
     return process.env.REACT_APP_API_URL || 'http://localhost:3000';
   }
 
-  // Check if we're running in Capacitor (mobile app)
-  // @ts-ignore - Capacitor global
-  const isCapacitor = window.Capacitor || (window as any).Capacitor;
-  const isCapacitorProtocol = window.location?.protocol === 'capacitor:' || 
-                               window.location?.protocol === 'capacitor';
-  const isMobileApp = isCapacitor || isCapacitorProtocol;
+  // Check if we're running in Capacitor (mobile app) - multiple detection methods for reliability
+  let isMobileApp = false;
+  const detectionMethods: string[] = [];
+  
+  // Method 1: Use Capacitor's official API if available
+  if (Capacitor && typeof Capacitor.isNativePlatform === 'function') {
+    try {
+      isMobileApp = Capacitor.isNativePlatform();
+      if (isMobileApp) detectionMethods.push('Capacitor.isNativePlatform()');
+    } catch (e) {
+      // Fall through to other detection methods
+    }
+  }
+  
+  // Method 2: Check for Capacitor global object
+  if (!isMobileApp) {
+    // @ts-ignore - Capacitor global
+    const hasCapacitor = !!(window.Capacitor || (window as any).Capacitor);
+    if (hasCapacitor) {
+      isMobileApp = true;
+      detectionMethods.push('window.Capacitor');
+    }
+  }
+  
+  // Method 3: Check for Capacitor protocol
+  if (!isMobileApp) {
+    const protocol = window.location?.protocol || '';
+    if (protocol === 'capacitor:' || protocol === 'capacitor') {
+      isMobileApp = true;
+      detectionMethods.push('capacitor protocol');
+    }
+  }
+  
+  // Method 4: Check for other Capacitor indicators
+  if (!isMobileApp) {
+    const hasCapacitorWeb = !!(window as any).CapacitorWeb;
+    if (hasCapacitorWeb) {
+      isMobileApp = true;
+      detectionMethods.push('CapacitorWeb');
+    }
+  }
   
   // Detect mobile browser (not just Capacitor app)
   const isMobileBrowser = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent || '');
@@ -26,29 +88,47 @@ const getApiUrl = () => {
   // Check for IP address pattern (e.g., 192.168.1.100)
   const isIPAddress = /^(\d{1,3}\.){3}\d{1,3}$/.test(currentHost);
   
-  // For mobile app (Capacitor), check if we should use IP or localhost
+  // CRITICAL: If we're on Android/iOS and hostname is localhost/empty, we MUST be in a mobile app
+  // This is a safety check - native apps should never use localhost
+  const isAndroidOrIOS = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+  if (!isMobileApp && isAndroidOrIOS && (isLocalhost || currentHost === '')) {
+    isMobileApp = true;
+    detectionMethods.push('Android/iOS + localhost fallback');
+    console.warn('[API] ⚠️  Detected Android/iOS with localhost - forcing mobile app mode to prevent localhost connection');
+  }
+  
+  // Log detection results for debugging
+  console.log('[API] Mobile app detection:', {
+    isMobileApp,
+    detectionMethods,
+    userAgent: navigator.userAgent?.substring(0, 50),
+    hostname: currentHost,
+    protocol: window.location?.protocol,
+    hasCapacitor: !!(window as any).Capacitor,
+  });
+  
+  // For mobile app (Capacitor), use IP address directly
   if (isMobileApp) {
-    // Option 1: Use environment variable if set (for WiFi testing)
+    // Option 1: Use environment variable if set (works for both USB + ADB reverse and WiFi)
     const envUrl = process.env.REACT_APP_API_URL;
     
-    // Try to extract IP from environment variable or use it directly
+    // If an env URL is provided, always prefer it (can be localhost for USB/ADB or IP for WiFi)
     if (envUrl) {
-      // If it's an IP address (not localhost), use it
-      if (!envUrl.includes('localhost') && !envUrl.includes('127.0.0.1')) {
-        console.log('[API] Mobile app: Using API URL from environment:', envUrl);
-        return envUrl;
-      }
+      console.log('[API] Mobile app: Using API URL from environment:', envUrl);
+      return envUrl;
     }
     
-    // Option 2: Try localhost first (for USB debugging with ADB reverse)
-    // This is the easiest method - just run: adb reverse tcp:3000 tcp:3000
-    console.log('[API] Mobile app detected. Trying localhost first (requires ADB reverse for USB).');
-    console.log('[API] If this fails, run: adb reverse tcp:3000 tcp:3000');
-    console.log('[API] Or rebuild app with current IP in .env.local file');
+    // Option 2: Use hardcoded IP address from constant above
+    console.log('[API] Mobile app detected. Using IP address:', MOBILE_API_URL);
+    console.log('[API] Computer IP:', MOBILE_API_IP);
+    console.log('[API] If this doesn\'t work, check that:');
+    console.log('[API] 1. Backend is running on port 3000');
+    console.log('[API] 2. Computer IP address is correct:', MOBILE_API_IP);
+    console.log('[API] 3. Phone and computer are on the same WiFi network');
+    console.log('[API] 4. Firewall allows connections on port 3000');
+    console.log('[API] 5. To change IP, edit MOBILE_API_IP constant at top of api.ts');
     
-    // Return localhost - user should use ADB reverse for USB debugging
-    // For WiFi, they need to rebuild with the correct IP in .env.local
-    return 'http://localhost:3000';
+    return MOBILE_API_URL;
   }
   
   // For ANY browser: if accessing via IP address, use that IP for API
@@ -62,40 +142,68 @@ const getApiUrl = () => {
   if (isLocalhost) {
     const envUrl = process.env.REACT_APP_API_URL;
 
+    // CRITICAL SAFETY CHECK: Never use localhost on Android/iOS devices
+    // If we're on a mobile device and somehow got here, use IP address instead
+    if (isAndroidOrIOS && (!envUrl || envUrl.includes('localhost') || envUrl.includes('127.0.0.1'))) {
+      console.error('[API] ⚠️  CRITICAL: Prevented localhost connection on mobile device!');
+      console.error('[API] Using IP address instead:', MOBILE_API_URL);
+      console.error('[API] If this IP is wrong, update MOBILE_API_IP constant at top of api.ts');
+      return MOBILE_API_URL;
+    }
+
     // Use env URL if it exists and is not localhost
     if (envUrl && !envUrl.includes('localhost') && !envUrl.includes('127.0.0.1')) {
       console.log('[API] Using API URL from environment:', envUrl);
       return envUrl;
     }
 
-    // Default to localhost for local development
-    console.log('[API] Using localhost for local development');
+    // Default to localhost for local development (web browser only)
+    console.log('[API] Using localhost for local development (web browser)');
     return 'http://localhost:3000';
   }
 
   // Fallback: use environment variable or localhost
-  return process.env.REACT_APP_API_URL || 'http://localhost:3000';
+  // But NEVER localhost on mobile devices
+  const fallbackUrl = process.env.REACT_APP_API_URL || 'http://localhost:3000';
+  if (isAndroidOrIOS && (fallbackUrl.includes('localhost') || fallbackUrl.includes('127.0.0.1'))) {
+    console.error('[API] ⚠️  CRITICAL: Fallback URL is localhost on mobile device!');
+    console.error('[API] Using IP address instead:', MOBILE_API_URL);
+    return MOBILE_API_URL;
+  }
+  return fallbackUrl;
 };
 
 // Get API URL safely (only when needed, not at module load)
+// This function is called dynamically to ensure Capacitor is initialized
 const getApiBaseUrl = () => {
   try {
-    return getApiUrl();
+    const url = getApiUrl();
+    console.log('[API] Resolved API base URL:', url);
+    return url;
   } catch (error) {
-    // Fallback if there's an error getting the URL
+    console.error('[API] Error getting API URL:', error);
+    // CRITICAL: Never use localhost on mobile devices, even in error case
+    const isMobile = typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+    if (isMobile) {
+      console.error('[API] Error occurred on mobile device, using IP address:', MOBILE_API_URL);
+      return MOBILE_API_URL;
+    }
+    // Fallback for web
     return process.env.REACT_APP_API_URL || 'http://localhost:3000';
   }
 };
 
-const API_BASE_URL = getApiBaseUrl();
+// Create a function to get the current API URL (dynamic, not cached)
+export const getCurrentApiUrl = () => {
+  return getApiBaseUrl();
+};
 
-// Log the API URL being used (only in development)
-if (process.env.NODE_ENV === 'development') {
-  console.log('[API] Using base URL:', API_BASE_URL);
-}
+// Initialize with a default, but we'll use interceptors to set it dynamically
+const initialUrl = getApiBaseUrl();
+console.log('[API] Initial API base URL:', initialUrl);
 
 export const authApi = axios.create({
-  baseURL: API_BASE_URL,
+  baseURL: initialUrl,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -103,33 +211,72 @@ export const authApi = axios.create({
 });
 
 export const api = axios.create({
-  baseURL: API_BASE_URL,
+  baseURL: initialUrl,
   headers: {
     'Content-Type': 'application/json',
   },
   timeout: 10000, // 10 second timeout
 });
 
+// Add request interceptor to dynamically update baseURL (in case Capacitor wasn't ready at module load)
+api.interceptors.request.use((config) => {
+  // Re-check the API URL on each request to ensure we have the correct one
+  const currentUrl = getCurrentApiUrl();
+  
+  // CRITICAL SAFETY CHECK: Never allow localhost on mobile devices
+  const isMobile = typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+  if (isMobile && (currentUrl.includes('localhost') || currentUrl.includes('127.0.0.1'))) {
+    console.error('[API] 🚨 BLOCKED: Attempted to use localhost on mobile device!');
+    console.error('[API] Forcing use of IP address:', MOBILE_API_URL);
+    config.baseURL = MOBILE_API_URL;
+    return config;
+  }
+  
+  if (config.baseURL !== currentUrl) {
+    console.log('[API] Updating baseURL from', config.baseURL, 'to', currentUrl);
+    config.baseURL = currentUrl;
+  }
+  return config;
+});
+
+authApi.interceptors.request.use((config) => {
+  // Re-check the API URL on each request to ensure we have the correct one
+  const currentUrl = getCurrentApiUrl();
+  
+  // CRITICAL SAFETY CHECK: Never allow localhost on mobile devices
+  const isMobile = typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+  if (isMobile && (currentUrl.includes('localhost') || currentUrl.includes('127.0.0.1'))) {
+    console.error('[API] 🚨 BLOCKED: Attempted to use localhost on mobile device!');
+    console.error('[API] Forcing use of IP address:', MOBILE_API_URL);
+    config.baseURL = MOBILE_API_URL;
+    return config;
+  }
+  
+  if (config.baseURL !== currentUrl) {
+    console.log('[API] Updating authApi baseURL from', config.baseURL, 'to', currentUrl);
+    config.baseURL = currentUrl;
+  }
+  return config;
+});
+
 // Request interceptor to add auth token
 api.interceptors.request.use(
   (config) => {
     try {
-      if (typeof localStorage !== 'undefined') {
-        const token = localStorage.getItem('token');
-        if (token) {
-          config.headers.Authorization = `Bearer ${token}`;
-        } else {
-          // Log warning if token is missing for protected routes
-          const isProtectedRoute = !config.url?.includes('/auth/login') && 
-                                  !config.url?.includes('/auth/register') &&
-                                  !config.url?.includes('/auth/forgot-password');
-          if (isProtectedRoute) {
-            console.warn('[API] Request to protected route without token:', config.url);
-          }
+      const token = authStorage.getToken();
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+      } else {
+        // Log warning if token is missing for protected routes
+        const isProtectedRoute = !config.url?.includes('/auth/login') && 
+                                !config.url?.includes('/auth/register') &&
+                                !config.url?.includes('/auth/forgot-password');
+        if (isProtectedRoute) {
+          console.warn('[API] Request to protected route without token:', config.url);
         }
       }
     } catch (error) {
-      console.error('[API] Error reading token from localStorage:', error);
+      console.error('[API] Error reading token:', error);
       // Continue without token - request will fail with 401 if auth is required
     }
     return config;
@@ -204,14 +351,11 @@ api.interceptors.response.use(
         // Only logout if it's clearly a token/auth issue, not a permission issue
         if (isTokenError || !errorMessage) {
           try {
-            if (typeof localStorage !== 'undefined') {
-              const token = localStorage.getItem('token');
-              console.warn('[API] Token exists but request failed with 401. Clearing auth state.');
-              localStorage.removeItem('token');
-              localStorage.removeItem('user');
-            }
+            const { authStorage } = require('../utils/authStorage');
+            console.warn('[API] Token exists but request failed with 401. Clearing auth state.');
+            authStorage.clear();
           } catch (storageError) {
-            console.error('[API] Error clearing localStorage:', storageError);
+            console.error('[API] Error clearing auth storage:', storageError);
           }
           
           // Only redirect if not already navigating away
@@ -314,7 +458,8 @@ export const businessService = {
   requestUnsuspension: (id: string, reason: string) => api.post(`/businesses/${id}/request-unsuspension`, { reason }),
   getStats: (id: string) => api.get(`/businesses/${id}/stats`),
   // Team members
-  inviteMember: (id: string, email: string) => api.post(`/businesses/${id}/members`, { email }),
+  inviteMember: (id: string, email: string, message?: string) =>
+    api.post(`/businesses/${id}/members`, { email, message: message || undefined }),
   listMembers: (id: string) => api.get(`/businesses/${id}/members`),
   removeMember: (id: string, memberId: string) => api.delete(`/businesses/${id}/members/${memberId}`),
   acceptInvite: (id: string, email: string) => api.post(`/businesses/${id}/members/accept`, { email }),
@@ -347,8 +492,8 @@ export const serviceService = {
     api.get('/services/search', { params: { q: query, category, location } }),
   getPopular: (limit?: number) => api.get('/services/popular', { params: { limit } }),
   getByBusiness: (businessId: string) => api.get(`/services/business/${businessId}`),
-  getAvailableSlots: (id: string, date: string) => 
-    api.get(`/services/${id}/available-slots`, { params: { date } }),
+  getAvailableSlots: (id: string, date: string, partySize?: number) => 
+    api.get(`/services/${id}/available-slots`, { params: { date, partySize } }),
 };
 
 // Messages API calls
@@ -361,7 +506,8 @@ export const messageService = {
     api.post(`/messages/chat/${businessId}`, { content, bookingId }),
   getConversation: (businessId: string) => api.get(`/messages/chat/${businessId}/conversation`),
   getConversations: () => api.get('/messages/chat/conversations'),
-  markConversationAsRead: (businessId: string) => api.patch(`/messages/chat/${businessId}/read`),
+  markConversationAsRead: (businessId: string, customerId?: string) =>
+    api.patch(`/messages/chat/${businessId}/read`, customerId ? { customerId } : {}),
 };
 
 // Bookings API calls
@@ -378,8 +524,8 @@ export const bookingService = {
     api.post(`/waitlist/notify/${businessId}/${serviceId}`, { availableDate }),
   getById: (id: string) => api.get(`/bookings/${id}`),
   update: (id: string, data: any) => api.patch(`/bookings/${id}`, data),
-  updateStatus: (id: string, status: string, reason?: string) => 
-    api.patch(`/bookings/${id}/status`, { status, reason }),
+  updateStatus: (id: string, status: string, reason?: string, resourceId?: string, assignToUserId?: string) =>
+    api.patch(`/bookings/${id}/status`, { status, reason, resourceId, assignToUserId }),
   checkIn: (id: string, businessId: string) => 
     api.post(`/bookings/${id}/checkin`, { businessId }),
   validateQR: (qrData: string) => 
@@ -457,6 +603,20 @@ export const offerService = {
   delete: (offerId: string, businessId: string) => api.delete(`/offers/${offerId}/business/${businessId}`),
   getAll: (page = 1, limit = 10) => api.get(`/feedback?page=${page}&limit=${limit}`),
   getStats: () => api.get('/feedback/stats'),
+};
+
+// Resources API (staff, tables, etc.)
+export const resourceService = {
+  getAll: (businessId?: string) =>
+    api.get('/resources', { params: businessId ? { businessId } : {} }),
+  getById: (id: string) => api.get(`/resources/${id}`),
+  create: (data: any) => api.post('/resources', data),
+  update: (id: string, data: any) => api.patch(`/resources/${id}`, data),
+  delete: (id: string) => api.delete(`/resources/${id}`),
+  linkToService: (resourceId: string, serviceId: string) =>
+    api.post(`/resources/${resourceId}/services/${serviceId}`),
+  unlinkFromService: (resourceId: string, serviceId: string) =>
+    api.delete(`/resources/${resourceId}/services/${serviceId}`),
 };
 
 // Calendar API calls

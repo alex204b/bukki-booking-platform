@@ -47,6 +47,8 @@ export const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose, onSuccess
   const [isProcessing, setIsProcessing] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const scannerStartedRef = useRef(false); // Track if scanner was successfully started
+  const hasScannedRef = useRef(false); // Track if we've already scanned a code
+  const lastScannedCodeRef = useRef<string | null>(null); // Track last scanned code to prevent duplicates
 
   useEffect(() => {
     let isMounted = true;
@@ -97,7 +99,10 @@ export const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose, onSuccess
           },
           (decodedText) => {
             // QR code scanned successfully
-            if (isMounted && !isProcessing) {
+            // Prevent multiple scans of the same code or while processing
+            if (isMounted && !isProcessing && !hasScannedRef.current && lastScannedCodeRef.current !== decodedText) {
+              hasScannedRef.current = true; // Mark as scanned immediately
+              lastScannedCodeRef.current = decodedText;
               handleScan(decodedText);
             }
           },
@@ -162,11 +167,11 @@ export const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose, onSuccess
   }, []);
 
   const handleScan = async (qrData: string) => {
-    if (isProcessing) return; // Prevent multiple simultaneous scans
-    
+    if (isProcessing || hasScannedRef.current) return; // Prevent multiple simultaneous scans
+
     setIsProcessing(true);
-    
-    // Stop scanning temporarily - only if scanner is actually running
+
+    // Stop scanning IMMEDIATELY - only if scanner is actually running
     if (scannerRef.current && scanning && scannerStartedRef.current) {
       try {
         await scannerRef.current.stop();
@@ -182,9 +187,9 @@ export const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose, onSuccess
     try {
       const response = await bookingService.validateQR(qrData);
       const data = response.data;
-      
+
       setResult(data);
-      
+
       if (data.success) {
         toast.success(data.message);
         if (onSuccess) {
@@ -195,11 +200,11 @@ export const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose, onSuccess
           onClose();
         }, 3000);
       } else {
-        toast.error(data.message);
-        // Resume scanning after 2 seconds on error
-        setTimeout(() => {
-          resumeScanning();
-        }, 2000);
+        // Show error but DON'T auto-resume - let user manually retry
+        toast.error(data.message, { duration: 4000 });
+        // Reset flags so user can scan again manually
+        hasScannedRef.current = false;
+        lastScannedCodeRef.current = null;
       }
     } catch (error: any) {
       const errorMessage = error.response?.data?.message || t('invalidQRCode') || 'Invalid QR code';
@@ -207,28 +212,32 @@ export const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose, onSuccess
         success: false,
         message: errorMessage,
       });
-      toast.error(errorMessage);
-      // Resume scanning after 2 seconds on error
-      setTimeout(() => {
-        resumeScanning();
-      }, 2000);
+      toast.error(errorMessage, { duration: 4000 });
+      // Reset flags so user can scan again manually
+      hasScannedRef.current = false;
+      lastScannedCodeRef.current = null;
     } finally {
       setIsProcessing(false);
     }
   };
 
   const resumeScanning = async () => {
+    // Reset scanning flags
+    hasScannedRef.current = false;
+    lastScannedCodeRef.current = null;
+    setIsProcessing(false);
+
     if (!scannerRef.current) {
       // Recreate scanner if it was destroyed
       try {
         scannerRef.current = new Html5Qrcode('qr-reader');
       } catch (err) {
         console.error('[QRScanner] Error recreating scanner:', err);
-        toast.error('Failed to restart scanner. Please refresh the page.');
+        toast.error('Failed to restart scanner. Please close and try again.');
         return;
       }
     }
-    
+
     try {
       await scannerRef.current.start(
         { facingMode: 'environment' },
@@ -238,7 +247,10 @@ export const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose, onSuccess
           aspectRatio: 1.0,
         },
         (decodedText) => {
-          if (!isProcessing) {
+          // Prevent multiple scans
+          if (!isProcessing && !hasScannedRef.current && lastScannedCodeRef.current !== decodedText) {
+            hasScannedRef.current = true;
+            lastScannedCodeRef.current = decodedText;
             handleScan(decodedText);
           }
         },
@@ -259,7 +271,7 @@ export const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onClose, onSuccess
         errorMessage = 'Camera permission denied. Please allow camera access.';
       }
       setCameraError(errorMessage);
-      toast.error(errorMessage);
+      toast.error(errorMessage, { duration: 3000 });
     }
   };
 

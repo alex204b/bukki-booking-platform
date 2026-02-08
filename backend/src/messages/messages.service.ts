@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, LessThan, Not, IsNull, DataSource } from 'typeorm';
+import { Repository, LessThan, Not, IsNull, In, DataSource } from 'typeorm';
 import { Message, MessageType, MessageStatus } from './entities/message.entity';
 import { User } from '../users/entities/user.entity';
 import { Business } from '../businesses/entities/business.entity';
@@ -29,64 +29,97 @@ export class MessagesService {
   ) {}
 
   /**
-   * Get all past customers for a business (customers who have completed bookings)
+   * Get all past customers for a business (anyone who has a booking: pending, confirmed, completed, no_show — not cancelled).
+   * Allowed for business owner or active business members (employees).
    */
-  async getPastCustomers(businessId: string, ownerId: string): Promise<User[]> {
+  async getPastCustomers(businessId: string, userId: string): Promise<User[]> {
     const business = await this.businessRepository.findOne({
-      where: { id: businessId, owner: { id: ownerId } },
+      where: { id: businessId },
+      relations: ['owner'],
     });
 
     if (!business) {
-      throw new ForbiddenException('Business not found or you are not the owner');
+      throw new NotFoundException('Business not found');
     }
 
-    // Get all unique customers who have completed bookings at this business
-    const bookings = await this.bookingRepository.find({
+    const isOwner = String(business.owner?.id ?? '') === String(userId ?? '');
+    const isMember = !isOwner && (await this.businessMemberRepository.findOne({
       where: {
         business: { id: businessId },
-        status: BookingStatus.COMPLETED,
-      },
-      relations: ['customer'],
-      select: {
-        customer: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          email: true,
-          phone: true,
-        },
-      },
-    });
+        user: { id: userId },
+        status: BusinessMemberStatus.ACTIVE,
+      } as any,
+    })) !== null;
+    if (!isOwner && !isMember) {
+      throw new ForbiddenException('You do not have access to this business');
+    }
 
-    // Get unique customers
-    const customerMap = new Map<string, User>();
-    bookings.forEach(booking => {
-      if (booking.customer && !customerMap.has(booking.customer.id as string)) {
-        customerMap.set(booking.customer.id as string, booking.customer as User);
-      }
-    });
+    // Get distinct customer IDs from all non-cancelled bookings; join on business relation so filtering is reliable
+    const statuses = [
+      BookingStatus.PENDING,
+      BookingStatus.CONFIRMED,
+      BookingStatus.COMPLETED,
+      BookingStatus.NO_SHOW,
+    ];
+    const rows = await this.bookingRepository
+      .createQueryBuilder('booking')
+      .innerJoin('booking.customer', 'customer')
+      .innerJoin('booking.business', 'biz')
+      .where('biz.id = :businessId', { businessId })
+      .andWhere('booking.status IN (:...statuses)', { statuses })
+      .select('customer.id', 'customerId')
+      .distinct(true)
+      .getRawMany();
 
-    return Array.from(customerMap.values());
+    const customerIds = (rows || [])
+      .map((r: { customerId?: string }) => r.customerId)
+      .filter((id): id is string => !!id);
+
+    if (customerIds.length === 0) {
+      return [];
+    }
+
+    return this.userRepository.find({
+      where: { id: In(customerIds) },
+      select: ['id', 'firstName', 'lastName', 'email', 'phone'],
+      order: { lastName: 'ASC', firstName: 'ASC' },
+    });
   }
 
   /**
-   * Send promotional offer to past customers
+   * Send promotional offer to past customers. Allowed for business owner or active business members.
+   * Message sender is always the business owner so the offer is from the business.
    */
   async sendPromotionalOffer(
     businessId: string,
-    ownerId: string,
+    userId: string,
     customerIds: string[],
     subject: string,
     content: string,
     metadata?: { offerCode?: string; discount?: number; validUntil?: string },
   ): Promise<Message[]> {
     const business = await this.businessRepository.findOne({
-      where: { id: businessId, owner: { id: ownerId } },
+      where: { id: businessId },
+      relations: ['owner'],
     });
 
     if (!business) {
-      throw new ForbiddenException('Business not found or you are not the owner');
+      throw new NotFoundException('Business not found');
     }
+
+    const isOwner = String(business.owner?.id ?? '') === String(userId ?? '');
+    const isMember = !isOwner && (await this.businessMemberRepository.findOne({
+      where: {
+        business: { id: businessId },
+        user: { id: userId },
+        status: BusinessMemberStatus.ACTIVE,
+      } as any,
+    })) !== null;
+    if (!isOwner && !isMember) {
+      throw new ForbiddenException('You do not have access to this business');
+    }
+
+    const senderId = business.owner?.id ?? userId;
 
     const messages: Message[] = [];
 
@@ -97,7 +130,7 @@ export class MessagesService {
       const message = this.messageRepository.create({
         recipient: { id: customerId } as any,
         business: { id: businessId } as any,
-        sender: { id: ownerId } as any,
+        sender: { id: senderId } as any,
         type: MessageType.PROMOTIONAL_OFFER,
         subject,
         content,
@@ -207,6 +240,7 @@ export class MessagesService {
     recipientId: string,
     businessId: string,
     businessMemberId: string,
+    customMessage?: string,
   ): Promise<Message> {
     const business = await this.businessRepository.findOne({
       where: { id: businessId },
@@ -217,13 +251,18 @@ export class MessagesService {
       throw new NotFoundException('Business not found');
     }
 
+    let content = `You have been invited to join ${business.name} as a team member.`;
+    if (customMessage?.trim()) {
+      content += `\n\nMessage from the owner:\n${customMessage.trim()}`;
+    }
+
     const message = this.messageRepository.create({
       recipient: { id: recipientId } as any,
       business: { id: businessId } as any,
       sender: { id: business.owner.id } as any,
       type: MessageType.TEAM_INVITATION,
       subject: `Team Invitation from ${business.name}`,
-      content: `You have been invited to join ${business.name} as a team member.`,
+      content,
       status: MessageStatus.UNREAD,
       metadata: {
         businessMemberId,
@@ -974,11 +1013,14 @@ export class MessagesService {
   }
 
   /**
-   * Mark all messages in a conversation as read
+   * Mark all messages in a conversation as read.
+   * For customers: conversation is with business owner (userId = customer, other = owner).
+   * For business owners/employees: conversation is with a customer; customerId must be passed.
    */
   async markConversationAsRead(
     userId: string,
     businessId: string,
+    customerId?: string,
   ): Promise<void> {
     const business = await this.businessRepository.findOne({
       where: { id: businessId },
@@ -989,7 +1031,11 @@ export class MessagesService {
       throw new NotFoundException('Business not found');
     }
 
-    const conversationId = this.generateConversationId(userId, business.owner.id as string);
+    const ownerId = business.owner.id as string;
+    // For owner/employee viewing a customer chat, conversationId is (customerId, ownerId)
+    const conversationId = customerId
+      ? this.generateConversationId(customerId, ownerId)
+      : this.generateConversationId(userId, ownerId);
 
     await this.messageRepository.update(
       {

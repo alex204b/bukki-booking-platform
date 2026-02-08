@@ -1,13 +1,16 @@
-import React, { useState } from 'react';
-import { Plus, Trash2, Save, Clock, DollarSign, Settings, CheckCircle } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Plus, Trash2, Save, Clock, DollarSign, Settings, CheckCircle, ChevronDown, Users } from 'lucide-react';
 import { api } from '../services/api';
 import toast from 'react-hot-toast';
 import { useI18n } from '../contexts/I18nContext';
-import { GeometricSymbol } from '../components/GeometricSymbols';
+import { useCurrency } from '../contexts/CurrencyContext';
 import { MapAddressSelector } from '../components/MapAddressSelector';
+import { TimePicker } from '../components/TimePicker';
+import { TeamManagementSection } from '../components/TeamManagementSection';
 import { generateUUID } from '../utils/uuid';
+import { authStorage } from '../utils/authStorage';
 
-type FieldType = 'text' | 'number' | 'textarea' | 'select' | 'checkbox';
+type FieldType = 'text' | 'number' | 'select' | 'checkbox';
 
 interface FormField {
   id: string;
@@ -22,6 +25,7 @@ interface Service {
   name: string;
   description: string;
   price: number;
+  priceMax?: number;
   duration: number;
   isActive: boolean;
   customFields: FormField[];
@@ -30,6 +34,13 @@ interface Service {
   bookingCooldownHours?: number;
   allowMultipleActiveBookings?: boolean;
 }
+
+/** Country code (ISO 3166-1 alpha-2) to E.164 calling code */
+const COUNTRY_CALLING_CODES: Record<string, string> = {
+  US: '1', CA: '1', GB: '44', UK: '44', RO: '40', MD: '373', RU: '7',
+  AU: '61', DE: '49', FR: '33', IT: '39', ES: '34', NL: '31', BR: '55',
+  IN: '91', JP: '81', CN: '86', UA: '380', PL: '48', TR: '90', MX: '52',
+};
 
 interface WorkingHours {
   [key: string]: {
@@ -40,11 +51,78 @@ interface WorkingHours {
 }
 
 export const BusinessOnboarding: React.FC = () => {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
+  const { formatPrice, formatPriceTier } = useCurrency();
   const [currentStep, setCurrentStep] = useState(1);
   const [countdown, setCountdown] = useState(5);
   const [businessName, setBusinessName] = useState('');
   const [category, setCategory] = useState('beauty_salon');
+  const [businessType, setBusinessType] = useState<'personal_service' | 'parallel'>('personal_service');
+
+  const PERSONAL_CATEGORIES = [
+    { value: 'beauty_salon', key: 'categoryBeautySalon' },
+    { value: 'tailor', key: 'categoryTailor' },
+    { value: 'mechanic', key: 'categoryMechanic' },
+    { value: 'fitness', key: 'categoryFitness' },
+    { value: 'healthcare', key: 'categoryHealthcare' },
+    { value: 'education', key: 'categoryEducation' },
+    { value: 'consulting', key: 'categoryConsulting' },
+    { value: 'other', key: 'categoryOther' },
+  ];
+  const PARALLEL_CATEGORIES = [
+    { value: 'restaurant', key: 'categoryRestaurant' },
+    { value: 'other', key: 'categoryOther' },
+  ];
+  const categoryOptions = businessType === 'parallel' ? PARALLEL_CATEGORIES : PERSONAL_CATEGORIES;
+  useEffect(() => {
+    if (businessType === 'parallel' && !['restaurant', 'other'].includes(category)) {
+      setCategory('restaurant');
+    } else if (businessType === 'personal_service' && category === 'restaurant') {
+      setCategory('beauty_salon');
+    }
+  }, [businessType]);
+
+  useEffect(() => {
+    if (businessType === 'personal_service') {
+      setNumberOfTables(5); // Reset when switching away from parallel
+    }
+  }, [businessType]);
+
+  useEffect(() => {
+    if (businessType === 'parallel') {
+      setServices(prev => {
+        const first = prev[0];
+        if (!first?.name?.trim()) {
+          return [{
+            ...(first || { id: generateUUID(), isActive: true, customFields: [] }),
+            name: t('tableReservation') || 'Table reservation',
+            price: 0,
+            duration: 90,
+            description: first?.description || '',
+          }, ...prev.slice(1)];
+        }
+        return prev;
+      });
+    }
+  }, [businessType]);
+  const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false);
+  const [openFieldTypeId, setOpenFieldTypeId] = useState<string | null>(null);
+  const categoryDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (categoryDropdownRef.current && !categoryDropdownRef.current.contains(e.target as Node)) {
+        setCategoryDropdownOpen(false);
+      }
+      if (openFieldTypeId && !(e.target as Element).closest('[data-field-type-dropdown]')) {
+        setOpenFieldTypeId(null);
+      }
+    };
+    if (categoryDropdownOpen || openFieldTypeId) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [categoryDropdownOpen, openFieldTypeId]);
   const [address, setAddress] = useState('');
   const [city, setCity] = useState('');
   const [state, setState] = useState('');
@@ -71,30 +149,36 @@ export const BusinessOnboarding: React.FC = () => {
     sunday: { isOpen: false },
   });
   
+  const [numberOfTables, setNumberOfTables] = useState<number>(5);
+
   const [services, setServices] = useState<Service[]>([
     {
       id: generateUUID(),
-      name: 'Basic Service',
-      description: 'Standard service offering',
-      price: 50,
-      duration: 60,
+      name: '',
+      description: '',
+      price: 0,
+      priceMax: undefined,
+      duration: 0,
       isActive: true,
       customFields: []
     }
   ]);
   
   const [fields, setFields] = useState<FormField[]>([
-    { id: generateUUID(), label: 'Notes', type: 'textarea', required: false },
+    { id: generateUUID(), label: '', type: 'text', required: false },
   ]);
   const [saving, setSaving] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [createdBusinessId, setCreatedBusinessId] = useState<string | null>(null);
+  const [pendingInvites, setPendingInvites] = useState<string[]>([]);
+  const [pendingInviteEmail, setPendingInviteEmail] = useState('');
 
   // Auto-redirect to dashboard after success
   React.useEffect(() => {
-    if (currentStep === 5 && countdown > 0) {
+    if (currentStep === 6 && countdown > 0) {
       const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
       return () => clearTimeout(timer);
-    } else if (currentStep === 5 && countdown === 0) {
+    } else if (currentStep === 6 && countdown === 0) {
       window.location.href = '/business-dashboard';
     }
   }, [currentStep, countdown]);
@@ -109,7 +193,7 @@ export const BusinessOnboarding: React.FC = () => {
   };
 
   const addField = (type: FieldType) => {
-    const base: FormField = { id: generateUUID(), label: 'New Field', type, required: false };
+    const base: FormField = { id: generateUUID(), label: '', type, required: false };
     if (type === 'select') base.options = ['Option 1', 'Option 2'];
     setFields(prev => [...prev, base]);
   };
@@ -122,13 +206,25 @@ export const BusinessOnboarding: React.FC = () => {
     setFields(prev => prev.filter(f => f.id !== id));
   };
 
+  const addPendingInvite = () => {
+    const email = pendingInviteEmail.trim();
+    if (!email) return;
+    if (pendingInvites.includes(email)) {
+      toast.error(t('alreadyAdded') || 'Already added');
+      return;
+    }
+    setPendingInvites((p) => [...p, email]);
+    setPendingInviteEmail('');
+  };
+
   const addService = () => {
     const newService: Service = {
       id: generateUUID(),
-      name: 'New Service',
+      name: '',
       description: '',
       price: 0,
-      duration: 30,
+      priceMax: undefined,
+      duration: 0,
       isActive: true,
       customFields: []
     };
@@ -150,12 +246,18 @@ export const BusinessOnboarding: React.FC = () => {
     }));
   };
 
+  const PAYMENT_PAIR = ['card_payment', 'cash_only'] as const;
+
   const toggleAmenity = (amenity: string) => {
-    setAmenities(prev =>
-      prev.includes(amenity)
-        ? prev.filter(a => a !== amenity)
-        : [...prev, amenity]
-    );
+    setAmenities(prev => {
+      const isAdding = !prev.includes(amenity);
+      let next = isAdding ? [...prev, amenity] : prev.filter(a => a !== amenity);
+      if (isAdding && PAYMENT_PAIR.includes(amenity as any)) {
+        const other = PAYMENT_PAIR.find(p => p !== amenity)!;
+        next = next.filter(a => a !== other);
+      }
+      return next;
+    });
   };
 
   const handleLocationSelect = (lat: number, lng: number, fullAddress: string, details?: any) => {
@@ -178,7 +280,13 @@ export const BusinessOnboarding: React.FC = () => {
         setCountry(details.country);
       }
       if (details.countryCode) {
-        setCountryCode(details.countryCode);
+        const cc = (details.countryCode || '').toUpperCase();
+        setCountryCode(cc);
+        // Auto-set phone prefix from location when phone is empty
+        const callingCode = COUNTRY_CALLING_CODES[cc];
+        if (callingCode) {
+          setPhone((prev) => (!prev.trim() ? `+${callingCode} ` : prev));
+        }
       }
     } else {
       // Fallback: Try to extract city, state, and zip from the full address string
@@ -323,23 +431,12 @@ export const BusinessOnboarding: React.FC = () => {
           errors.push('Phone number is required');
           fieldErrors.phone = 'Phone number is required';
         } else {
-          // Remove all non-digit characters except +
           const cleanedPhone = phone.replace(/[\s\-().]/g, '');
-          // Check if it's a valid phone number (10 digits for US, or 11 with country code)
-          if (cleanedPhone.startsWith('+')) {
-            // International format: + followed by 10-15 digits
-            const intlRegex = /^\+[1-9]\d{9,14}$/;
-            if (!intlRegex.test(cleanedPhone)) {
-              errors.push('Phone number must be in international format: +1234567890 (10-15 digits after +)');
-              fieldErrors.phone = 'Phone number must be in international format: +1234567890 (10-15 digits after +)';
-            }
-          } else {
-            // US format: exactly 10 digits
-            const usRegex = /^\d{10}$/;
-            if (!usRegex.test(cleanedPhone)) {
-              errors.push('Phone number must be exactly 10 digits (e.g., 1234567890)');
-              fieldErrors.phone = 'Phone number must be exactly 10 digits (e.g., 1234567890)';
-            }
+          const digitsOnly = cleanedPhone.replace(/\+/g, '');
+          // Accept 7-15 digits (international range)
+          if (!/^\d{7,15}$/.test(digitsOnly)) {
+            errors.push('Phone number must have 7-15 digits (e.g., +40 712 345 678)');
+            fieldErrors.phone = 'Phone number must have 7-15 digits';
           }
         }
 
@@ -368,6 +465,10 @@ export const BusinessOnboarding: React.FC = () => {
         break;
 
       case 2: // Services
+        if (businessType === 'parallel' && (numberOfTables < 1 || numberOfTables > 100)) {
+          errors.push('Number of tables must be between 1 and 100');
+          fieldErrors.numberOfTables = 'Enter a number between 1 and 100';
+        }
         if (services.length === 0) {
           errors.push('At least one service is required');
         } else {
@@ -381,12 +482,19 @@ export const BusinessOnboarding: React.FC = () => {
               fieldErrors[`service_${index}_name`] = 'Service name must be at least 2 characters';
             }
 
-            if (service.price <= 0) {
-              errors.push(`Service ${serviceNum}: Price must be greater than $0`);
-              fieldErrors[`service_${index}_price`] = 'Price must be greater than $0';
+            const isParallel = businessType === 'parallel';
+            if (!isParallel && service.price <= 0) {
+              const msg = `Price must be greater than ${formatPrice(0)}`;
+              errors.push(`Service ${serviceNum}: ${msg}`);
+              fieldErrors[`service_${index}_price`] = msg;
+            } else if (service.price < 0) {
+              const msg = 'Price cannot be negative';
+              errors.push(`Service ${serviceNum}: ${msg}`);
+              fieldErrors[`service_${index}_price`] = msg;
             } else if (service.price > 100000) {
-              errors.push(`Service ${serviceNum}: Price cannot exceed $100,000`);
-              fieldErrors[`service_${index}_price`] = 'Price cannot exceed $100,000';
+              const msg = `Price cannot exceed ${formatPrice(100000)}`;
+              errors.push(`Service ${serviceNum}: ${msg}`);
+              fieldErrors[`service_${index}_price`] = msg;
             }
 
             if (service.duration <= 0) {
@@ -464,31 +572,54 @@ export const BusinessOnboarding: React.FC = () => {
     setFieldErrors({});
     setSaving(true);
     try {
-      // 1) Create business
+      const customBookingFields = fields
+        .filter(f => f.label?.trim())
+        .map(({ id, ...rest }) => ({
+          fieldName: rest.label,
+          fieldType: rest.type,
+          isRequired: rest.required,
+          options: rest.options,
+        }));
+
       const businessPayload = {
         name: businessName,
-        description,
+        description: description || null,
         category,
+        businessType,
         address,
         city,
         state,
         zipCode,
-        country: country,
+        country: country || 'USA',
         phone,
-        email,
-        website,
-        latitude,
-        longitude,
-        priceRange,
-        amenities,
+        email: email || null,
+        website: website || null,
+        latitude: latitude ?? null,
+        longitude: longitude ?? null,
+        priceRange: priceRange || 'moderate',
+        amenities: amenities || [],
         workingHours,
-        customBookingFields: fields.map(({ id, ...rest }) => rest),
+        customBookingFields,
       };
-      const businessRes = await api.post('/businesses', businessPayload);
-      const business = businessRes.data;
+      let business: { id: string };
+      let usedExistingBusiness = false;
+      try {
+        const businessRes = await api.post('/businesses', businessPayload);
+        business = businessRes.data;
+      } catch (createErr: any) {
+        if (createErr?.response?.status === 400 && (createErr?.response?.data?.message || '').toLowerCase().includes('already have a business')) {
+          const { businessService } = await import('../services/api');
+          const myRes = await businessService.getMyBusiness();
+          business = myRes?.data;
+          if (!business?.id) throw createErr;
+          usedExistingBusiness = true;
+        } else {
+          throw createErr;
+        }
+      }
 
-      // 2) Upload images if any were selected
-      if (selectedImages.length > 0) {
+      // 2) Upload images if any were selected (skip if using existing business)
+      if (!usedExistingBusiness && selectedImages.length > 0) {
         try {
           const { businessService } = await import('../services/api');
           await businessService.uploadImages(business.id, selectedImages);
@@ -498,37 +629,90 @@ export const BusinessOnboarding: React.FC = () => {
         }
       }
 
-      // 3) Create services
+      // 3) Create services (skip if using existing business)
+      let tableServiceId: string | null = null;
+      if (!usedExistingBusiness) {
       for (const service of services) {
-        if (service.name && service.price > 0) {
-          await api.post('/services', {
+        const isTableService = businessType === 'parallel';
+        if (service.name && (service.price > 0 || (isTableService && service.price >= 0))) {
+          const customFields = (service.customFields || []).map(({ id, ...rest }) => rest);
+          const serviceRes = await api.post('/services', {
             ...service,
             businessId: business.id,
-            customFields: service.customFields.map(({ id, ...rest }) => rest),
+            resourceType: isTableService ? 'table' : undefined,
+            priceMax: service.priceMax != null && service.priceMax > service.price ? service.priceMax : undefined,
+            customFields,
           });
+          if (isTableService && serviceRes?.data?.id) {
+            tableServiceId = serviceRes.data.id;
+          }
+        }
+      }
+      }
+
+      // 4) For parallel businesses: create table resources and link to table service (skip if using existing)
+      if (!usedExistingBusiness && businessType === 'parallel' && numberOfTables > 0 && tableServiceId) {
+        const { resourceService } = await import('../services/api');
+        for (let i = 1; i <= numberOfTables; i++) {
+          const res = await resourceService.create({
+            name: `${t('table') || 'Table'} ${i}`,
+            type: 'table',
+            businessId: business.id,
+            capacity: 4,
+            sortOrder: i,
+          });
+          if (res?.data?.id) {
+            await resourceService.linkToService(res.data.id, tableServiceId);
+          }
         }
       }
       
       // Show pending review notice
       toast.success('Business submitted! Review usually takes 30–60 minutes. You\'ll receive an email when it\'s approved.');
 
-      // Update localStorage to reflect the new business owner role
-      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      // Update auth storage to reflect the new business owner role
+      const userStr = authStorage.getUser();
+      const user = userStr ? JSON.parse(userStr) : {};
       user.role = 'business_owner';
-      localStorage.setItem('user', JSON.stringify(user));
+      authStorage.setUser(JSON.stringify(user));
 
-      // Show success screen instead of redirecting immediately
-      setCurrentStep(5); // Add a success step
+      // 5) Send invites for any emails added before creation
+      if (pendingInvites.length > 0) {
+        const { businessService: bizApi } = await import('../services/api');
+        for (const email of pendingInvites) {
+          try {
+            await bizApi.inviteMember(business.id, email.trim());
+            toast.success(t('inviteSent') || 'Invite sent');
+          } catch (invErr: any) {
+            const msg = invErr?.response?.data?.message || '';
+            if (msg.includes('No account found with this email')) {
+              toast.error(t('inviteEmailNotRegistered') || msg);
+            } else if (msg.includes('already a team member')) {
+              toast.error(t('inviteAlreadyMember') || msg);
+            } else if (msg.includes('invite was already sent')) {
+              toast.error(t('inviteAlreadySent') || msg);
+            } else {
+              toast.error(msg || `Failed to invite ${email}`);
+            }
+          }
+        }
+        setPendingInvites([]);
+      }
+
+      // Business is created, stay on Team step so they can invite more or continue
+      setCreatedBusinessId(business.id);
     } catch (e: any) {
       console.error('Business creation error:', e);
-      toast.error(e.response?.data?.message || 'Failed to save business. Please try again.');
+      const data = e.response?.data;
+      const msg = Array.isArray(data?.message) ? data.message[0] : (data?.message || data?.error || e.message || 'Failed to save business. Please try again.');
+      toast.error(msg);
     } finally {
       setSaving(false);
     }
   };
 
   const nextStep = () => {
-    if (currentStep >= 4) return;
+    if (currentStep >= 5) return;
 
     // Validate current step before proceeding
     const validation = validateStep(currentStep);
@@ -556,9 +740,13 @@ export const BusinessOnboarding: React.FC = () => {
     setFieldErrors({});
     
     // Proceed to next step
-    if (currentStep < 4) {
+    if (currentStep < 5) {
       setCurrentStep(currentStep + 1);
     }
+  };
+
+  const finishPersonnelStep = () => {
+    setCurrentStep(6);
   };
 
   const prevStep = () => {
@@ -574,39 +762,46 @@ export const BusinessOnboarding: React.FC = () => {
     { id: 1, title: 'Business Info', icon: Settings },
     { id: 2, title: 'Services', icon: DollarSign },
     { id: 3, title: 'Working Hours', icon: Clock },
-    { id: 4, title: 'Booking Form', icon: Settings }
+    { id: 4, title: 'Booking Form', icon: Settings },
+    { id: 5, title: t('personnelOnboarding'), icon: Users }
   ];
 
   return (
-    <div className="max-w-6xl mx-auto">
+    <div className="w-full max-w-[1600px] mx-auto px-4 sm:px-6 pt-4 pb-16 lg:pb-6">
       {/* Progress Steps */}
-      <div className="mb-8">
-        <div className="flex items-center justify-between">
+      <div className="mb-8 flex justify-center">
+        <div className="flex items-center gap-x-4 sm:gap-x-6">
           {steps.map((step, index) => {
             const Icon = step.icon;
             const isActive = currentStep === step.id;
             const isCompleted = currentStep > step.id;
-            
+            const arrowCompleted = currentStep > step.id;
+
             return (
-              <div key={step.id} className="flex items-center">
-                <div className={`flex items-center justify-center w-10 h-10 rounded-full border-2 ${
-                  isCompleted ? 'bg-primary-600 border-primary-600 text-white' :
-                  isActive ? 'border-primary-600 text-primary-600' :
-                  'border-gray-300 text-gray-400'
-                }`}>
-                  {isCompleted ? <CheckCircle className="h-5 w-5" /> : <Icon className="h-5 w-5" />}
+              <React.Fragment key={step.id}>
+                <div className="flex items-center flex-shrink-0">
+                  <div className={`flex items-center justify-center w-10 h-10 rounded-full border-2 ${
+                    isCompleted ? 'bg-[#330007] border-[#330007] text-white' :
+                    isActive ? 'border-[#330007] text-[#330007]' :
+                    'border-gray-300 text-gray-400'
+                  }`}>
+                    {isCompleted ? <CheckCircle className="h-5 w-5" /> : <Icon className="h-5 w-5" />}
+                  </div>
+                  <span className={`ml-2 text-sm font-medium whitespace-nowrap ${
+                    isActive ? 'text-[#330007]' : isCompleted ? 'text-gray-900' : 'text-gray-400'
+                  }`}>
+                    {step.title}
+                  </span>
                 </div>
-                <span className={`ml-2 text-sm font-medium ${
-                  isActive ? 'text-primary-600' : isCompleted ? 'text-gray-900' : 'text-gray-400'
-                }`}>
-                  {step.title}
-                </span>
                 {index < steps.length - 1 && (
-                  <div className={`w-16 h-0.5 mx-4 ${
-                    isCompleted ? 'bg-primary-600' : 'bg-gray-300'
-                  }`} />
+                  <div className={`flex items-center justify-center w-10 flex-shrink-0 ${arrowCompleted ? 'text-[#330007]' : 'text-gray-300'}`}>
+                    <svg viewBox="0 0 48 12" className="w-12 h-3 flex-shrink-0" fill="currentColor">
+                      <line x1="0" y1="6" x2="34" y2="6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                      <polygon points="32,0 48,6 32,12" />
+                    </svg>
+                  </div>
                 )}
-              </div>
+              </React.Fragment>
             );
           })}
         </div>
@@ -617,9 +812,39 @@ export const BusinessOnboarding: React.FC = () => {
         {currentStep === 1 && (
           <div className="space-y-6">
             <div className="text-center mb-8">
-              <GeometricSymbol variant="diamond" size={60} strokeWidth={4} color="#f97316" className="mx-auto mb-4" />
               <h2 className="text-2xl font-bold text-gray-900">{t('businessInfo')}</h2>
               <p className="text-gray-600 mt-2">{t('businessInfoDesc')}</p>
+            </div>
+
+            {/* Business Type: Personal service vs Parallel */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">{t('businessType') || 'Business type'}</label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <button
+                  type="button"
+                  onClick={() => setBusinessType('personal_service')}
+                  className={`flex flex-col items-start p-4 rounded-xl border-2 text-left transition-colors ${
+                    businessType === 'personal_service'
+                      ? 'border-[#330007] bg-[#fef2f2]'
+                      : 'border-[#fecaca] bg-white hover:border-[#330007]/30'
+                  }`}
+                >
+                  <span className="font-semibold text-gray-900">{t('personalService') || 'Personal service'}</span>
+                  <span className="text-sm text-gray-600 mt-1">{t('personalServiceDesc') || 'One employee serves one customer (barber, mechanic, therapist)'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBusinessType('parallel')}
+                  className={`flex flex-col items-start p-4 rounded-xl border-2 text-left transition-colors ${
+                    businessType === 'parallel'
+                      ? 'border-[#330007] bg-[#fef2f2]'
+                      : 'border-[#fecaca] bg-white hover:border-[#330007]/30'
+                  }`}
+                >
+                  <span className="font-semibold text-gray-900">{t('parallelBusiness') || 'Parallel business'}</span>
+                  <span className="text-sm text-gray-600 mt-1">{t('parallelBusinessDesc') || 'Multiple customers at once (restaurant tables, rooms)'}</span>
+                </button>
+              </div>
             </div>
             
             {/* Validation Summary */}
@@ -671,11 +896,39 @@ export const BusinessOnboarding: React.FC = () => {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">{t('categoryOnboarding')} *</label>
-                <select className="input w-full" value={category} onChange={e => setCategory(e.target.value)}>
-                  {['beauty_salon','tailor','mechanic','restaurant','fitness','healthcare','education','consulting','other'].map(c => (
-                    <option key={c} value={c}>{c.replace('_',' ').replace(/\b\w/g, l => l.toUpperCase())}</option>
-                  ))}
-                </select>
+                <div ref={categoryDropdownRef} className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setCategoryDropdownOpen((o) => !o)}
+                    className="w-full min-h-[44px] flex items-center justify-between gap-2 rounded-xl px-4 py-2.5 text-left text-gray-800 bg-[#fef2f2] border-2 border-[#fecaca] hover:border-[#330007]/30 focus:border-[#330007] focus:ring-2 focus:ring-[#330007]/20 focus:outline-none transition-colors cursor-pointer"
+                  >
+                    <span>{t(
+                      { beauty_salon: 'categoryBeautySalon', tailor: 'categoryTailor', mechanic: 'categoryMechanic', restaurant: 'categoryRestaurant', fitness: 'categoryFitness', healthcare: 'categoryHealthcare', education: 'categoryEducation', consulting: 'categoryConsulting', other: 'categoryOther' }[category] || 'categoryOther'
+                    )}</span>
+                    <ChevronDown className={`h-5 w-5 text-[#330007] flex-shrink-0 transition-transform ${categoryDropdownOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {categoryDropdownOpen && (
+                    <div className="absolute left-0 right-0 top-full mt-1 py-1.5 rounded-xl bg-[#fef2f2] border-2 border-[#fecaca] shadow-lg z-50 max-h-60 overflow-y-auto">
+                      {categoryOptions.map(({ value, key }) => (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => {
+                            setCategory(value);
+                            setCategoryDropdownOpen(false);
+                          }}
+                          className={`w-full text-left px-4 py-2.5 text-sm font-medium transition-colors first:rounded-t-[10px] last:rounded-b-[10px] ${
+                            category === value
+                              ? 'bg-[#330007] text-white'
+                              : 'text-gray-800 hover:bg-[#330007]/10'
+                          }`}
+                        >
+                          {t(key)}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-2">{t('descriptionOnboarding')}</label>
@@ -688,8 +941,8 @@ export const BusinessOnboarding: React.FC = () => {
                 />
               </div>
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Business Images</label>
-                <p className="text-sm text-gray-500 mb-2">Upload up to 10 images (max 5MB each)</p>
+                <label className="block text-sm font-medium text-gray-700 mb-2">{t('businessImages')}</label>
+                <p className="text-sm text-gray-500 mb-2">{t('uploadImagesHint')}</p>
                 <input
                   type="file"
                   accept="image/*"
@@ -706,8 +959,8 @@ export const BusinessOnboarding: React.FC = () => {
                     file:mr-4 file:py-2 file:px-4
                     file:rounded-md file:border-0
                     file:text-sm file:font-semibold
-                    file:bg-primary-50 file:text-primary-700
-                    hover:file:bg-primary-100"
+                    file:bg-[#fef2f2] file:text-[#330007] file:border file:border-[#330007]
+                    hover:file:bg-[#fee2e2]"
                 />
                 {selectedImages.length > 0 && (
                   <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -742,7 +995,7 @@ export const BusinessOnboarding: React.FC = () => {
                 )}
               </div>
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Address *</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">{t('addressOnboarding')} *</label>
                 <input 
                   className={`input w-full ${fieldErrors.address ? 'border-red-500 focus:ring-red-500' : ''}`}
                   placeholder="Street address" 
@@ -808,7 +1061,7 @@ export const BusinessOnboarding: React.FC = () => {
                 )}
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Postal Code *</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">{t('zipCodeOnboarding')} *</label>
                 <input 
                   className={`input w-full ${fieldErrors.zipCode ? 'border-red-500 focus:ring-red-500' : ''}`}
                   placeholder="Postal Code (auto-filled from map)" 
@@ -832,8 +1085,9 @@ export const BusinessOnboarding: React.FC = () => {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">{t('phoneOnboarding')} *</label>
                 <input 
+                  type="tel"
                   className={`input w-full ${fieldErrors.phone ? 'border-red-500 focus:ring-red-500' : ''}`}
-                  placeholder="1234567890 or +1234567890" 
+                  placeholder={COUNTRY_CALLING_CODES[countryCode] ? `+${COUNTRY_CALLING_CODES[countryCode]} ...` : '+1 ...'} 
                   value={phone} 
                   onChange={e => {
                     setPhone(e.target.value);
@@ -851,7 +1105,7 @@ export const BusinessOnboarding: React.FC = () => {
                   <p className="mt-1 text-sm text-red-600">{fieldErrors.phone}</p>
                 )}
                 {!fieldErrors.phone && (
-                  <p className="mt-1 text-xs text-gray-500">Enter 10 digits (e.g., 1234567890) or international format with +</p>
+                  <p className="mt-1 text-xs text-gray-500">{t('phoneLocationHint')}</p>
                 )}
               </div>
               <div>
@@ -902,12 +1156,12 @@ export const BusinessOnboarding: React.FC = () => {
 
             {/* Price Range */}
             <div className="mt-6">
-              <label className="block text-sm font-medium text-gray-700 mb-3">Price Range</label>
+              <label className="block text-sm font-medium text-gray-700 mb-3">{t('priceRange')}</label>
               <div className="grid grid-cols-3 gap-3">
                 {[
-                  { value: 'cheap', label: '$ Budget-Friendly', desc: 'Affordable pricing' },
-                  { value: 'moderate', label: '$$ Moderate', desc: 'Mid-range pricing' },
-                  { value: 'expensive', label: '$$$ Premium', desc: 'High-end pricing' },
+                  { value: 'cheap', tier: 1 as const, labelKey: 'budgetFriendlyLabel', descKey: 'affordablePricing' },
+                  { value: 'moderate', tier: 2 as const, labelKey: 'moderateLabel', descKey: 'midRangePricing' },
+                  { value: 'expensive', tier: 3 as const, labelKey: 'premiumLabel', descKey: 'highEndPricing' },
                 ].map(option => (
                   <button
                     key={option.value}
@@ -915,12 +1169,12 @@ export const BusinessOnboarding: React.FC = () => {
                     onClick={() => setPriceRange(option.value)}
                     className={`p-4 rounded-lg border-2 transition-all ${
                       priceRange === option.value
-                        ? 'border-primary-600 bg-primary-50 text-primary-700'
+                        ? 'border-[#330007] bg-[#fef2f2] text-[#330007]'
                         : 'border-gray-200 hover:border-gray-300'
                     }`}
                   >
-                    <div className="font-semibold text-lg mb-1">{option.label}</div>
-                    <div className="text-xs text-gray-600">{option.desc}</div>
+                    <div className="font-semibold text-lg mb-1">{formatPriceTier(option.tier)} {t(option.labelKey)}</div>
+                    <div className="text-xs text-gray-600">{t(option.descKey)}</div>
                   </button>
                 ))}
               </div>
@@ -928,21 +1182,21 @@ export const BusinessOnboarding: React.FC = () => {
 
             {/* Amenities */}
             <div className="mt-6">
-              <label className="block text-sm font-medium text-gray-700 mb-3">Amenities & Features</label>
+              <label className="block text-sm font-medium text-gray-700 mb-3">{t('amenitiesAndFeatures')}</label>
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
                 {[
-                  { value: 'parking', label: '🅿️ Parking', icon: '🅿️' },
-                  { value: 'wheelchair_accessible', label: '♿ Wheelchair Accessible', icon: '♿' },
-                  { value: 'wifi', label: '📶 Free WiFi', icon: '📶' },
-                  { value: 'outdoor_seating', label: '🌳 Outdoor Seating', icon: '🌳' },
-                  { value: 'air_conditioned', label: '❄️ Air Conditioned', icon: '❄️' },
-                  { value: 'pet_friendly', label: '🐕 Pet Friendly', icon: '🐕' },
-                  { value: 'valet_parking', label: '🚗 Valet Parking', icon: '🚗' },
-                  { value: 'reservations_required', label: '📅 Reservations Required', icon: '📅' },
-                  { value: 'walk_ins_welcome', label: '🚶 Walk-ins Welcome', icon: '🚶' },
-                  { value: 'card_payment', label: '💳 Card Payments', icon: '💳' },
-                  { value: 'cash_only', label: '💵 Cash Only', icon: '💵' },
-                  { value: 'delivery', label: '🚚 Delivery Available', icon: '🚚' },
+                  { value: 'parking', labelKey: 'parking' },
+                  { value: 'wheelchair_accessible', labelKey: 'wheelchairAccessible' },
+                  { value: 'wifi', labelKey: 'freeWifi' },
+                  { value: 'outdoor_seating', labelKey: 'outdoorSeating' },
+                  { value: 'air_conditioned', labelKey: 'airConditioned' },
+                  { value: 'pet_friendly', labelKey: 'petFriendly' },
+                  { value: 'valet_parking', labelKey: 'valetParking' },
+                  { value: 'reservations_required', labelKey: 'reservationsRequired' },
+                  { value: 'walk_ins_welcome', labelKey: 'walkInsWelcome' },
+                  { value: 'card_payment', labelKey: 'cardPayment' },
+                  { value: 'cash_only', labelKey: 'cashOnly' },
+                  { value: 'delivery', labelKey: 'deliveryAvailable' },
                 ].map(amenity => (
                   <button
                     key={amenity.value}
@@ -950,15 +1204,15 @@ export const BusinessOnboarding: React.FC = () => {
                     onClick={() => toggleAmenity(amenity.value)}
                     className={`p-3 rounded-lg border-2 transition-all text-left ${
                       amenities.includes(amenity.value)
-                        ? 'border-primary-600 bg-primary-50 text-primary-700'
+                        ? 'border-[#330007] bg-[#fef2f2] text-[#330007]'
                         : 'border-gray-200 hover:border-gray-300'
                     }`}
                   >
-                    <div className="text-sm font-medium">{amenity.label}</div>
+                    <div className="text-sm font-medium">{t(amenity.labelKey)}</div>
                   </button>
                 ))}
               </div>
-              <p className="text-xs text-gray-500 mt-2">Select all that apply to help customers find your business</p>
+              <p className="text-xs text-gray-500 mt-2">{t('amenitiesHint')}</p>
             </div>
           </div>
         )}
@@ -966,10 +1220,27 @@ export const BusinessOnboarding: React.FC = () => {
         {currentStep === 2 && (
           <div className="space-y-6">
             <div className="text-center mb-8">
-              <GeometricSymbol variant="star" size={60} strokeWidth={4} color="#f97316" className="mx-auto mb-4" />
               <h2 className="text-2xl font-bold text-gray-900">{t('servicesOnboarding')}</h2>
               <p className="text-gray-600 mt-2">{t('servicesDesc')}</p>
             </div>
+
+            {businessType === 'parallel' && (
+              <div className="mb-6 p-4 rounded-xl bg-[#fef2f2] border-2 border-[#fecaca]">
+                <label className="block text-sm font-medium text-gray-700 mb-2">{t('numberOfTables') || 'Number of tables'}</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={numberOfTables}
+                  onChange={(e) => setNumberOfTables(Math.max(1, Math.min(100, parseInt(e.target.value, 10) || 1)))}
+                  className={`input w-32 ${fieldErrors.numberOfTables ? 'border-red-500' : ''}`}
+                />
+                <p className="text-xs text-gray-500 mt-1">{t('numberOfTablesHint') || 'Tables will be created automatically. You can add or remove them later.'}</p>
+                {fieldErrors.numberOfTables && (
+                  <p className="mt-1 text-sm text-red-600">{fieldErrors.numberOfTables}</p>
+                )}
+              </div>
+            )}
             
             {/* Validation Summary */}
             {Object.keys(fieldErrors).length > 0 && (
@@ -996,106 +1267,68 @@ export const BusinessOnboarding: React.FC = () => {
             
             <div className="space-y-6">
               {services.map((service, index) => (
-                <div key={service.id} className="border rounded-lg p-6 bg-gray-50">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold">Service {index + 1}</h3>
+                <div key={service.id} className="border rounded-lg p-4 bg-gray-50">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-base font-semibold">Service {index + 1}</h3>
                     {services.length > 1 && (
-                      <button 
-                        className="text-red-600 hover:text-red-800"
-                        onClick={() => removeService(service.id)}
-                      >
+                      <button type="button" className="text-red-600 hover:text-red-800" onClick={() => removeService(service.id)}>
                         <Trash2 className="h-4 w-4" />
                       </button>
                     )}
                   </div>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">{t('serviceNameOnboarding')} *</label>
+                  <div className="flex flex-wrap gap-x-4 gap-y-3 items-end">
+                    <div className="min-w-[140px] flex-1">
+                      <label className="block text-xs font-medium text-gray-700 mb-1">{t('serviceNameOnboarding')} *</label>
                       <input 
-                        className={`input w-full ${fieldErrors[`service_${index}_name`] ? 'border-red-500 focus:ring-red-500' : ''}`}
+                        className={`input h-9 w-full text-sm ${fieldErrors[`service_${index}_name`] ? 'border-red-500 focus:ring-red-500' : ''}`}
                         placeholder={t('serviceNameOnboarding')} 
                         value={service.name} 
                         onChange={e => {
                           updateService(service.id, { name: e.target.value });
-                          if (fieldErrors[`service_${index}_name`]) {
-                            setFieldErrors(prev => {
-                              const next = { ...prev };
-                              delete next[`service_${index}_name`];
-                              return next;
-                            });
-                          }
+                          if (fieldErrors[`service_${index}_name`]) setFieldErrors(prev => { const n = { ...prev }; delete n[`service_${index}_name`]; return n; });
                         }}
                         onFocus={clearOnFirstFocus(`service-name-${service.id}`, () => updateService(service.id, { name: '' }))}
                       />
-                      {fieldErrors[`service_${index}_name`] && (
-                        <p className="mt-1 text-sm text-red-600">{fieldErrors[`service_${index}_name`]}</p>
-                      )}
+                      {fieldErrors[`service_${index}_name`] && <p className="mt-0.5 text-xs text-red-600">{fieldErrors[`service_${index}_name`]}</p>}
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">{t('priceOnboarding')} *</label>
-                      <input 
-                        type="number" 
-                        className={`input w-full ${fieldErrors[`service_${index}_price`] ? 'border-red-500 focus:ring-red-500' : ''}`}
-                        placeholder="0.00" 
-                        value={service.price} 
-                        onChange={e => {
-                          updateService(service.id, { price: parseFloat(e.target.value) || 0 });
-                          if (fieldErrors[`service_${index}_price`]) {
-                            setFieldErrors(prev => {
-                              const next = { ...prev };
-                              delete next[`service_${index}_price`];
-                              return next;
-                            });
-                          }
+                      <label className="block text-xs font-medium text-gray-700 mb-1">{lang === 'ro' ? 'Preț minim' : lang === 'ru' ? 'Мин. цена' : 'Min price'} ({formatPriceTier(1)}) {businessType === 'parallel' ? '' : '*'}</label>
+                      <input type="number" min={businessType === 'parallel' ? 0 : 0.01} step={0.01}
+                        className={`input h-9 w-[80px] px-2 text-sm ${fieldErrors[`service_${index}_price`] ? 'border-red-500 focus:ring-red-500' : ''}`}
+                        placeholder="0" value={service.price === 0 ? '' : service.price} 
+                        onChange={e => { const v = parseFloat(e.target.value); updateService(service.id, { price: isNaN(v) ? 0 : v });
+                          if (fieldErrors[`service_${index}_price`]) setFieldErrors(prev => { const n = { ...prev }; delete n[`service_${index}_price`]; return n; });
                         }}
                         onFocus={clearOnFirstFocus(`service-price-${service.id}`, () => updateService(service.id, { price: 0 }))}
                       />
-                      {fieldErrors[`service_${index}_price`] && (
-                        <p className="mt-1 text-sm text-red-600">{fieldErrors[`service_${index}_price`]}</p>
-                      )}
+                      {fieldErrors[`service_${index}_price`] && <p className="mt-0.5 text-xs text-red-600">{fieldErrors[`service_${index}_price`]}</p>}
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">{t('durationOnboarding')} * (minutes)</label>
-                      <input 
-                        type="number" 
-                        className={`input w-full ${fieldErrors[`service_${index}_duration`] ? 'border-red-500 focus:ring-red-500' : ''}`}
-                        placeholder="30" 
-                        value={service.duration} 
-                        onChange={e => {
-                          updateService(service.id, { duration: parseInt(e.target.value) || 30 });
-                          if (fieldErrors[`service_${index}_duration`]) {
-                            setFieldErrors(prev => {
-                              const next = { ...prev };
-                              delete next[`service_${index}_duration`];
-                              return next;
-                            });
-                          }
+                      <label className="block text-xs font-medium text-gray-700 mb-1">{lang === 'ro' ? 'Preț maxim' : lang === 'ru' ? 'Макс. цена' : 'Max price'} ({formatPriceTier(1)})</label>
+                      <input type="number" min={0} step={0.01} className="input h-9 w-[80px] px-2 text-sm"
+                        placeholder="—" value={service.priceMax != null && service.priceMax > 0 ? service.priceMax : ''} 
+                        onChange={e => { const val = e.target.value; const v = val === '' ? undefined : parseFloat(val); updateService(service.id, { priceMax: v != null && !isNaN(v) ? v : undefined }); }}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">{businessType === 'parallel' ? (t('slotDuration') || 'Slot duration (min)') : t('durationOnboarding')} *</label>
+                      <input type="number" min={1} className={`input h-9 w-[70px] px-2 text-sm ${fieldErrors[`service_${index}_duration`] ? 'border-red-500 focus:ring-red-500' : ''}`}
+                        placeholder="30" value={service.duration === 0 ? '' : service.duration} 
+                        onChange={e => { const v = parseInt(e.target.value, 10); updateService(service.id, { duration: isNaN(v) ? 0 : v });
+                          if (fieldErrors[`service_${index}_duration`]) setFieldErrors(prev => { const n = { ...prev }; delete n[`service_${index}_duration`]; return n; });
                         }}
                         onFocus={clearOnFirstFocus(`service-duration-${service.id}`, () => updateService(service.id, { duration: 0 }))}
                       />
-                      {fieldErrors[`service_${index}_duration`] && (
-                        <p className="mt-1 text-sm text-red-600">{fieldErrors[`service_${index}_duration`]}</p>
-                      )}
+                      {fieldErrors[`service_${index}_duration`] && <p className="mt-0.5 text-xs text-red-600">{fieldErrors[`service_${index}_duration`]}</p>}
                     </div>
-                    <div className="flex items-center">
-                      <label className="flex items-center gap-2 text-sm text-gray-700">
-                        <input 
-                          type="checkbox" 
-                          checked={service.isActive} 
-                          onChange={e => updateService(service.id, { isActive: e.target.checked })} 
-                        />
-                        {t('activeOnboarding')}
-                      </label>
-                    </div>
+                    <label className="flex items-center gap-2 text-xs text-gray-700 pb-1">
+                      <input type="checkbox" checked={service.isActive} onChange={e => updateService(service.id, { isActive: e.target.checked })} />
+                      {t('activeOnboarding')}
+                    </label>
                   </div>
-                  
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">{t('descriptionOnboarding')}</label>
-                    <textarea 
-                      className="input w-full h-20" 
-                      placeholder={t('descriptionOnboarding')} 
-                      value={service.description} 
+                  <div className="mt-3">
+                    <label className="block text-xs font-medium text-gray-700 mb-1">{t('descriptionOnboarding')}</label>
+                    <textarea className="input w-full h-14 text-sm py-2" placeholder={t('descriptionOnboarding')} value={service.description} 
                       onChange={e => updateService(service.id, { description: e.target.value })} 
                       onFocus={clearOnFirstFocus(`service-description-${service.id}`, () => updateService(service.id, { description: '' }))}
                     />
@@ -1103,11 +1336,12 @@ export const BusinessOnboarding: React.FC = () => {
                 </div>
               ))}
               
-              <button 
-                className="btn btn-outline w-full" 
+              <button
+                type="button"
                 onClick={addService}
+                className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-[#fef2f2] border-2 border-[#fecaca] text-[#330007] font-semibold hover:bg-[#330007]/5 hover:border-[#330007]/30 transition-colors"
               >
-                <Plus className="h-4 w-4 mr-2" />
+                <Plus className="h-5 w-5" />
                 {t('addAnotherService')}
               </button>
             </div>
@@ -1117,7 +1351,6 @@ export const BusinessOnboarding: React.FC = () => {
         {currentStep === 3 && (
           <div className="space-y-6">
             <div className="text-center mb-8">
-              <GeometricSymbol variant="sun" size={60} strokeWidth={4} color="#f97316" className="mx-auto mb-4" />
               <h2 className="text-2xl font-bold text-gray-900">{t('workingHours')}</h2>
               <p className="text-gray-600 mt-2">{t('workingHoursDesc')}</p>
             </div>
@@ -1138,18 +1371,16 @@ export const BusinessOnboarding: React.FC = () => {
                   
                   {hours.isOpen && (
                     <div className="flex items-center gap-2">
-                      <input 
-                        type="time" 
-                        className="input w-32" 
-                        value={hours.openTime || '09:00'} 
-                        onChange={e => updateWorkingHours(day, { openTime: e.target.value })} 
+                      <TimePicker
+                        value={hours.openTime || '09:00'}
+                        onChange={(v) => updateWorkingHours(day, { openTime: v })}
+                        className="w-32"
                       />
                       <span>{t('to')}</span>
-                      <input 
-                        type="time" 
-                        className="input w-32" 
-                        value={hours.closeTime || '17:00'} 
-                        onChange={e => updateWorkingHours(day, { closeTime: e.target.value })} 
+                      <TimePicker
+                        value={hours.closeTime || '17:00'}
+                        onChange={(v) => updateWorkingHours(day, { closeTime: v })}
+                        className="w-32"
                       />
                     </div>
                   )}
@@ -1162,36 +1393,51 @@ export const BusinessOnboarding: React.FC = () => {
         {currentStep === 4 && (
           <div className="space-y-6">
             <div className="text-center mb-8">
-              <GeometricSymbol variant="cross" size={60} strokeWidth={4} color="#f97316" className="mx-auto mb-4" />
               <h2 className="text-2xl font-bold text-gray-900">{t('bookingForm')}</h2>
               <p className="text-gray-600 mt-2">{t('bookingFormDesc')}</p>
             </div>
             
             <div className="space-y-4">
               {fields.map((field) => (
-                <div key={field.id} className="border rounded-lg p-4">
+                <div key={field.id} className="border-2 border-[#fecaca] rounded-xl p-4 bg-[#fef2f2]/50">
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                     <input 
                       className="input" 
                       placeholder={t('fieldLabel') || 'Field Label (e.g., Notes, Special Requests)'} 
                       value={field.label} 
                       onChange={e => updateField(field.id, { label: e.target.value })} 
-                      onFocus={clearOnFirstFocus(`field-label-${field.id}`, () => {
-                        // Clear if it's a default value
-                        if (field.label === 'Notes' || field.label === 'New Field') {
-                          updateField(field.id, { label: '' });
-                        }
-                      })}
                     />
-                    <select 
-                      className="input" 
-                      value={field.type} 
-                      onChange={e => updateField(field.id, { type: e.target.value as FieldType })}
-                    >
-                      {['text','number','textarea','select','checkbox'].map(t => (
-                        <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>
-                      ))}
-                    </select>
+                    <div data-field-type-dropdown className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setOpenFieldTypeId(openFieldTypeId === field.id ? null : field.id)}
+                        className="w-full min-h-[40px] flex items-center justify-between gap-2 rounded-xl px-3 py-2 text-left text-gray-800 bg-[#fef2f2] border-2 border-[#fecaca] hover:border-[#330007]/30 focus:border-[#330007] focus:outline-none transition-colors cursor-pointer"
+                      >
+                        <span>{t({ text: 'textField', number: 'numberField', select: 'selectOnboarding', checkbox: 'checkbox' }[field.type] || 'textField')}</span>
+                        <ChevronDown className={`h-4 w-4 text-[#330007] flex-shrink-0 transition-transform ${openFieldTypeId === field.id ? 'rotate-180' : ''}`} />
+                      </button>
+                      {openFieldTypeId === field.id && (
+                        <div className="absolute left-0 right-0 top-full mt-1 py-1.5 rounded-xl bg-[#fef2f2] border-2 border-[#fecaca] shadow-lg z-50">
+                          {(['text', 'number', 'select', 'checkbox'] as const).map((type) => (
+                            <button
+                              key={type}
+                              type="button"
+                              onClick={() => {
+                                updateField(field.id, { type });
+                                setOpenFieldTypeId(null);
+                              }}
+                              className={`w-full text-left px-3 py-2 text-sm font-medium transition-colors first:rounded-t-[10px] last:rounded-b-[10px] ${
+                                field.type === type
+                                  ? 'bg-[#330007] text-white'
+                                  : 'text-gray-800 hover:bg-[#330007]/10'
+                              }`}
+                            >
+                              {t({ text: 'textField', number: 'numberField', select: 'selectOnboarding', checkbox: 'checkbox' }[type])}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                     <label className="flex items-center gap-2 text-sm text-gray-700">
                       <input 
                         type="checkbox" 
@@ -1200,9 +1446,10 @@ export const BusinessOnboarding: React.FC = () => {
                       />
                       {t('requiredOnboarding')}
                     </label>
-                    <button 
-                      className="btn btn-ghost btn-sm justify-self-end" 
+                    <button
+                      type="button"
                       onClick={() => removeField(field.id)}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-red-600 hover:bg-red-50 font-medium text-sm justify-self-end transition-colors"
                     >
                       <Trash2 className="h-4 w-4" />
                       {t('removeOnboarding')}
@@ -1231,21 +1478,73 @@ export const BusinessOnboarding: React.FC = () => {
                 </div>
               ))}
               
-              <div className="flex gap-2 flex-wrap">
-                <button className="btn btn-outline btn-sm" onClick={() => addField('text')}>{t('textField')}</button>
-                <button className="btn btn-outline btn-sm" onClick={() => addField('number')}>{t('numberField')}</button>
-                <button className="btn btn-outline btn-sm" onClick={() => addField('textarea')}>{t('textarea')}</button>
-                <button className="btn btn-outline btn-sm" onClick={() => addField('select')}>{t('selectOnboarding')}</button>
-                <button className="btn btn-outline btn-sm" onClick={() => addField('checkbox')}>{t('checkbox')}</button>
-              </div>
+              <button
+                type="button"
+                onClick={() => addField('text')}
+                className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-[#fef2f2] border-2 border-[#fecaca] text-[#330007] font-semibold hover:bg-[#330007]/5 hover:border-[#330007]/30 transition-colors"
+              >
+                <Plus className="h-5 w-5" />
+                {t('addField')}
+              </button>
             </div>
           </div>
         )}
 
         {currentStep === 5 && (
+          <div className="space-y-6">
+            <div className="text-center mb-6">
+              <h2 className="text-2xl font-bold text-gray-900">{t('personnelOnboarding')}</h2>
+              <p className="text-gray-600 mt-2">
+                {createdBusinessId ? t('personnelOnboardingDesc') : t('finishSetupToInvite')}
+              </p>
+            </div>
+            {createdBusinessId ? (
+              <TeamManagementSection businessId={createdBusinessId} />
+            ) : (
+              <div className="space-y-4 rounded-lg border border-gray-200 bg-gray-50/50 p-4">
+                <p className="text-sm text-gray-600">{t('personnelOnboardingDesc')}</p>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-2">
+                  <input
+                    type="email"
+                    value={pendingInviteEmail}
+                    onChange={(e) => setPendingInviteEmail(e.target.value)}
+                    placeholder={t('inviteEmailPlaceholder') || 'staff@email.com'}
+                    className="min-w-0 flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-[#330007] focus:outline-none focus:ring-1 focus:ring-[#330007]"
+                    onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addPendingInvite())}
+                  />
+                  <button
+                    type="button"
+                    onClick={addPendingInvite}
+                    disabled={!pendingInviteEmail.trim()}
+                    className="shrink-0 rounded-lg bg-[#330007] px-4 py-2 text-sm font-medium text-white hover:bg-[#4a000a] disabled:opacity-50"
+                  >
+                    {t('invite') || 'Invite'}
+                  </button>
+                </div>
+                {pendingInvites.length > 0 && (
+                  <div className="divide-y rounded border border-gray-200 bg-white">
+                    {pendingInvites.map((email) => (
+                      <div key={email} className="flex items-center justify-between px-3 py-2">
+                        <span className="text-sm text-gray-900">{email}</span>
+                        <button
+                          type="button"
+                          onClick={() => setPendingInvites((p) => p.filter((e) => e !== email))}
+                          className="text-sm font-medium text-red-600 hover:text-red-700"
+                        >
+                          {t('remove') || 'Remove'}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {currentStep === 6 && (
           <div className="space-y-6 text-center">
             <div className="mb-8">
-              <GeometricSymbol variant="check" size={80} strokeWidth={4} color="#10b981" className="mx-auto mb-6" />
               <h2 className="text-3xl font-bold text-gray-900 mb-4">Business Submitted Successfully!</h2>
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 max-w-2xl mx-auto">
                 <div className="flex items-center justify-center mb-4">
@@ -1271,7 +1570,7 @@ export const BusinessOnboarding: React.FC = () => {
 
             <div className="flex justify-center gap-4 mt-4">
               <button
-                className="btn btn-primary"
+                className="btn bg-[#330007] hover:bg-[#4a000a] text-white border-0"
                 onClick={() => window.location.href = '/business-dashboard'}
               >
                 Go to Dashboard Now
@@ -1287,10 +1586,10 @@ export const BusinessOnboarding: React.FC = () => {
         )}
 
         {/* Navigation */}
-        {currentStep < 5 && (
+        {currentStep < 6 && (
           <div className="flex justify-between mt-8 pt-6 border-t">
             <button 
-              className="btn btn-outline" 
+              className="btn btn-outline px-6 py-3 min-w-[120px]" 
               onClick={prevStep} 
               disabled={currentStep === 1}
             >
@@ -1298,16 +1597,23 @@ export const BusinessOnboarding: React.FC = () => {
             </button>
             
             <div className="flex gap-3">
-              {currentStep < 4 ? (
+              {currentStep < 5 ? (
                 <button 
-                  className="btn btn-primary" 
+                  className="btn bg-[#330007] hover:bg-[#4a000a] text-white border-0 px-6 py-3 min-w-[140px]" 
                   onClick={nextStep}
+                >
+                  {t('nextStep')}
+                </button>
+              ) : createdBusinessId ? (
+                <button 
+                  className="btn bg-[#330007] hover:bg-[#4a000a] text-white border-0 px-6 py-3 min-w-[140px]" 
+                  onClick={finishPersonnelStep}
                 >
                   {t('nextStep')}
                 </button>
               ) : (
                 <button 
-                  className="btn btn-primary" 
+                  className="btn bg-[#330007] hover:bg-[#4a000a] text-white border-0 disabled:opacity-50 px-6 py-3 min-w-[140px]" 
                   onClick={handleSave} 
                   disabled={saving}
                 >

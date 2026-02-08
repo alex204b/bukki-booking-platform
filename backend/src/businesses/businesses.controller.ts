@@ -1,8 +1,8 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Request, Query, NotFoundException, UnauthorizedException, BadRequestException, UseInterceptors, UploadedFiles, UploadedFile, Res } from '@nestjs/common';
-import { Response } from 'express';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Request, Query, NotFoundException, UnauthorizedException, BadRequestException, UseInterceptors, UploadedFiles } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery, ApiConsumes } from '@nestjs/swagger';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { BusinessesService } from './businesses.service';
+import { StorageService } from '../storage/storage.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -14,7 +14,10 @@ import { multerConfig } from '../common/config/multer.config';
 @ApiTags('Businesses')
 @Controller('businesses')
 export class BusinessesController {
-  constructor(private readonly businessesService: BusinessesService) {}
+  constructor(
+    private readonly businessesService: BusinessesService,
+    private readonly storage: StorageService,
+  ) {}
 
   @Post()
   @UseGuards(JwtAuthGuard)
@@ -287,8 +290,8 @@ export class BusinessesController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Invite a team member by email' })
-  async inviteMember(@Param('id') id: string, @Body() body: { email: string }, @Request() req) {
-    return this.businessesService.inviteMember(id, req.user.id, body.email);
+  async inviteMember(@Param('id') id: string, @Body() body: { email: string; message?: string }, @Request() req) {
+    return this.businessesService.inviteMember(id, req.user.id, body.email, body.message);
   }
 
   @Get(':id/members')
@@ -397,7 +400,7 @@ export class BusinessesController {
   @ApiResponse({ status: 200, description: 'Images uploaded successfully' })
   async uploadImages(
     @Param('id') id: string,
-    @UploadedFiles() files: Array<Express.Multer.File>,
+    @UploadedFiles() files: Express.Multer.File[],
     @Request() req,
   ) {
     if (!req.user) {
@@ -417,34 +420,15 @@ export class BusinessesController {
       throw new UnauthorizedException('You do not have permission to upload images for this business');
     }
 
-    // Save file paths - store relative paths (frontend will prepend API URL)
-    const imagePaths = files.map(file => `/uploads/businesses/${file.filename}`);
-    console.log(`[BusinessesController] Uploaded ${files.length} image(s)`);
-    console.log(`[BusinessesController] Image paths:`, imagePaths);
-    console.log(`[BusinessesController] Files saved to: ${files.map(f => f.path).join(', ')}`);
-    return this.businessesService.addImages(id, imagePaths);
-  }
-
-  @Get('test-image/:filename')
-  @ApiOperation({ summary: 'TEST: Check if image file exists and can be served' })
-  async testImage(@Param('filename') filename: string, @Res() res: Response) {
-    const fs = require('fs');
-    const path = require('path');
-    const uploadsPath = path.join(process.cwd(), 'uploads', 'businesses', filename);
-    
-    console.log(`[BusinessesController] Testing image: ${filename}`);
-    console.log(`[BusinessesController] Full path: ${uploadsPath}`);
-    console.log(`[BusinessesController] File exists: ${fs.existsSync(uploadsPath)}`);
-    
-    if (fs.existsSync(uploadsPath)) {
-      return res.sendFile(uploadsPath);
-    } else {
-      return res.status(404).json({ 
-        error: 'Image not found',
-        path: uploadsPath,
-        cwd: process.cwd()
-      });
+    const urls: string[] = [];
+    for (const file of files) {
+      const buf = (file as any).buffer as Buffer;
+      if (!buf) throw new BadRequestException('Upload failed: no file data');
+      const url = await this.storage.upload(buf, file.mimetype, file.originalname);
+      urls.push(url);
     }
+    console.log(`[BusinessesController] Uploaded ${files.length} image(s) to R2`);
+    return this.businessesService.addImages(id, urls);
   }
 
   @Delete(':id/images/:imageIndex')

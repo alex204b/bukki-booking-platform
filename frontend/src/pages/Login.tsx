@@ -8,12 +8,16 @@ import toast from 'react-hot-toast';
 import { signInWithPopup, GoogleAuthProvider, FacebookAuthProvider } from 'firebase/auth';
 import { auth, googleProvider, facebookProvider } from '../config/firebase';
 import { ConnectionErrorModal } from '../components/ConnectionErrorModal';
+import { LoginBackground } from '../components/LoginBackground';
+import { authStorage } from '../utils/authStorage';
 
 type ViewMode = 'login' | 'signup' | 'forgot-password' | 'verify-code' | 'reset-password';
 
 export const Login: React.FC = () => {
   const [viewMode, setViewMode] = useState<ViewMode>('login');
   const [isSignUp, setIsSignUp] = useState(false);
+  // Signup step: 1 = personal data, 2 = passwords & confirmation
+  const [signupStep, setSignupStep] = useState<1 | 2>(1);
 
   // Login state
   const [email, setEmail] = useState('');
@@ -69,7 +73,7 @@ export const Login: React.FC = () => {
   const { t, lang, setLang } = useI18n();
   const navigate = useNavigate();
   const location = useLocation();
-
+ 
   const from = location.state?.from?.pathname || '/';
 
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -220,7 +224,34 @@ export const Login: React.FC = () => {
 
   const handleSignupSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validateAll()) return;
+    const form = e.target as HTMLFormElement;
+    const passwordInput = form?.elements.namedItem('password') as HTMLInputElement | null;
+    const confirmInput = form?.elements.namedItem('confirmPassword') as HTMLInputElement | null;
+    let password = formData.password;
+    let confirmPassword = formData.confirmPassword;
+    if (passwordInput && confirmInput) {
+      password = passwordInput.value;
+      confirmPassword = confirmInput.value;
+      setFormData((prev) => ({ ...prev, password, confirmPassword }));
+      setErrors((prev) => ({
+        ...prev,
+        password: passwordStrongEnough(password) ? '' : t('errPwd'),
+        confirmPassword: password === confirmPassword ? '' : t('errPwdMatch'),
+      }));
+    }
+    const isValid =
+      formData.firstName.trim().length >= 2 &&
+      formData.lastName.trim().length >= 2 &&
+      emailRegex.test(formData.email) &&
+      (!formData.phone || phoneRegex.test(formData.phone)) &&
+      passwordStrongEnough(password) &&
+      password === confirmPassword &&
+      !!formData.role;
+    if (!isValid) {
+      validateAll();
+      toast.error(t('fixFormErrors') || 'Please fix the errors in the form.');
+      return;
+    }
     setSignupLoading(true);
 
     try {
@@ -228,7 +259,7 @@ export const Login: React.FC = () => {
         firstName: formData.firstName,
         lastName: formData.lastName,
         email: formData.email,
-        password: formData.password,
+        password,
         phone: formData.phone,
         role: formData.role,
       });
@@ -256,7 +287,8 @@ export const Login: React.FC = () => {
     const newIsSignUp = !isSignUp;
     setIsSignUp(newIsSignUp);
     setViewMode(newIsSignUp ? 'signup' : 'login');
-    // Clear errors when switching
+    // Reset signup step and clear errors when switching
+    setSignupStep(1);
     setErrors({});
     setIsDropdownOpen(false);
   };
@@ -394,6 +426,9 @@ export const Login: React.FC = () => {
 
   const handleGoogleLogin = async () => {
     try {
+      // Clear any existing session before OAuth to prevent wrong-account login
+      const { authStorage } = await import('../utils/authStorage');
+      authStorage.clear();
       const result = await signInWithPopup(auth, googleProvider);
       const user = result.user;
       const idToken = await user.getIdToken();
@@ -403,8 +438,8 @@ export const Login: React.FC = () => {
       const { user: userData, token: userToken } = response.data;
 
       // Set up the session similar to regular login
-      localStorage.setItem('token', userToken);
-      localStorage.setItem('user', JSON.stringify(userData));
+      authStorage.setToken(userToken);
+      authStorage.setUser(JSON.stringify(userData));
       authApi.defaults.headers.common['Authorization'] = `Bearer ${userToken}`;
       api.defaults.headers.common['Authorization'] = `Bearer ${userToken}`;
 
@@ -421,6 +456,9 @@ export const Login: React.FC = () => {
 
   const handleFacebookLogin = async () => {
     try {
+      // Clear any existing session before OAuth to prevent wrong-account login
+      const { authStorage } = await import('../utils/authStorage');
+      authStorage.clear();
       const result = await signInWithPopup(auth, facebookProvider);
       const user = result.user;
       const idToken = await user.getIdToken();
@@ -432,8 +470,8 @@ export const Login: React.FC = () => {
       const { user: userData, token: userToken } = response.data;
 
       // Set up the session
-      localStorage.setItem('token', userToken);
-      localStorage.setItem('user', JSON.stringify(userData));
+      authStorage.setToken(userToken);
+      authStorage.setUser(JSON.stringify(userData));
       authApi.defaults.headers.common['Authorization'] = `Bearer ${userToken}`;
       api.defaults.headers.common['Authorization'] = `Bearer ${userToken}`;
 
@@ -466,153 +504,153 @@ export const Login: React.FC = () => {
   }, [isDropdownOpen]);
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-start p-0 relative overflow-hidden" style={{ backgroundColor: '#330007' }}>
-      {/* Precision Diagonal White Section - Linked to logo using rem units */}
+    <LoginBackground>
+      {/* Safe-area top bar for phones (under status bar/notch) */}
       <div
-        className="absolute bg-white"
+        className="absolute inset-x-0 top-0 z-20 pointer-events-none md:hidden"
         style={{
-          width: '200vw',
-          height: '200vh',
-          left: 'calc(50% - 15.2rem - 24px)', // Positioned relative to center, adjusted 8px right
-          bottom: 'calc(100% + 63px)', // Moved 70px higher
-          transform: 'rotate(45deg)',
-          transformOrigin: 'bottom left',
-        }}
+          // Use device safe area on iOS when available, otherwise a small responsive height
+          height: 'max(env(safe-area-inset-top, 0px), 1.5vh)',
+          backgroundColor: '#330007',
+          '--safe-area-top': 'max(env(safe-area-inset-top, 0px), 1.5vh)',
+        } as React.CSSProperties}
       />
 
       {/* Corner language switcher */}
-      <div className="absolute top-4 right-4 z-30 text-xs sm:text-sm select-none">
+      <div 
+        className="absolute right-2 sm:right-3 md:right-4 z-30 text-sm sm:text-sm select-none touch-manipulation language-switcher-safe-area"
+      >
         <button
           type="button"
-          className={`px-2 transition-colors ${lang === 'ro' ? 'text-white font-bold' : 'text-white/70 hover:text-white'}`}
+          className={`px-2 sm:px-2.5 py-1 transition-colors ${lang === 'ro' ? 'text-red-600 font-bold' : 'text-red-500 hover:text-red-600 active:text-red-600'}`}
           onClick={() => setLang('ro')}
         >
           RO
         </button>
-        <span className="px-1 text-white/50">|</span>
+        <span className="px-0.5 sm:px-1 text-red-500/70">|</span>
         <button
           type="button"
-          className={`px-2 transition-colors ${lang === 'en' ? 'text-white font-bold' : 'text-white/70 hover:text-white'}`}
+          className={`px-2 sm:px-2.5 py-1 transition-colors ${lang === 'en' ? 'text-red-600 font-bold' : 'text-red-500 hover:text-red-600 active:text-red-600'}`}
           onClick={() => setLang('en')}
         >
           EN
         </button>
-        <span className="px-1 text-white/50">|</span>
+        <span className="px-0.5 sm:px-1 text-red-500/70">|</span>
         <button
           type="button"
-          className={`px-2 transition-colors ${lang === 'ru' ? 'text-white font-bold' : 'text-white/70 hover:text-white'}`}
+          className={`px-2 sm:px-2.5 py-1 transition-colors ${lang === 'ru' ? 'text-red-600 font-bold' : 'text-red-500 hover:text-red-600 active:text-red-600'}`}
           onClick={() => setLang('ru')}
         >
           RU
         </button>
       </div>
 
-      {/* Login/Signup Card */}
-      <div className="relative w-full max-w-2xl z-10">
-        <div className="relative">
-          {/* Content */}
-          <div className="relative z-10">
-            {/* Logo - Fully Responsive Positioning */}
-            <div className="text-center" style={{ marginTop: 'calc(5rem - 70px)', marginBottom: '2rem' }}>
-              <img
-                src="/bukki-text.png"
-                alt="BUKKi"
-                className="w-[24rem] max-w-[80vw] h-auto mx-auto"
-                style={{ mixBlendMode: 'screen' }}
-              />
-        </div>
-
-            {/* Forms Container - Responsive offset */}
-            <div className={`relative ${
-              viewMode === 'signup'
-                ? 'min-h-[60vh]'
-                : viewMode === 'forgot-password' || viewMode === 'verify-code'
-                ? 'min-h-[20vh]'
-                : viewMode === 'reset-password'
-                ? 'min-h-[30vh]'
-                : 'min-h-[25vh]'
-            }`} style={{ marginTop: 'calc(-4rem - 90px)' }}>
-              {/* Login Form */}
-              {viewMode === 'login' && (
-                <form onSubmit={handleLoginSubmit} className="space-y-5 mx-auto" style={{ width: '60%', fontSize: '0.9rem' }}>
+      {/* Forms Container - grouped with logo, fits on screen */}
+      <div
+        className="relative w-full max-w-2xl z-10 mx-auto flex flex-col justify-center px-4 sm:px-6 md:px-0 pb-4 sm:pb-8 forms-container-safe-area"
+        style={{
+          minHeight: '100vh',
+          paddingTop: 'var(--form-start, 180px)',
+        }}
+      >
+        <div className={`relative ${
+          viewMode === 'signup'
+            ? ''
+            : ''
+        }`}>
+            {/* Login Form */}
+            {viewMode === 'login' && (
+              <form
+                onSubmit={handleLoginSubmit}
+                className="space-y-2.5 sm:space-y-4 mx-auto w-[92%] sm:w-[90%] md:w-[75%] max-w-[420px] text-center"
+                style={{ fontSize: 'clamp(0.8rem, 2.4vw, 1rem)' }}
+              >
                   {/* Email */}
                   <div className="relative">
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="E-mail"
-                      className="w-full px-5 py-3 bg-black/30 border-0 rounded-full focus:outline-none focus:ring-2 focus:ring-red-500 transition-all duration-300 text-white placeholder-white/70 text-sm"
-                />
-            </div>
+                    <input
+                      type="email"
+                      required
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder={t('emailAddress') || 'E-mail'}
+                      className="w-full px-3 sm:px-5 py-2.5 sm:py-3.5 bg-black/30 border-0 rounded-full focus:outline-none focus:ring-2 focus:ring-red-500 transition-all duration-300 text-white placeholder-white/70 text-sm sm:text-base text-center sm:text-left placeholder:text-center sm:placeholder:text-left"
+                    />
+                  </div>
 
                   {/* Password */}
                   <div className="relative">
-                <input
-                      type={showPassword ? "text" : "password"}
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Password"
-                      className="w-full px-5 py-3 bg-black/30 border-0 rounded-full focus:outline-none focus:ring-2 focus:ring-red-500 transition-all duration-300 text-white placeholder-white/70 text-sm"
-                />
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      required
+                      autoComplete="off"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder={t('password') || 'Password'}
+                      className="w-full px-3 sm:px-5 py-2.5 sm:py-3.5 pr-10 sm:pr-14 bg-black/30 border-0 rounded-full focus:outline-none focus:ring-2 focus:ring-red-500 transition-all duration-300 text-white placeholder-white/70 text-sm sm:text-base text-center sm:text-left placeholder:text-center sm:placeholder:text-left"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 sm:right-4 top-1/2 -translate-y-1/2 text-white/70 hover:text-white transition-colors touch-manipulation"
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4 sm:h-5 sm:w-5" /> : <Eye className="h-4 w-4 sm:h-5 sm:w-5" />}
+                    </button>
                   </div>
 
                   {/* Submit Button */}
                   <button
                     type="submit"
                     disabled={loginLoading}
-                    className="w-full bg-red-600 hover:bg-red-700 text-white py-3 rounded-full font-semibold text-base transition-all duration-300 transform hover:scale-105 disabled:opacity-70 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-2"
+                    className="w-full bg-red-600 hover:bg-red-700 active:bg-red-800 text-white py-2.5 sm:py-3.5 rounded-full font-semibold text-sm sm:text-base transition-all duration-300 transform active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-2 mt-1.5 sm:mt-0 text-center touch-manipulation"
                   >
                       {loginLoading ? (
                         <>
                           <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                          {t('signingIn') || 'Signing in...'}
+                          {t('Signing In') || 'Signing in...'}
                         </>
                       ) : (
-                        'Log in'
+                        t('Log in') || 'Log in'
                       )}
                   </button>
 
                   {/* Social Login Buttons */}
-                  <div className="flex gap-3">
+                  <div className="flex gap-2 sm:gap-3 mt-2.5 sm:mt-4">
                     {/* Google Login */}
                     <button
                       type="button"
                       onClick={handleGoogleLogin}
-                      className="w-1/2 bg-white hover:bg-gray-100 text-gray-800 py-3 rounded-full font-semibold text-sm transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2"
+                      className="w-1/2 bg-white hover:bg-gray-100 active:bg-gray-200 text-gray-800 py-2.5 sm:py-3.5 rounded-full font-semibold text-xs sm:text-sm transition-all duration-300 transform active:scale-95 flex items-center justify-center gap-1.5 sm:gap-2 touch-manipulation"
                     >
-                      <svg className="w-4 h-4" viewBox="0 0 24 24">
+                      <svg className="w-4 h-4 sm:w-4 sm:h-4" viewBox="0 0 24 24">
                         <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
                         <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
                         <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
                         <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
                       </svg>
-                      Google
+                      {t('google') || 'Google'}
                     </button>
 
                     {/* Facebook Login */}
                     <button
                       type="button"
                       onClick={handleFacebookLogin}
-                      className="w-1/2 bg-[#1877F2] hover:bg-[#1565C0] text-white py-3 rounded-full font-semibold text-sm transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2"
+                      className="w-1/2 bg-[#1877F2] hover:bg-[#1565C0] active:bg-[#0d5aa7] text-white py-2.5 sm:py-3.5 rounded-full font-semibold text-xs sm:text-sm transition-all duration-300 transform active:scale-95 flex items-center justify-center gap-1.5 sm:gap-2 touch-manipulation"
                     >
-                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                      <svg className="w-4 h-4 sm:w-4 sm:h-4" fill="currentColor" viewBox="0 0 24 24">
                         <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
                       </svg>
-                      Facebook
+                      {t('facebook') || 'Facebook'}
                     </button>
                   </div>
 
                   {/* Forgot Password */}
-                  <div className="text-center">
+                  <div className="text-center pt-1 sm:pt-2">
                     <button
                       type="button"
                       onClick={() => setViewMode('forgot-password')}
-                      className="text-white hover:text-white/80 font-medium text-sm"
+                      className="text-white hover:text-white/80 active:text-white/70 font-medium text-xs sm:text-sm touch-manipulation py-1"
                     >
-                      Forgot password?
+                      {t('forgotPassword') || 'Forgot password?'}
                     </button>
                   </div>
 
@@ -621,9 +659,9 @@ export const Login: React.FC = () => {
                     <button
                       type="button"
                       onClick={toggleMode}
-                      className="text-white hover:text-white/80 font-medium text-sm"
+                      className="text-white hover:text-white/80 active:text-white/70 font-medium text-xs sm:text-sm touch-manipulation py-1"
                     >
-                      Sign up
+                      {t('signUp') || 'Sign up'}
                     </button>
                   </div>
                 </form>
@@ -631,7 +669,7 @@ export const Login: React.FC = () => {
 
               {/* Forgot Password Form */}
               {viewMode === 'forgot-password' && (
-                <form onSubmit={handleForgotPassword} className="space-y-5 animate-fadeIn mx-auto" style={{ width: '60%', fontSize: '0.9rem' }}>
+                <form onSubmit={handleForgotPassword} className="space-y-4 md:space-y-5 animate-fadeIn mx-auto w-full md:w-[90%] md:w-[70%] max-w-[500px]" style={{ fontSize: 'clamp(0.85rem, 2.5vw, 0.9rem)' }}>
                   {/* Email */}
                   <div className="relative">
                     <input
@@ -640,7 +678,7 @@ export const Login: React.FC = () => {
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder="E-mail"
-                      className="w-full px-5 py-3 bg-black/30 border-0 rounded-full focus:outline-none focus:ring-2 focus:ring-red-500 transition-all duration-300 text-white placeholder-white/70 text-sm"
+                      className="w-full px-4 md:px-5 py-2.5 md:py-3 bg-black/30 border-0 rounded-full focus:outline-none focus:ring-2 focus:ring-red-500 transition-all duration-300 text-white placeholder-white/70 text-sm md:text-base"
                     />
                   </div>
 
@@ -648,7 +686,7 @@ export const Login: React.FC = () => {
                   <button
                     type="submit"
                     disabled={forgotPasswordLoading}
-                    className="w-full bg-red-600 hover:bg-red-700 text-white py-3 rounded-full font-semibold text-base transition-all duration-300 transform hover:scale-105 disabled:opacity-70 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-2"
+                    className="w-full bg-red-600 hover:bg-red-700 text-white py-2.5 md:py-3 rounded-full font-semibold text-sm md:text-base transition-all duration-300 transform hover:scale-105 disabled:opacity-70 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-2"
                   >
                       {forgotPasswordLoading ? (
                         <>
@@ -676,7 +714,7 @@ export const Login: React.FC = () => {
 
               {/* Verify Code Form */}
               {viewMode === 'verify-code' && (
-                <form onSubmit={handleVerifyCode} className="space-y-6 animate-fadeIn mx-auto" style={{ width: '75%' }}>
+                <form onSubmit={handleVerifyCode} className="space-y-5 md:space-y-6 animate-fadeIn mx-auto w-full md:w-[90%] md:w-[75%] max-w-[550px]">
                   {/* Code Input */}
                   <div className="relative">
                     <input
@@ -687,10 +725,10 @@ export const Login: React.FC = () => {
                       value={resetCode}
                       onChange={handleCodeChange}
                       placeholder="0000"
-                      className="w-full px-4 py-4 bg-black/30 border-0 rounded-full focus:outline-none focus:ring-2 focus:ring-red-500 transition-all duration-300 text-center text-3xl tracking-widest font-mono text-white placeholder-white/70"
+                      className="w-full px-4 py-3 md:py-4 bg-black/30 border-0 rounded-full focus:outline-none focus:ring-2 focus:ring-red-500 transition-all duration-300 text-center text-2xl md:text-3xl tracking-widest font-mono text-white placeholder-white/70"
                       autoFocus
                     />
-                    <p className="mt-2 text-xs text-white/70 text-center">
+                    <p className="mt-2 text-xs md:text-sm text-white/70 text-center px-2">
                       Enter the 4-digit code from your email
                     </p>
                   </div>
@@ -699,7 +737,7 @@ export const Login: React.FC = () => {
                   <button
                     type="submit"
                     disabled={verifyCodeLoading || resetCode.length !== 4}
-                    className="w-full bg-red-600 hover:bg-red-700 text-white py-4 rounded-full font-semibold text-lg transition-all duration-300 transform hover:scale-105 disabled:opacity-70 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-2"
+                    className="w-full bg-red-600 hover:bg-red-700 text-white py-3 md:py-4 rounded-full font-semibold text-base md:text-lg transition-all duration-300 transform hover:scale-105 disabled:opacity-70 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-2"
                   >
                       {verifyCodeLoading ? (
                         <>
@@ -738,7 +776,7 @@ export const Login: React.FC = () => {
 
               {/* Reset Password Form */}
               {viewMode === 'reset-password' && (
-                <form onSubmit={handleResetPassword} className="space-y-6 animate-fadeIn mx-auto" style={{ width: '75%' }}>
+                <form onSubmit={handleResetPassword} className="space-y-5 md:space-y-6 animate-fadeIn mx-auto w-full md:w-[90%] md:w-[75%] max-w-[550px]">
                   {resetPasswordSuccess ? (
                     <div className="bg-green-500/20 border border-green-500 rounded-2xl p-6 text-center">
                       <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-green-500/30 mb-4">
@@ -758,11 +796,19 @@ export const Login: React.FC = () => {
                         <input
                           type={showNewPassword ? "text" : "password"}
                           required
+                          autoComplete="off"
                           value={newPassword}
                           onChange={(e) => setNewPassword(e.target.value)}
                           placeholder={t('newPassword')}
-                          className="w-full px-6 py-4 bg-black/30 border-0 rounded-full focus:outline-none focus:ring-2 focus:ring-red-500 transition-all duration-300 text-white placeholder-white/70"
+                          className="w-full px-4 md:px-6 py-3 md:py-4 pr-10 md:pr-14 bg-black/30 border-0 rounded-full focus:outline-none focus:ring-2 focus:ring-red-500 transition-all duration-300 text-white placeholder-white/70 text-sm md:text-base"
                         />
+                        <button
+                          type="button"
+                          onClick={() => setShowNewPassword(!showNewPassword)}
+                          className="absolute right-3 md:right-4 top-1/2 -translate-y-1/2 text-white/70 hover:text-white transition-colors"
+                        >
+                          {showNewPassword ? <EyeOff className="h-4 w-4 md:h-5 md:w-5" /> : <Eye className="h-4 w-4 md:h-5 md:w-5" />}
+                        </button>
                         {newPassword && validatePassword(newPassword).length > 0 && (
                           <p className="mt-1 text-xs text-red-300">
                             {validatePassword(newPassword)[0]}
@@ -778,11 +824,19 @@ export const Login: React.FC = () => {
                         <input
                           type={showConfirmNewPassword ? "text" : "password"}
                           required
+                          autoComplete="off"
                           value={confirmNewPassword}
                           onChange={(e) => setConfirmNewPassword(e.target.value)}
                           placeholder={t('confirmPassword')}
-                          className="w-full px-6 py-4 bg-black/30 border-0 rounded-full focus:outline-none focus:ring-2 focus:ring-red-500 transition-all duration-300 text-white placeholder-white/70"
+                          className="w-full px-4 md:px-6 py-3 md:py-4 pr-10 md:pr-14 bg-black/30 border-0 rounded-full focus:outline-none focus:ring-2 focus:ring-red-500 transition-all duration-300 text-white placeholder-white/70 text-sm md:text-base"
                         />
+                        <button
+                          type="button"
+                          onClick={() => setShowConfirmNewPassword(!showConfirmNewPassword)}
+                          className="absolute right-3 md:right-4 top-1/2 -translate-y-1/2 text-white/70 hover:text-white transition-colors"
+                        >
+                          {showConfirmNewPassword ? <EyeOff className="h-4 w-4 md:h-5 md:w-5" /> : <Eye className="h-4 w-4 md:h-5 md:w-5" />}
+                        </button>
                         {confirmNewPassword && newPassword !== confirmNewPassword && (
                           <p className="mt-1 text-xs text-red-300">{t('passwordsDoNotMatch')}</p>
                         )}
@@ -795,7 +849,7 @@ export const Login: React.FC = () => {
             <button
               type="submit"
                         disabled={resetPasswordLoading || validatePassword(newPassword).length > 0 || newPassword !== confirmNewPassword}
-                        className="w-full bg-red-600 hover:bg-red-700 text-white py-4 rounded-full font-semibold text-lg transition-all duration-300 transform hover:scale-105 disabled:opacity-70 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-2"
+                        className="w-full bg-red-600 hover:bg-red-700 text-white py-3 md:py-4 rounded-full font-semibold text-base md:text-lg transition-all duration-300 transform hover:scale-105 disabled:opacity-70 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-2"
                       >
                           {resetPasswordLoading ? (
                             <>
@@ -823,167 +877,206 @@ export const Login: React.FC = () => {
                 </form>
               )}
 
-              {/* Signup Form */}
-              {viewMode === 'signup' && (
-                <form onSubmit={handleSignupSubmit} className="space-y-3 mx-auto" style={{ width: '60%', fontSize: '0.9rem' }}>
-                  {/* Name fields */}
-                  <div className="grid grid-cols-2 gap-3">
-                <div className="relative">
-                  <input
-                    name="firstName"
-                    type="text"
-                    required
-                    value={formData.firstName}
-                    onChange={handleSignupChange}
-                    placeholder={t('firstName')}
-                    className="w-full px-5 py-3 bg-black/30 border-0 rounded-full focus:outline-none focus:ring-2 focus:ring-red-500 transition-all duration-300 text-white placeholder-white/70 text-sm"
-                  />
-                  {errors.firstName && <p className="mt-1 text-xs text-red-300">{errors.firstName}</p>}
+            {/* Signup Form - 2-step flow */}
+            {viewMode === 'signup' && (
+              <form
+                onSubmit={handleSignupSubmit}
+                className="space-y-3 sm:space-y-3.5 mx-auto w-full sm:w-[90%] md:w-[75%] max-w-[420px]"
+                style={{ fontSize: 'clamp(0.85rem, 2.5vw, 1rem)' }}
+              >
+                {/* Step indicator */}
+                <div className="flex justify-center gap-2 mb-1 sm:mb-2">
+                  <div className={`h-1.5 w-6 rounded-full ${signupStep === 1 ? 'bg-white' : 'bg-white/30'}`} />
+                  <div className={`h-1.5 w-6 rounded-full ${signupStep === 2 ? 'bg-white' : 'bg-white/30'}`} />
                 </div>
 
-                <div className="relative">
-                  <input
-                    name="lastName"
-                    type="text"
-                    required
-                    value={formData.lastName}
-                    onChange={handleSignupChange}
-                    placeholder={t('lastName')}
-                    className="w-full px-5 py-3 bg-black/30 border-0 rounded-full focus:outline-none focus:ring-2 focus:ring-red-500 transition-all duration-300 text-white placeholder-white/70 text-sm"
-                  />
-                  {errors.lastName && <p className="mt-1 text-xs text-red-300">{errors.lastName}</p>}
-                </div>
-              </div>
+                {/* Step 1: personal data */}
+                {signupStep === 1 && (
+                  <div className="space-y-2.5 sm:space-y-3">
+                    {/* Name fields */}
+                    <div className="grid grid-cols-2 gap-2 sm:gap-3">
+                      <div className="relative">
+                        <input
+                          name="firstName"
+                          type="text"
+                          required
+                          value={formData.firstName}
+                          onChange={handleSignupChange}
+                          placeholder={t('firstName')}
+                          className="w-full px-3 sm:px-5 py-2.5 sm:py-3.5 bg-black/30 border-0 rounded-full focus:outline-none focus:ring-2 focus:ring-red-500 transition-all duration-300 text-white placeholder-white/70 text-sm sm:text-base"
+                        />
+                        {errors.firstName && <p className="mt-1 text-xs text-red-300">{errors.firstName}</p>}
+                      </div>
 
-                  {/* Email */}
-                  <div className="relative">
-                    <input
-                      name="email"
-                      type="email"
-                      autoComplete="email"
-                      required
-                      value={formData.email}
-                      onChange={handleSignupChange}
-                      placeholder={t('emailAddress')}
-                      className="w-full px-5 py-3 bg-black/30 border-0 rounded-full focus:outline-none focus:ring-2 focus:ring-red-500 transition-all duration-300 text-white placeholder-white/70 text-sm"
-                    />
-                    {errors.email && <p className="mt-1 text-xs text-red-300">{errors.email}</p>}
-                  </div>
+                      <div className="relative">
+                        <input
+                          name="lastName"
+                          type="text"
+                          required
+                          value={formData.lastName}
+                          onChange={handleSignupChange}
+                          placeholder={t('lastName')}
+                          className="w-full px-3 sm:px-5 py-2.5 sm:py-3.5 bg-black/30 border-0 rounded-full focus:outline-none focus:ring-2 focus:ring-red-500 transition-all duration-300 text-white placeholder-white/70 text-sm sm:text-base"
+                        />
+                        {errors.lastName && <p className="mt-1 text-xs text-red-300">{errors.lastName}</p>}
+                      </div>
+                    </div>
 
-                  {/* Phone */}
-                  <div className="relative">
-                    <input
-                      name="phone"
-                      type="tel"
-                      value={formData.phone}
-                      onChange={handleSignupChange}
-                      placeholder={t('phoneNumber')}
-                      className="w-full px-5 py-3 bg-black/30 border-0 rounded-full focus:outline-none focus:ring-2 focus:ring-red-500 transition-all duration-300 text-white placeholder-white/70 text-sm"
-                    />
-                    {errors.phone && <p className="mt-1 text-xs text-red-300">{errors.phone}</p>}
-                  </div>
-
-                  {/* Account Type */}
-                  <div className="relative" ref={dropdownRef}>
-                    <div
-                      onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                      className={`w-full px-5 py-3 bg-black/30 border-0 rounded-full focus:outline-none cursor-pointer text-white flex items-center justify-between text-sm ${
-                        isDropdownOpen
-                          ? 'ring-2 ring-red-500'
-                          : ''
-                      }`}
-                    >
-                      <span>{formData.role === 'customer' ? t('customer') : t('businessOwner')}</span>
-                      <ChevronDown
-                        className={`w-4 h-4 text-white/70 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`}
+                    {/* Email */}
+                    <div className="relative">
+                      <input
+                        name="email"
+                        type="email"
+                        autoComplete="email"
+                        required
+                        value={formData.email}
+                        onChange={handleSignupChange}
+                        placeholder={t('emailAddress')}
+                        className="w-full px-3 sm:px-5 py-2.5 sm:py-3.5 bg-black/30 border-0 rounded-full focus:outline-none focus:ring-2 focus:ring-red-500 transition-all duration-300 text-white placeholder-white/70 text-sm sm:text-base"
                       />
+                      {errors.email && <p className="mt-1 text-xs text-red-300">{errors.email}</p>}
                     </div>
 
-                    {/* Dropdown Options */}
-                    {isDropdownOpen && (
-                    <div className="absolute w-full mt-2 bg-black/50 backdrop-blur-sm rounded-3xl shadow-xl overflow-hidden z-20">
-                      <div
-                        onClick={() => {
-                          handleSignupChange({ target: { name: 'role', value: 'customer' } } as any);
-                          setIsDropdownOpen(false);
-                        }}
-                        className={`px-5 py-2 cursor-pointer transition-all duration-200 text-sm ${
-                          formData.role === 'customer'
-                            ? 'bg-red-600 text-white font-semibold'
-                            : 'hover:bg-white/10 text-white'
-                        }`}
-                      >
-                        {t('customer')}
-                      </div>
-                      <div
-                        onClick={() => {
-                          handleSignupChange({ target: { name: 'role', value: 'business_owner' } } as any);
-                          setIsDropdownOpen(false);
-                        }}
-                        className={`px-5 py-2 cursor-pointer transition-all duration-200 text-sm ${
-                          formData.role === 'business_owner'
-                            ? 'bg-red-600 text-white font-semibold'
-                            : 'hover:bg-white/10 text-white'
-                        }`}
-                      >
-                        {t('businessOwner')}
-                      </div>
+                    {/* Phone */}
+                    <div className="relative">
+                      <input
+                        name="phone"
+                        type="tel"
+                        value={formData.phone}
+                        onChange={handleSignupChange}
+                        placeholder={t('phoneNumber')}
+                        className="w-full px-3 sm:px-5 py-2.5 sm:py-3.5 bg-black/30 border-0 rounded-full focus:outline-none focus:ring-2 focus:ring-red-500 transition-all duration-300 text-white placeholder-white/70 text-sm sm:text-base"
+                      />
+                      {errors.phone && <p className="mt-1 text-xs text-red-300">{errors.phone}</p>}
                     </div>
-                    )}
-                    {errors.role && <p className="mt-1 text-xs text-red-300">{errors.role}</p>}
+
+                    {/* Account Type */}
+                    <div className="relative" ref={dropdownRef}>
+                      <div
+                        onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                        className={`w-full px-3 sm:px-5 py-2.5 sm:py-3.5 bg-black/30 border-0 rounded-full focus:outline-none cursor-pointer text-white flex items-center justify-between text-sm sm:text-base touch-manipulation ${
+                          isDropdownOpen ? 'ring-2 ring-red-500' : ''
+                        }`}
+                      >
+                        <span>{formData.role === 'customer' ? t('customer') : t('businessOwner')}</span>
+                        <ChevronDown
+                          className={`w-4 h-4 sm:w-4 sm:h-4 text-white/70 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`}
+                        />
+                      </div>
+
+                      {/* Dropdown Options */}
+                      {isDropdownOpen && (
+                        <div className="absolute w-full mt-2 bg-black/50 backdrop-blur-sm rounded-3xl shadow-xl overflow-hidden z-20">
+                          <div
+                            onClick={() => {
+                              handleSignupChange({ target: { name: 'role', value: 'customer' } } as any);
+                              setIsDropdownOpen(false);
+                            }}
+                            className={`px-5 py-2 cursor-pointer transition-all duration-200 text-sm ${
+                              formData.role === 'customer'
+                                ? 'bg-red-600 text-white font-semibold'
+                                : 'hover:bg-white/10 text-white'
+                            }`}
+                          >
+                            {t('customer')}
+                          </div>
+                          <div
+                            onClick={() => {
+                              handleSignupChange({ target: { name: 'role', value: 'business_owner' } } as any);
+                              setIsDropdownOpen(false);
+                            }}
+                            className={`px-5 py-2 cursor-pointer transition-all duration-200 text-sm ${
+                              formData.role === 'business_owner'
+                                ? 'bg-red-600 text-white font-semibold'
+                                : 'hover:bg-white/10 text-white'
+                            }`}
+                          >
+                            {t('businessOwner')}
+                          </div>
+                        </div>
+                      )}
+                      {errors.role && <p className="mt-1 text-xs text-red-300">{errors.role}</p>}
+                    </div>
+
+                    {/* Next Button */}
+                    <button
+                      type="button"
+                      onClick={() => setSignupStep(2)}
+                      className="w-full bg-red-600 hover:bg-red-700 active:bg-red-800 text-white py-2.5 sm:py-3.5 rounded-full font-semibold text-sm sm:text-base transition-all duration-300 transform active:scale-95 flex items-center justify-center gap-2 mt-1 sm:mt-0 touch-manipulation"
+                    >
+                      {t('Next') || 'Next'}
+                    </button>
                   </div>
+                )}
 
-                  {/* Password */}
-                  <div className="relative">
-                    <input
-                      name="password"
-                      type={showPassword ? "text" : "password"}
-                      autoComplete="new-password"
-                      required
-                      value={formData.password}
-                      onChange={handleSignupChange}
-                      placeholder={t('password')}
-                      className="w-full px-5 py-3 bg-black/30 border-0 rounded-full focus:outline-none focus:ring-2 focus:ring-red-500 transition-all duration-300 text-white placeholder-white/70 text-sm"
-                    />
-                    {errors.password && <p className="mt-1 text-xs text-red-300">{errors.password}</p>}
-                  </div>
+                {/* Step 2: passwords & confirmation */}
+                {signupStep === 2 && (
+                  <div className="space-y-2.5 sm:space-y-3">
+                    {/* Password */}
+                    <div className="relative">
+                      <input
+                        name="password"
+                        type={showPassword ? 'text' : 'password'}
+                        autoComplete="off"
+                        required
+                        value={formData.password}
+                        onChange={handleSignupChange}
+                        placeholder={t('password')}
+                        className="w-full px-3 sm:px-5 py-2.5 sm:py-3.5 pr-10 sm:pr-14 bg-black/30 border-0 rounded-full focus:outline-none focus:ring-2 focus:ring-red-500 transition-all duration-300 text-white placeholder-white/70 text-sm sm:text-base"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 sm:right-4 top-1/2 -translate-y-1/2 text-white/70 active:text-white transition-colors touch-manipulation"
+                      >
+                        {showPassword ? <EyeOff className="h-4 w-4 sm:h-5 sm:w-5" /> : <Eye className="h-4 w-4 sm:h-5 sm:w-5" />}
+                      </button>
+                      {errors.password && <p className="mt-1 text-xs text-red-300">{errors.password}</p>}
+                    </div>
 
-                  {/* Confirm Password */}
-                  <div className="relative">
-                    <input
-                      name="confirmPassword"
-                      type={showConfirmPassword ? "text" : "password"}
-                      autoComplete="new-password"
-                      required
-                      value={formData.confirmPassword}
-                      onChange={handleSignupChange}
-                      placeholder={t('confirmPassword')}
-                      className="w-full px-5 py-3 bg-black/30 border-0 rounded-full focus:outline-none focus:ring-2 focus:ring-red-500 transition-all duration-300 text-white placeholder-white/70 text-sm"
-                    />
-                    {errors.confirmPassword && <p className="mt-1 text-xs text-red-300">{errors.confirmPassword}</p>}
-                  </div>
+                    {/* Confirm Password */}
+                    <div className="relative">
+                      <input
+                        name="confirmPassword"
+                        type={showConfirmPassword ? 'text' : 'password'}
+                        autoComplete="off"
+                        required
+                        value={formData.confirmPassword}
+                        onChange={handleSignupChange}
+                        placeholder={t('confirmPassword')}
+                        className="w-full px-3 sm:px-5 py-2.5 sm:py-3.5 pr-10 sm:pr-14 bg-black/30 border-0 rounded-full focus:outline-none focus:ring-2 focus:ring-red-500 transition-all duration-300 text-white placeholder-white/70 text-sm sm:text-base"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        className="absolute right-3 sm:right-4 top-1/2 -translate-y-1/2 text-white/70 active:text-white transition-colors touch-manipulation"
+                      >
+                        {showConfirmPassword ? <EyeOff className="h-4 w-4 sm:h-5 sm:w-5" /> : <Eye className="h-4 w-4 sm:h-5 sm:w-5" />}
+                      </button>
+                      {errors.confirmPassword && <p className="mt-1 text-xs text-red-300">{errors.confirmPassword}</p>}
+                    </div>
 
-                  {/* Terms */}
-                  <label className="flex items-start gap-2 cursor-pointer text-xs">
-                    <input type="checkbox" className="w-3 h-3 mt-0.5 text-red-600 rounded" required />
-                    <span className="text-white/80">
-                      I agree to the{' '}
-                      <Link to="/terms" className="text-white hover:text-white/80 underline" target="_blank">
-                        Terms of Service
-                      </Link>
-                      {' '}and{' '}
-                      <Link to="/privacy" className="text-white hover:text-white/80 underline" target="_blank">
-                        Privacy Policy
-                      </Link>
-                    </span>
-                  </label>
+                    {/* Terms */}
+                    <label className="flex items-start gap-2 cursor-pointer text-xs">
+                      <input type="checkbox" className="w-3 h-3 mt-0.5 text-red-600 rounded" required />
+                      <span className="text-white/80">
+                        I agree to the{' '}
+                        <Link to="/terms" className="text-white hover:text-white/80 underline" target="_blank">
+                          Terms of Service
+                        </Link>
+                        {' '}and{' '}
+                        <Link to="/privacy" className="text-white hover:text-white/80 underline" target="_blank">
+                          Privacy Policy
+                        </Link>
+                      </span>
+                    </label>
 
-                  {/* Submit Button */}
-                  <button
-                    type="submit"
-                    disabled={signupLoading}
-                    className="w-full bg-red-600 hover:bg-red-700 text-white py-3 rounded-full font-semibold text-base transition-all duration-300 transform hover:scale-105 disabled:opacity-70 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-2"
-                  >
+                    {/* Submit Button */}
+                    <button
+                      type="submit"
+                      disabled={signupLoading}
+                      className="w-full bg-red-600 hover:bg-red-700 active:bg-red-800 text-white py-2.5 sm:py-3.5 rounded-full font-semibold text-sm sm:text-base transition-all duration-300 transform active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-2 mt-2 sm:mt-0 touch-manipulation"
+                    >
                       {signupLoading ? (
                         <>
                           <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -992,56 +1085,65 @@ export const Login: React.FC = () => {
                       ) : (
                         t('createAccount')
                       )}
-                  </button>
-
-                  {/* Social Signup Buttons */}
-                  <div className="flex gap-3">
-                    {/* Google Signup */}
-                    <button
-                      type="button"
-                      onClick={handleGoogleLogin}
-                      className="w-1/2 bg-white hover:bg-gray-100 text-gray-800 py-3 rounded-full font-semibold text-sm transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2"
-                    >
-                      <svg className="w-4 h-4" viewBox="0 0 24 24">
-                        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-                      </svg>
-                      Google
                     </button>
 
-                    {/* Facebook Signup */}
+                    {/* Social Signup Buttons */}
+                    <div className="flex gap-2 sm:gap-3 mt-2.5 sm:mt-4">
+                      {/* Google Signup */}
+                      <button
+                        type="button"
+                        onClick={handleGoogleLogin}
+                        className="w-1/2 bg-white hover:bg-gray-100 active:bg-gray-200 text-gray-800 py-2.5 sm:py-3.5 rounded-full font-semibold text-xs sm:text-sm transition-all duration-300 transform active:scale-95 flex items-center justify-center gap-1.5 sm:gap-2 touch-manipulation"
+                      >
+                        <svg className="w-4 h-4 sm:w-4 sm:h-4" viewBox="0 0 24 24">
+                          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                        </svg>
+                        Google
+                      </button>
+
+                      {/* Facebook Signup */}
+                      <button
+                        type="button"
+                        onClick={handleFacebookLogin}
+                        className="w-1/2 bg-[#1877F2] hover:bg-[#1565C0] active:bg-[#0d5aa7] text-white py-2.5 sm:py-3.5 rounded-full font-semibold text-xs sm:text-sm transition-all duration-300 transform active:scale-95 flex items-center justify-center gap-1.5 sm:gap-2 touch-manipulation"
+                      >
+                        <svg className="w-4 h-4 sm:w-4 sm:h-4" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+                        </svg>
+                        Facebook
+                      </button>
+                    </div>
+
+                    {/* Back Button */}
                     <button
                       type="button"
-                      onClick={handleFacebookLogin}
-                      className="w-1/2 bg-[#1877F2] hover:bg-[#1565C0] text-white py-3 rounded-full font-semibold text-sm transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2"
+                      onClick={() => setSignupStep(1)}
+                      className="w-full text-white hover:text-white/80 active:text-white/70 font-medium text-xs sm:text-sm touch-manipulation py-1"
                     >
-                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
-                      </svg>
-                      Facebook
+                      {t('back') || 'Back'}
                     </button>
                   </div>
-                </form>
-              )}
+                )}
+              </form>
+            )}
             </div>
 
-            {/* Toggle Link - Only show for signup */}
-            {viewMode === 'signup' && (
-              <p className="text-center text-white/80 mt-2 text-xs">
-                {t('haveAccount')} {' '}
-                <button
-                  type="button"
-                  onClick={toggleMode}
-                  className="text-white hover:text-white/80 font-semibold transition-colors duration-200"
-                >
-                  {t('signIn')}
+        {/* Toggle Link - Only show for signup */}
+        {viewMode === 'signup' && (
+          <p className="text-center text-white/80 mt-2 text-xs">
+            {t('haveAccount')}{' '}
+            <button
+              type="button"
+              onClick={toggleMode}
+              className="text-white hover:text-white/80 font-semibold transition-colors duration-200"
+            >
+              {t('signIn')}
             </button>
-              </p>
-            )}
-          </div>
-        </div>
+          </p>
+        )}
       </div>
 
       <style>{`
@@ -1059,6 +1161,28 @@ export const Login: React.FC = () => {
         .animate-fadeIn {
           animation: fadeIn 0.5s ease-out forwards;
         }
+
+        /* Safe area padding for mobile only */
+        .forms-container-safe-area {
+          padding-top: calc(max(env(safe-area-inset-top, 0px), 1.5vh) + var(--form-start, 180px));
+        }
+
+        @media (min-width: 768px) {
+          .forms-container-safe-area {
+            padding-top: var(--form-start, 180px);
+          }
+        }
+
+        /* Language switcher safe area positioning for mobile only */
+        .language-switcher-safe-area {
+          top: calc(max(env(safe-area-inset-top, 0px), 1.5vh) + 0.5rem);
+        }
+
+        @media (min-width: 768px) {
+          .language-switcher-safe-area {
+            top: 0.75rem;
+          }
+        }
       `}</style>
 
       {/* Connection Error Modal */}
@@ -1068,6 +1192,6 @@ export const Login: React.FC = () => {
         baseURL={connectionError.baseURL}
         isMobile={connectionError.isMobile}
       />
-    </div>
+    </LoginBackground>
   );
 };

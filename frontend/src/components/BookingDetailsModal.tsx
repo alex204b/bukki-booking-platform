@@ -2,6 +2,7 @@ import React from 'react';
 import { X, Calendar, Clock, MapPin, Phone, User, CheckCircle, XCircle, AlertCircle, FileText, MessageCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { useI18n } from '../contexts/I18nContext';
+import { useCurrency } from '../contexts/CurrencyContext';
 import { QRCodeSVG } from 'qrcode.react';
 import { useNavigate } from 'react-router-dom';
 
@@ -46,6 +47,7 @@ export const BookingDetailsModal: React.FC<BookingDetailsModalProps> = ({
   currentUserId,
 }) => {
   const { t } = useI18n();
+  const { formatPrice } = useCurrency();
   const navigate = useNavigate();
 
   const getStatusConfig = (status: string) => {
@@ -212,7 +214,7 @@ export const BookingDetailsModal: React.FC<BookingDetailsModalProps> = ({
               {/* Total Amount */}
               {booking.totalAmount && (
                 <div className="flex items-center gap-2 text-sm font-semibold">
-                  <span className="text-gray-700">Total: ${Number(booking.totalAmount).toFixed(2)}</span>
+                  <span className="text-gray-700">Total: {formatPrice(Number(booking.totalAmount || 0))}</span>
                 </div>
               )}
             </div>

@@ -9,6 +9,7 @@ import { BusinessContact } from './entities/business-contact.entity';
 import { User, UserRole } from '../users/entities/user.entity';
 import { MessagesService } from '../messages/messages.service';
 import { RequestsService } from '../requests/requests.service';
+import { StorageService } from '../storage/storage.service';
 import { PaginationDto, PaginatedResult, createPaginatedResponse } from '../common/dto/pagination.dto';
 
 @Injectable()
@@ -28,38 +29,58 @@ export class BusinessesService {
     private messagesService: MessagesService,
     @Inject(forwardRef(() => RequestsService))
     private requestsService: RequestsService,
+    private storage: StorageService,
   ) {}
 
   async isOwnerOrMember(businessId: string, userId: string): Promise<boolean> {
     const business = await this.businessRepository.findOne({ where: { id: businessId }, relations: ['owner'] });
     if (!business) throw new NotFoundException('Business not found');
-    if (business.owner.id === userId) return true;
+    if (String(business.owner?.id ?? '') === String(userId ?? '')) return true;
     const member = await this.businessMemberRepository.findOne({ where: { business: { id: businessId }, user: { id: userId }, status: BusinessMemberStatus.ACTIVE } as any });
     return !!member;
   }
 
-  async inviteMember(businessId: string, ownerId: string, email: string) {
+  async inviteMember(businessId: string, ownerId: string, email: string, message?: string) {
     const business = await this.businessRepository.findOne({ where: { id: businessId }, relations: ['owner'] });
     if (!business) throw new NotFoundException('Business not found');
     if (business.owner.id !== ownerId) throw new ForbiddenException('Only owner can invite');
-    const existing = await this.businessMemberRepository.findOne({ where: { business: { id: businessId }, email, status: BusinessMemberStatus.ACTIVE } as any });
-    if (existing) throw new BadRequestException('Member already exists');
-    const invite = this.businessMemberRepository.create({ business: { id: businessId } as any, email, status: BusinessMemberStatus.INVITED });
-    const savedInvite = await this.businessMemberRepository.save(invite);
-    
-    // Create message for team invitation if user exists
-    const user = await this.userRepository.findOne({ where: { email } });
-    if (user) {
-      await this.messagesService.createTeamInvitationMessage(user.id, businessId, savedInvite.id);
+
+    const normalizedEmail = email?.trim()?.toLowerCase();
+    if (!normalizedEmail) throw new BadRequestException('Email is required');
+
+    const user = await this.userRepository.findOne({ where: { email: normalizedEmail } });
+    if (!user) {
+      throw new BadRequestException(
+        'No account found with this email. The person must sign up on the app first before you can invite them.',
+      );
     }
-    
+
+    if (user.role === 'business_owner') {
+      throw new BadRequestException(
+        'Business owners cannot be invited as employees. They already own their own business.',
+      );
+    }
+    if (user.role === 'employee') {
+      throw new BadRequestException(
+        'This person is already an employee at another business and cannot be invited to join a different company.',
+      );
+    }
+
+    const existing = await this.businessMemberRepository.findOne({ where: { business: { id: businessId }, email: normalizedEmail, status: BusinessMemberStatus.ACTIVE } as any });
+    if (existing) throw new BadRequestException('This person is already a team member.');
+    const existingInvite = await this.businessMemberRepository.findOne({ where: { business: { id: businessId }, email: normalizedEmail, status: BusinessMemberStatus.INVITED } as any });
+    if (existingInvite) throw new BadRequestException('An invite was already sent to this email. They need to accept it first.');
+
+    const invite = this.businessMemberRepository.create({ business: { id: businessId } as any, email: normalizedEmail, status: BusinessMemberStatus.INVITED });
+    const savedInvite = await this.businessMemberRepository.save(invite);
+    await this.messagesService.createTeamInvitationMessage(user.id, businessId, savedInvite.id, message?.trim() || undefined);
     return savedInvite;
   }
 
   async listMembers(businessId: string, requesterId: string) {
     const allowed = await this.isOwnerOrMember(businessId, requesterId);
     if (!allowed) throw new ForbiddenException('Not allowed');
-    return this.businessMemberRepository.find({ where: { business: { id: businessId }, status: BusinessMemberStatus.ACTIVE } as any });
+    return this.businessMemberRepository.find({ where: { business: { id: businessId }, status: BusinessMemberStatus.ACTIVE } as any, relations: ['user'] });
   }
 
   async listInvitesByEmail(userEmail: string) {
@@ -156,39 +177,66 @@ export class BusinessesService {
   }
 
   async create(createBusinessDto: any, ownerId: string): Promise<Business> {
-    // Prevent duplicate businesses per owner
-    const existing = await this.businessRepository
-      .createQueryBuilder('business')
-      .where('business.ownerId = :ownerId', { ownerId })
-      .getOne();
-    if (existing) {
-      throw new BadRequestException('You already have a business');
-    }
-
-    const coords = await this.geocodeAddress(createBusinessDto);
-    const business = this.businessRepository.create({
-      ...createBusinessDto,
-      ...coords,
-      owner: { id: ownerId },
-      status: BusinessStatus.PENDING,
-      onboardingCompleted: true,
-    });
-
-    let savedBusiness: Business;
     try {
-      savedBusiness = await (this.businessRepository.save(business as any) as unknown as Business);
-    } catch (error: any) {
-      // Surface DB errors clearly
-      if (error?.code === '23505') {
-        // unique_violation in Postgres
-        throw new BadRequestException('Business with provided details already exists');
+      // Prevent duplicate businesses per owner
+      const existing = await this.businessRepository
+        .createQueryBuilder('business')
+        .where('business.ownerId = :ownerId', { ownerId })
+        .getOne();
+      if (existing) {
+        throw new BadRequestException('You already have a business');
       }
-      throw error;
-    }
+
+      const coords = await this.geocodeAddress(createBusinessDto);
+      const rawFields = createBusinessDto.customBookingFields;
+      const customBookingFields = Array.isArray(rawFields)
+        ? rawFields
+            .filter((f: any) => f && (f.fieldName || f.label))
+            .map((f: any) => ({
+              fieldName: String(f.fieldName || f.label || ''),
+              fieldType: ['text', 'number', 'select', 'textarea', 'checkbox'].includes(f.fieldType || f.type) ? (f.fieldType || f.type) : 'text',
+              isRequired: Boolean(f.isRequired ?? f.required ?? false),
+              options: Array.isArray(f.options) ? f.options : undefined,
+            }))
+        : null;
+
+      const allowedKeys = [
+        'name', 'description', 'category', 'address', 'city', 'state', 'zipCode', 'country',
+        'phone', 'email', 'website', 'latitude', 'longitude', 'workingHours', 'amenities',
+        'priceRange', 'businessType', 'bookingAssignment',
+      ];
+      const sanitized: Record<string, any> = {};
+      for (const key of allowedKeys) {
+        if (createBusinessDto[key] !== undefined) sanitized[key] = createBusinessDto[key];
+      }
+      sanitized.customBookingFields = customBookingFields;
+      Object.assign(sanitized, coords);
+
+      const business = this.businessRepository.create({
+        ...sanitized,
+        owner: { id: ownerId },
+        status: BusinessStatus.PENDING,
+        onboardingCompleted: true,
+      });
+
+      let savedBusiness: Business;
+      try {
+        savedBusiness = await (this.businessRepository.save(business as any) as unknown as Business);
+      } catch (error: any) {
+        if (error?.code === '23505') {
+          throw new BadRequestException('Business with provided details already exists');
+        }
+        console.error('[BusinessesService.create] Save error:', error?.message || error);
+        throw new BadRequestException(error?.message || 'Failed to save business');
+      }
     
-    // Generate QR code
-    const qrCodeData = await this.generateQRCode(savedBusiness.id);
-    await this.businessRepository.update(savedBusiness.id, { qrCode: qrCodeData });
+      // Generate QR code (non-fatal if it fails)
+      try {
+        const qrCodeData = await this.generateQRCode(savedBusiness.id);
+        await this.businessRepository.update(savedBusiness.id, { qrCode: qrCodeData });
+      } catch (qrErr: any) {
+        console.warn('[BusinessesService.create] QR code generation failed:', qrErr?.message);
+      }
 
     // Send confirmation email to owner
     try {
@@ -205,7 +253,7 @@ export class BusinessesService {
       if (to) {
         const html = `
           <div style="font-family: Arial, sans-serif; max-width:600px; margin:0 auto; padding:20px;">
-            <div style="background: linear-gradient(135deg,#f97316,#ea580c); padding:24px; color:#fff; border-radius:8px 8px 0 0;">
+            <div style="background: #330007; padding:24px; color:#fff; border-radius:8px 8px 0 0;">
               <h2 style="margin:0;">Your business was submitted</h2>
             </div>
             <div style="border:1px solid #e5e7eb; border-top:0; padding:24px; border-radius:0 0 8px 8px;">
@@ -223,7 +271,12 @@ export class BusinessesService {
       console.error('Failed to send business submission email:', e?.message || e);
     }
 
-    return this.findOne(savedBusiness.id);
+      return this.findOne(savedBusiness.id);
+    } catch (e: any) {
+      console.error('[BusinessesService.create] Error:', e?.message || e, e?.stack);
+      if (e instanceof BadRequestException) throw e;
+      throw new BadRequestException(e?.message || 'Failed to create business');
+    }
   }
 
   async findAll(status?: BusinessStatus): Promise<Business[]> {
@@ -371,18 +424,38 @@ export class BusinessesService {
       .getOne();
   }
 
+  /** Fields that staff (non-owners) are allowed to update */
+  private static readonly STAFF_ALLOWED_UPDATE_FIELDS = ['showRevenue', 'autoAcceptBookings', 'bookingAssignment'];
+
   async update(id: string, updateData: any, userId: string, userRole: string): Promise<Business> {
     const business = await this.findOne(id);
 
-    // Check if user owns the business or is super admin
-    if (business.owner.id !== userId && userRole !== 'super_admin') {
+    const ownerId = String(business.owner?.id ?? '');
+    const requestUserId = String(userId ?? '');
+
+    const isOwner = ownerId === requestUserId;
+    const isSuperAdmin = userRole === 'super_admin';
+    const isMember = !isOwner && (await this.isOwnerOrMember(id, userId));
+
+    if (!isOwner && !isSuperAdmin && !isMember) {
       throw new ForbiddenException('You can only update your own business');
     }
 
-    // If address fields changed, re-geocode
+    // Staff (members) may only update a whitelist of fields
+    let dataToApply = updateData;
+    if (isMember && !isOwner) {
+      dataToApply = {};
+      for (const key of BusinessesService.STAFF_ALLOWED_UPDATE_FIELDS) {
+        if (key in updateData) {
+          dataToApply[key] = updateData[key];
+        }
+      }
+    }
+
+    // If address fields changed, re-geocode (only owners/super_admin can change address)
     const addressFields = ['address', 'city', 'state', 'zipCode', 'country'];
-    const addressChanged = addressFields.some(k => k in updateData);
-    Object.assign(business, updateData);
+    const addressChanged = addressFields.some(k => k in dataToApply);
+    Object.assign(business, dataToApply);
     if (addressChanged) {
       const coords = await this.geocodeAddress({
         address: business.address,
@@ -804,7 +877,7 @@ export class BusinessesService {
   async getBusinessStats(businessId: string): Promise<any> {
     const business = await this.findOne(businessId);
 
-    // Query bookings for accurate stats
+    // All-time stats (for main totals)
     const bookingsQuery = await this.dataSource.query(
       `SELECT
         COUNT(*) as "totalBookings",
@@ -815,6 +888,31 @@ export class BusinessesService {
       [businessId]
     );
 
+    // This month stats (for % change vs last month)
+    const now = new Date();
+    const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString();
+    const thisMonthBookingsQuery = await this.dataSource.query(
+      `SELECT
+        COUNT(*) as "totalBookings",
+        COUNT(DISTINCT "customerId") as "totalCustomers",
+        COALESCE(SUM("totalAmount"), 0) as "totalRevenue"
+       FROM bookings
+       WHERE "businessId" = $1 AND "deletedAt" IS NULL
+         AND "appointmentDate" >= $2 AND "appointmentDate" < $3`,
+      [businessId, thisMonthStart, new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString()]
+    );
+    const lastMonthBookingsQuery = await this.dataSource.query(
+      `SELECT
+        COUNT(*) as "totalBookings",
+        COUNT(DISTINCT "customerId") as "totalCustomers",
+        COALESCE(SUM("totalAmount"), 0) as "totalRevenue"
+       FROM bookings
+       WHERE "businessId" = $1 AND "deletedAt" IS NULL
+         AND "appointmentDate" >= $2 AND "appointmentDate" < $3`,
+      [businessId, lastMonthStart, thisMonthStart]
+    );
+
     // Query services count
     const servicesQuery = await this.dataSource.query(
       `SELECT COUNT(*) as count FROM services WHERE "businessId" = $1 AND "deletedAt" IS NULL`,
@@ -822,6 +920,8 @@ export class BusinessesService {
     );
 
     const stats = bookingsQuery[0] || { totalBookings: 0, totalCustomers: 0, totalRevenue: 0 };
+    const thisMonth = thisMonthBookingsQuery[0] || { totalBookings: 0, totalCustomers: 0, totalRevenue: 0 };
+    const lastMonth = lastMonthBookingsQuery[0] || { totalBookings: 0, totalCustomers: 0, totalRevenue: 0 };
 
     const base = {
       totalBookings: parseInt(stats.totalBookings) || 0,
@@ -829,13 +929,18 @@ export class BusinessesService {
       totalServices: parseInt(servicesQuery[0]?.count || 0),
       averageRating: business.rating || 0,
       reviewCount: business.reviewCount || 0,
+      // Previous month values for % change
+      totalBookingsLastMonth: parseInt(lastMonth.totalBookings) || 0,
+      totalCustomersLastMonth: parseInt(lastMonth.totalCustomers) || 0,
+      totalBookingsThisMonth: parseInt(thisMonth.totalBookings) || 0,
+      totalCustomersThisMonth: parseInt(thisMonth.totalCustomers) || 0,
     } as any;
 
     if (business.showRevenue) {
       base.totalRevenue = parseFloat(stats.totalRevenue) || 0;
+      base.totalRevenueThisMonth = parseFloat(thisMonth.totalRevenue) || 0;
+      base.totalRevenueLastMonth = parseFloat(lastMonth.totalRevenue) || 0;
     }
-
-    console.log(`[BusinessesService] Stats for business ${businessId}:`, base);
 
     return base;
   }
@@ -954,22 +1059,15 @@ export class BusinessesService {
       throw new BadRequestException('Invalid image index');
     }
 
-    // Delete the file from filesystem
-    const fs = await import('fs/promises');
-    const path = await import('path');
-    const imagePath = business.images[imageIndex];
-    const fullPath = path.join(process.cwd(), imagePath);
-
+    const imageUrl = business.images[imageIndex];
     try {
-      await fs.unlink(fullPath);
+      await this.storage.deleteByUrl(imageUrl);
     } catch (error) {
-      console.error('Error deleting file:', error);
-      // Continue even if file deletion fails (file might not exist)
+      console.error('[BusinessesService] R2 delete failed:', error);
+      // Continue – remove from DB even if R2 delete fails (e.g. already gone)
     }
 
-    // Remove from array
     business.images.splice(imageIndex, 1);
-
     return this.businessRepository.save(business);
   }
 }

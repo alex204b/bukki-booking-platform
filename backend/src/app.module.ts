@@ -28,8 +28,10 @@ import { RequestsModule } from './requests/requests.module';
 import { ResourcesModule } from './resources/resources.module';
 import { ChatModule } from './chat/chat.module';
 import { RedisModule } from './redis/redis.module';
+import { CommonModule } from './common/common.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { HealthController } from './health/health.controller';
 
 @Module({
   imports: [
@@ -129,8 +131,9 @@ import { AppService } from './app.service';
     ResourcesModule,
     RedisModule,
     ChatModule,
+    CommonModule,
   ],
-  controllers: [AppController],
+  controllers: [AppController, HealthController],
   providers: [AppService],
 })
 export class AppModule {}

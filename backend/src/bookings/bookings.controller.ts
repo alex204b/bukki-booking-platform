@@ -16,17 +16,29 @@ export class BookingsController {
   @ApiOperation({ summary: 'Create a new booking' })
   @ApiResponse({ status: 201, description: 'Booking created successfully' })
   async create(@Body() createBookingDto: any, @Request() req) {
+    console.log(`[BookingsController] ========== CREATE BOOKING REQUEST ==========`);
+    console.log(`[BookingsController] User role: ${req.user.role}, User ID: ${req.user.id}`);
+    console.log(`[BookingsController] Full createBookingDto:`, JSON.stringify(createBookingDto, null, 2));
+    console.log(`[BookingsController] createBookingDto.customerEmail:`, createBookingDto.customerEmail);
+    console.log(`[BookingsController] createBookingDto.customerId:`, createBookingDto.customerId);
+    
     // Business owners and employees can specify a customerId OR customerEmail to create bookings on behalf of customers
     let customerId: string;
     
     if ((req.user.role === 'business_owner' || req.user.role === 'employee') && createBookingDto.customerEmail) {
       // Backend will handle customer lookup/creation for business owners using email
       customerId = createBookingDto.customerEmail; // Pass email as string, service will handle it
+      console.log(`[BookingsController] ✅ Using customerEmail as customerId: "${customerId}"`);
     } else if ((req.user.role === 'business_owner' || req.user.role === 'employee') && createBookingDto.customerId) {
       customerId = createBookingDto.customerId;
+      console.log(`[BookingsController] Using customerId from DTO: ${customerId}`);
     } else {
       customerId = req.user.id;
+      console.log(`[BookingsController] Using req.user.id as customerId: ${customerId}`);
     }
+    
+    console.log(`[BookingsController] Final customerId passed to service: "${customerId}"`);
+    console.log(`[BookingsController] ===============================================`);
     
     return this.bookingsService.create(createBookingDto, customerId);
   }
@@ -114,6 +126,21 @@ export class BookingsController {
     return this.bookingsService.getBookingStats(businessId, period);
   }
 
+  @Get('my-bookings')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get current user bookings (non-paginated)' })
+  @ApiResponse({ status: 200, description: 'Bookings retrieved successfully' })
+  async getMyBookings(@Request() req) {
+    // Return all bookings for the current user without pagination
+    const result = await this.bookingsService.findAllPaginated(
+      req.user.id,
+      req.user.role,
+      { limit: 1000, offset: 0 }, // Large limit for non-paginated
+    );
+    return result.data;
+  }
+
   @Get(':id')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
@@ -131,10 +158,15 @@ export class BookingsController {
   @ApiResponse({ status: 200, description: 'Booking status updated successfully' })
   async updateStatus(
     @Param('id') id: string,
-    @Body() body: { status: BookingStatus; reason?: string },
+    @Body() body: { status: BookingStatus; reason?: string; resourceId?: string; assignToUserId?: string },
     @Request() req,
   ) {
-    return this.bookingsService.updateStatus(id, body.status, req.user.id, req.user.role, body.reason);
+    try {
+      return await this.bookingsService.updateStatus(id, body.status, req.user.id, req.user.role, body.reason, body.resourceId, body.assignToUserId);
+    } catch (err: any) {
+      console.error('[BookingsController] updateStatus error:', err?.message, err?.stack);
+      throw err;
+    }
   }
 
   @Post(':id/checkin')

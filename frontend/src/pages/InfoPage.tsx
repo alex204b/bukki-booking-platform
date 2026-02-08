@@ -683,7 +683,7 @@ const InfoPage: React.FC = () => {
                   </Link>
                 </li>
                 <li>
-                  <Link to="/businesses" className="text-gray-300 hover:text-white transition-colors text-xs">
+                  <Link to="/" className="text-gray-300 hover:text-white transition-colors text-xs">
                     {t('browseBusinesses')}
                   </Link>
                 </li>

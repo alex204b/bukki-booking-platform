@@ -11,20 +11,21 @@ import { User } from '../users/entities/user.entity';
 import { UsersModule } from '../users/users.module';
 import { MessagesModule } from '../messages/messages.module';
 import { RequestsModule } from '../requests/requests.module';
-import { EmailService } from '../common/services/email.service';
 import { multerConfig } from '../common/config/multer.config';
+import { StorageModule } from '../storage/storage.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Business, BusinessMember, BusinessContact, User]),
     ConfigModule,
     MulterModule.register(multerConfig),
+    StorageModule,
     UsersModule,
     MessagesModule,
     forwardRef(() => RequestsModule),
   ],
   controllers: [BusinessesController],
-  providers: [BusinessesService, EmailService],
+  providers: [BusinessesService],
   exports: [BusinessesService],
 })
 export class BusinessesModule {}

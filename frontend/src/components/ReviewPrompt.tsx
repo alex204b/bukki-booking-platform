@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useI18n } from '../contexts/I18nContext';
 import { GeometricSymbol } from './GeometricSymbols';
+import { authStorage } from '../utils/authStorage';
 
 interface ReviewPromptProps {
   bookingId: number;
@@ -38,7 +39,7 @@ export const ReviewPrompt: React.FC<ReviewPromptProps> = ({
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Authorization': `Bearer ${authStorage.getToken()}`,
         },
         body: JSON.stringify({
           businessId,

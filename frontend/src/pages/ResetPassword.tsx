@@ -159,7 +159,7 @@ export const ResetPassword: React.FC = () => {
                 id="newPassword"
                 name="newPassword"
                 type={showPassword ? 'text' : 'password'}
-                autoComplete="new-password"
+                autoComplete="off"
                 required
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
@@ -202,7 +202,7 @@ export const ResetPassword: React.FC = () => {
                 id="confirmPassword"
                 name="confirmPassword"
                 type={showConfirmPassword ? 'text' : 'password'}
-                autoComplete="new-password"
+                autoComplete="off"
                 required
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}

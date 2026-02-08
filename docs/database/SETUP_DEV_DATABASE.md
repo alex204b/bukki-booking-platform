@@ -122,7 +122,8 @@ SMTP_FROM=noreply@yourdomain.com
 # API Keys (optional - use placeholder for dev)
 STRIPE_SECRET_KEY=sk_test_...
 GOOGLE_MAPS_API_KEY=your_key
-OPENAI_API_KEY=your_key
+GEMINI_API_KEY=your_key
+# Or for Moldova: HUGGINGFACE_API_KEY=your_key, AI_PROVIDER=huggingface
 FIREBASE_PROJECT_ID=your_project
 FIREBASE_PRIVATE_KEY=your_key
 FIREBASE_CLIENT_EMAIL=your_email

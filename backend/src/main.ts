@@ -1,11 +1,11 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { NestExpressApplication } from '@nestjs/platform-express';
-import { join } from 'path';
 import { SanitizationPipe } from './common/pipes/sanitization.pipe';
 
 async function bootstrap() {
@@ -14,28 +14,6 @@ async function bootstrap() {
   console.log('Port:', process.env.PORT);
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
-
-  // Serve static files from uploads directory
-  // Use absolute path to ensure it works in all environments
-  const uploadsPath = join(process.cwd(), 'uploads');
-  console.log(`📁 Serving static files from: ${uploadsPath}`);
-  console.log(`📁 Process CWD: ${process.cwd()}`);
-  console.log(`📁 __dirname: ${__dirname}`);
-  
-  // Check if uploads directory exists and create if needed
-  const fs = require('fs');
-  if (!fs.existsSync(uploadsPath)) {
-    console.warn(`⚠️  Uploads directory does not exist: ${uploadsPath}`);
-    console.warn(`📁 Creating uploads directory...`);
-    fs.mkdirSync(uploadsPath, { recursive: true });
-    fs.mkdirSync(join(uploadsPath, 'businesses'), { recursive: true });
-  }
-  
-  app.useStaticAssets(uploadsPath, {
-    prefix: '/uploads/',
-  });
-  
-  console.log(`✅ Static files will be served at: http://localhost:${process.env.PORT || 3000}/uploads/`);
 
   // Trust proxy (needed when behind Render/NGINX/Cloudflare) so rate-limit sees real IP
   const httpAdapter = app.getHttpAdapter();
@@ -91,10 +69,55 @@ async function bootstrap() {
   // In production, you should restrict this to your actual frontend URLs
   const isDevelopment = process.env.NODE_ENV !== 'production';
   
-  app.enableCors({
-    origin: isDevelopment ? true : allowedOrigins, // Allow all origins in development for mobile testing
+  // Custom origin function to handle mobile apps (which may not send Origin header)
+  // This is critical for Capacitor/React Native apps that don't always send Origin headers
+  const corsOptions: any = {
+    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+      // In development, allow all origins including undefined (mobile apps)
+      if (isDevelopment) {
+        console.log(`[CORS] Allowing request from origin: ${origin || 'undefined (mobile app)'}`);
+        callback(null, true);
+        return;
+      }
+      
+      // In production, check against allowed origins
+      // Allow requests without origin (mobile apps, Postman, etc.)
+      if (!origin) {
+        console.log('[CORS] Allowing request without origin (mobile app)');
+        callback(null, true);
+        return;
+      }
+      
+      // Check if origin is in allowed list
+      if (allowedOrigins.includes(origin)) {
+        console.log(`[CORS] Allowing request from allowed origin: ${origin}`);
+        callback(null, true);
+      } else {
+        console.warn(`[CORS] Blocking request from origin: ${origin}`);
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     credentials: true,
-  });
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+    exposedHeaders: ['Authorization'],
+  };
+  
+  app.enableCors(corsOptions);
+  console.log(`✅ CORS enabled - Development mode: ${isDevelopment}, Allowed origins: ${isDevelopment ? 'ALL (development)' : allowedOrigins.join(', ')}`);
+
+  // Request logging middleware for debugging (development only)
+  if (isDevelopment) {
+    app.use((req: any, res: any, next: any) => {
+      const origin = req.headers.origin || 'no origin (mobile app)';
+      const userAgent = req.headers['user-agent'] || 'unknown';
+      console.log(`[REQUEST] ${req.method} ${req.url} | Origin: ${origin} | User-Agent: ${userAgent?.substring(0, 50)}`);
+      next();
+    });
+  }
+
+  // Return actual error messages to client (helps debugging, esp. 500s)
+  app.useGlobalFilters(new AllExceptionsFilter());
 
   // Global validation and sanitization pipes
   app.useGlobalPipes(

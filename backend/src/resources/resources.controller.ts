@@ -22,7 +22,8 @@ export class ResourcesController {
   @Post()
   @UseGuards(JwtAuthGuard)
   create(@Body() createResourceDto: CreateResourceDto, @Request() req) {
-    return this.resourcesService.create(createResourceDto, req.user.userId);
+    // JwtStrategy returns the full user entity as req.user, so the ID field is `id`
+    return this.resourcesService.create(createResourceDto, req.user.id);
   }
 
   @Get()
@@ -42,13 +43,13 @@ export class ResourcesController {
     @Body() updateResourceDto: UpdateResourceDto,
     @Request() req,
   ) {
-    return this.resourcesService.update(id, updateResourceDto, req.user.userId);
+    return this.resourcesService.update(id, updateResourceDto, req.user.id);
   }
 
   @Delete(':id')
   @UseGuards(JwtAuthGuard)
   remove(@Param('id') id: string, @Request() req) {
-    return this.resourcesService.remove(id, req.user.userId);
+    return this.resourcesService.remove(id, req.user.id);
   }
 
   @Post(':id/services/:serviceId')
@@ -58,7 +59,7 @@ export class ResourcesController {
     @Param('serviceId') serviceId: string,
     @Request() req,
   ) {
-    return this.resourcesService.linkToService(resourceId, serviceId, req.user.userId);
+    return this.resourcesService.linkToService(resourceId, serviceId, req.user.id);
   }
 
   @Delete(':id/services/:serviceId')
@@ -68,6 +69,6 @@ export class ResourcesController {
     @Param('serviceId') serviceId: string,
     @Request() req,
   ) {
-    return this.resourcesService.unlinkFromService(resourceId, serviceId, req.user.userId);
+    return this.resourcesService.unlinkFromService(resourceId, serviceId, req.user.id);
   }
 }

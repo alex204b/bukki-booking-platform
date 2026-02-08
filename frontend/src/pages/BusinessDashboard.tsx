@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { api, bookingService } from '../services/api';
 import { useI18n } from '../contexts/I18nContext';
-import { Building2, Calendar, DollarSign, Users, Plus, Eye, Edit, CheckCircle, XCircle, QrCode, Clock, Bell, MessageCircle, Settings } from 'lucide-react';
+import { useCurrency } from '../contexts/CurrencyContext';
+import { Building2, Calendar, DollarSign, Users, Plus, Eye, Edit, CheckCircle, XCircle, QrCode, Clock, Bell, ChevronDown, Settings, MessageCircle } from 'lucide-react';
 import { RevenueChart } from '../components/RevenueChart';
 import { BookingActionModal } from '../components/BookingActionModal';
+import { TeamManagementSection } from '../components/TeamManagementSection';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from 'react-query';
 import toast from 'react-hot-toast';
@@ -13,6 +15,7 @@ interface Service {
   id: string;
   name: string;
   price: number;
+  priceMax?: number;
   duration: number;
   isActive: boolean;
   maxBookingsPerCustomerPerDay?: number;
@@ -32,18 +35,20 @@ interface Booking {
 
 export const BusinessDashboard: React.FC = () => {
   const { user } = useAuth();
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
+  const { formatPrice, formatPriceRange, formatPriceTier } = useCurrency();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [services, setServices] = useState<Service[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [showAddService, setShowAddService] = useState(false);
-  const [newService, setNewService] = useState({ name: '', price: '', duration: '' });
+  const [newService, setNewService] = useState({ name: '', price: '', priceMax: '', duration: '' });
   const [showEditService, setShowEditService] = useState(false);
   const [editingService, setEditingService] = useState<Service | null>(null);
   const [editServiceData, setEditServiceData] = useState({ 
     name: '', 
     price: '', 
+    priceMax: '',
     duration: '',
     maxBookingsPerCustomerPerDay: '1',
     maxBookingsPerCustomerPerWeek: '',
@@ -66,6 +71,38 @@ export const BusinessDashboard: React.FC = () => {
     action: 'accept',
   });
   const [isUpdatingBooking, setIsUpdatingBooking] = useState(false);
+  const [bookingFilterOpen, setBookingFilterOpen] = useState(false);
+  const bookingFilterRef = useRef<HTMLDivElement>(null);
+  const [bookingsSectionOpen, setBookingsSectionOpen] = useState(false);
+  const [servicesSectionOpen, setServicesSectionOpen] = useState(false);
+  const [teamSectionOpen, setTeamSectionOpen] = useState(true);
+  const [revenueToggleLoading, setRevenueToggleLoading] = useState(false);
+
+  // Close booking filter dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (bookingFilterRef.current && !bookingFilterRef.current.contains(event.target as Node)) {
+        setBookingFilterOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Scroll to Team section when navigating with #team hash
+  useEffect(() => {
+    if (window.location.hash === '#team') {
+      const el = document.getElementById('team');
+      if (el) el.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, []);
+
+  const bookingFilterOptions: { value: 'all' | 'upcoming' | 'pending' | 'done'; labelKey: string }[] = [
+    { value: 'all', labelKey: 'all' },
+    { value: 'upcoming', labelKey: 'upcoming' },
+    { value: 'pending', labelKey: 'pending' },
+    { value: 'done', labelKey: 'filterDone' },
+  ];
 
   // Determine if user is an employee (staff)
   useEffect(() => {
@@ -87,14 +124,18 @@ export const BusinessDashboard: React.FC = () => {
 
       const allBookings = Array.isArray(bookingsRes.data) ? bookingsRes.data : [];
 
-      const businessBookings = allBookings.map((b: any) => ({
-        id: b.id,
-        customerName: `${b.customer?.firstName || ''} ${b.customer?.lastName || ''}`.trim() || t('customer'),
-        serviceName: b.service?.name || t('serviceName'),
-        appointmentDate: b.appointmentDate,
-        status: b.status,
-        totalAmount: Number(b.totalAmount) || 0,
-      }));
+      const businessBookings = allBookings.map((b: any) => {
+        let name = `${b.customer?.firstName || ''} ${b.customer?.lastName || ''}`.trim();
+        name = name.replace(/\s+(Customer|Client)$/i, '').trim();
+        return {
+          id: b.id,
+          customerName: name || '—',
+          serviceName: b.service?.name || t('serviceName'),
+          appointmentDate: b.appointmentDate,
+          status: b.status,
+          totalAmount: Number(b.totalAmount) || 0,
+        };
+      });
 
       console.log('[BusinessDashboard] ✅ Formatted bookings:', {
         count: businessBookings.length,
@@ -119,17 +160,29 @@ export const BusinessDashboard: React.FC = () => {
     (async () => {
       try {
         setServicesLoading(true);
+        console.log('[BusinessDashboard] Fetching my-business...');
         const bRes = await api.get('/businesses/my-business');
-        setMyBusiness(bRes.data);
-        if (bRes.data?.id) {
-          console.log('[BusinessDashboard] Loading data for business:', bRes.data.id);
-          
-          const [sRes, servicesRes, waitlistRes] = await Promise.all([
-            api.get(`/businesses/${bRes.data.id}/stats`).catch((err) => {
+        console.log('[BusinessDashboard] my-business response:', bRes.data);
+        const raw = bRes.data;
+        const business = Array.isArray(raw) ? raw[0] : raw;
+        setMyBusiness(business ?? null);
+
+        if (!business?.id) {
+          console.error('[BusinessDashboard] ❌ No business found or no business ID!');
+          console.error('[BusinessDashboard] Response data:', bRes.data);
+          toast.error('Business profile not found. Please complete business onboarding.');
+          setServicesLoading(false);
+          return;
+        }
+
+        console.log('[BusinessDashboard] ✅ Business loaded:', business.name, '(ID:', business.id, ')');
+
+        const [sRes, servicesRes, waitlistRes] = await Promise.all([
+            api.get(`/businesses/${business.id}/stats`).catch((err) => {
               console.error('[BusinessDashboard] ❌ Error fetching stats:', err);
               return { data: {} };
             }),
-            api.get(`/services/business/${bRes.data.id}`).catch((err) => {
+            api.get(`/services/business/${business.id}`).catch((err) => {
               console.error('[BusinessDashboard] ❌ Error fetching services:', err);
               console.error('[BusinessDashboard] Error details:', {
                 message: err.message,
@@ -138,7 +191,7 @@ export const BusinessDashboard: React.FC = () => {
               });
               return { data: [] };
             }),
-            api.get(`/waitlist/business/${bRes.data.id}`).catch(() => ({ data: [] })), // Waitlist (optional)
+            api.get(`/waitlist/business/${business.id}`).catch(() => ({ data: [] })), // Waitlist (optional)
           ]);
           
           setStatsApi(sRes.data);
@@ -162,8 +215,7 @@ export const BusinessDashboard: React.FC = () => {
           setWaitlist(waitlistRes.data || []);
 
           // Load bookings using the dedicated function
-          await loadBookings(bRes.data.id);
-        }
+          await loadBookings(business.id);
       } catch (err: any) {
         console.error('[BusinessDashboard] ❌ Failed to load business data:', err?.response?.data || err?.message);
         setServicesLoading(false);
@@ -172,34 +224,64 @@ export const BusinessDashboard: React.FC = () => {
   }, [user, t]);
 
   const handleAddService = async () => {
+    console.log('[BusinessDashboard] handleAddService called');
+    console.log('[BusinessDashboard] myBusiness:', myBusiness);
+    console.log('[BusinessDashboard] newService:', newService);
+
     if (!newService.name || !newService.price || !newService.duration) {
       toast.error('Please fill in all fields');
       return;
     }
 
     if (!myBusiness?.id) {
-      toast.error('Business not found');
+      console.error('[BusinessDashboard] ❌ myBusiness or myBusiness.id is null!');
+      console.error('[BusinessDashboard] myBusiness value:', myBusiness);
+      toast.error('Business not found. Please refresh the page and try again.');
       return;
     }
 
+    console.log('[BusinessDashboard] Creating service with businessId:', myBusiness.id);
+
     try {
-      const response = await api.post('/services', {
-        name: newService.name,
-        price: parseFloat(newService.price),
-        duration: parseInt(newService.duration),
+      const isParallel = myBusiness?.businessType === 'parallel';
+      const price = parseFloat(newService.price);
+      if (price < 0 || (!isParallel && price <= 0)) {
+        toast.error(isParallel ? t('priceCannotBeNegative') || 'Price cannot be negative' : t('priceMustBePositive') || 'Price must be greater than 0');
+        return;
+      }
+      const priceMaxVal = parseFloat(newService.priceMax);
+      const serviceData: any = {
+        name: newService.name.trim(),
+        price,
+        duration: parseInt(newService.duration) || 90,
         isActive: true,
         businessId: myBusiness.id,
-      });
+      };
+      if (!isNaN(priceMaxVal) && priceMaxVal > price) {
+        serviceData.priceMax = priceMaxVal;
+      }
+      if (isParallel) {
+        serviceData.resourceType = 'table';
+      }
 
+      console.log('[BusinessDashboard] Sending service data:', serviceData);
+
+      const response = await api.post('/services', serviceData);
+
+      console.log('[BusinessDashboard] ✅ Service created successfully:', response.data);
       toast.success('Service added successfully!');
-      setNewService({ name: '', price: '', duration: '' });
+      setNewService({ name: '', price: '', priceMax: '', duration: '' });
       setShowAddService(false);
       
       // Refresh services list
       await refreshServices();
     } catch (error: any) {
-      console.error('Error adding service:', error);
-      toast.error(error.response?.data?.message || 'Failed to add service');
+      console.error('[BusinessDashboard] ❌ Error adding service:', error);
+      console.error('[BusinessDashboard] Error response:', error.response?.data);
+      console.error('[BusinessDashboard] Error status:', error.response?.status);
+      
+      const errorMessage = error.response?.data?.message || error.message || 'Failed to add service';
+      toast.error(`Failed to add service: ${errorMessage}`);
     }
   };
 
@@ -223,15 +305,22 @@ export const BusinessDashboard: React.FC = () => {
       return;
     }
 
-    if (!editServiceData.name || !editServiceData.price || !editServiceData.duration) {
-      toast.error('Please fill in all fields');
+    if (!editServiceData.name || !editServiceData.duration) {
+      toast.error('Please fill in name and duration');
+      return;
+    }
+    const isParallel = myBusiness?.businessType === 'parallel';
+    const price = parseFloat(editServiceData.price);
+    if (isNaN(price) || price < 0 || (!isParallel && price <= 0)) {
+      toast.error(isParallel ? 'Price cannot be negative' : 'Price must be greater than 0');
       return;
     }
 
     try {
+      const priceMaxVal = parseFloat(editServiceData.priceMax);
       const updateData: any = {
         name: editServiceData.name,
-        price: parseFloat(editServiceData.price),
+        price,
         duration: parseInt(editServiceData.duration),
         maxBookingsPerCustomerPerDay: parseInt(editServiceData.maxBookingsPerCustomerPerDay) || 1,
         bookingCooldownHours: parseInt(editServiceData.bookingCooldownHours) || 0,
@@ -251,6 +340,7 @@ export const BusinessDashboard: React.FC = () => {
       setEditServiceData({ 
         name: '', 
         price: '', 
+        priceMax: '',
         duration: '',
         maxBookingsPerCustomerPerDay: '1',
         maxBookingsPerCustomerPerWeek: '',
@@ -325,209 +415,323 @@ export const BusinessDashboard: React.FC = () => {
     }
   };
 
+  const pctChange = (current: number, previous: number): { text: string; type: 'positive' | 'negative' | 'neutral' } => {
+    if (previous === 0) return { text: current > 0 ? '+100%' : '0%', type: current > 0 ? 'positive' : 'neutral' };
+    const pct = Math.round(((current - previous) / previous) * 100);
+    if (pct > 0) return { text: `+${pct}%`, type: 'positive' };
+    if (pct < 0) return { text: `${pct}%`, type: 'negative' };
+    return { text: '0%', type: 'neutral' };
+  };
+
+  const bookingsChange = statsApi?.totalBookingsThisMonth != null && statsApi?.totalBookingsLastMonth != null
+    ? pctChange(statsApi.totalBookingsThisMonth, statsApi.totalBookingsLastMonth)
+    : { text: '—', type: 'neutral' as const };
+  const revenueChange = statsApi?.totalRevenueThisMonth != null && statsApi?.totalRevenueLastMonth != null
+    ? pctChange(statsApi.totalRevenueThisMonth, statsApi.totalRevenueLastMonth)
+    : { text: '—', type: 'neutral' as const };
+  const customersChange = statsApi?.totalCustomersThisMonth != null && statsApi?.totalCustomersLastMonth != null
+    ? pctChange(statsApi.totalCustomersThisMonth, statsApi.totalCustomersLastMonth)
+    : { text: '—', type: 'neutral' as const };
+
   const stats = [
-    { name: t('totalBookings'), value: String(statsApi?.totalBookings ?? 0), icon: Calendar, change: '+0%', changeType: 'neutral' },
-    ...(!isStaff && myBusiness?.showRevenue && (statsApi?.totalRevenue !== undefined) ? [{ name: t('totalRevenue'), value: `$${(statsApi?.totalRevenue || 0).toLocaleString()}`, icon: DollarSign, change: '+0%', changeType: 'neutral' }] : []),
-    { name: t('customers'), value: String(statsApi?.totalCustomers ?? 0), icon: Users, change: '+0%', changeType: 'neutral' },
-    { name: t('services'), value: String(services.filter(s => s.isActive).length), icon: Building2, change: '+0%', changeType: 'neutral' },
+    { name: t('totalBookings'), value: String(statsApi?.totalBookings ?? 0), icon: Calendar, change: bookingsChange.text, changeType: bookingsChange.type },
+    ...(!isStaff && myBusiness?.showRevenue && (statsApi?.totalRevenue !== undefined) ? [{ name: t('totalRevenue'), value: formatPrice((statsApi?.totalRevenue || 0) / 100), icon: DollarSign, change: revenueChange.text, changeType: revenueChange.type }] : []),
+    { name: t('customers'), value: String(statsApi?.totalCustomers ?? 0), icon: Users, change: customersChange.text, changeType: customersChange.type },
+    { name: t('services'), value: String(services.filter(s => s.isActive).length), icon: Building2, change: '—', changeType: 'neutral' as const },
   ];
 
   const toggleRevenue = async () => {
     if (!myBusiness?.id) return;
+    setRevenueToggleLoading(true);
     try {
-      const next = !myBusiness.showRevenue;
-      await api.patch(`/businesses/${myBusiness.id}`, { showRevenue: next });
-      setMyBusiness({ ...myBusiness, showRevenue: next });
+      const next = !(myBusiness.showRevenue === true);
+      const { data } = await api.patch(`/businesses/${myBusiness.id}`, { showRevenue: next });
+      setMyBusiness((prev: typeof myBusiness) => (prev && data ? { ...prev, showRevenue: (data as any).showRevenue ?? next } : prev));
       if (next) {
         const sRes = await api.get(`/businesses/${myBusiness.id}/stats`);
         setStatsApi(sRes.data);
       }
-    } catch {}
+    } catch (err: any) {
+      const msg = err.response?.data?.message || err.message || 'Failed to update revenue setting';
+      toast.error(msg);
+    } finally {
+      setRevenueToggleLoading(false);
+    }
   };
 
   return (
-    <div className="space-y-6">
-      {/* Revenue Visibility (owner only) */}
-      {!isStaff && (
-      <div className="card p-6">
-        <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-gray-900">{t('revenueTracking')}</h3>
-          <label className="flex items-center gap-2 text-sm text-gray-700">
-            <input type="checkbox" checked={!!myBusiness?.showRevenue} onChange={toggleRevenue} />
-            {myBusiness?.showRevenue ? t('enabled') : t('disabled')}
-          </label>
+    <div className="bg-[#f9fafb] text-gray-900">
+      <div className="w-full max-w-none px-2 sm:px-3 pt-10">
+        {/* Header */}
+        <div className="mb-8">
+          <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-900">
+                {isStaff ? t('businessSchedule') : t('businessDashboard')}
+              </h1>
+              <p className="mt-2 text-sm text-gray-500">
+                {isStaff
+                  ? `${t('viewScheduleAndBookings')} ${myBusiness?.name || t('theBusiness')}`
+                  : t('manageBusinessAndTrack')}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              {!isStaff && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/business-settings')}
+                    className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+                  >
+                    <Settings className="h-4 w-4 shrink-0" />
+                    <span>{t('settings') || 'Settings'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/chat-list')}
+                    className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+                  >
+                    <MessageCircle className="h-4 w-4 shrink-0" />
+                    <span>{t('messages') || 'Messages'}</span>
+                  </button>
+                </>
+              )}
+              <button
+                type="button"
+                onClick={() => navigate('/qr-scanner')}
+                className="lg:hidden inline-flex items-center gap-2 rounded-lg bg-[#dc2626] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#b91c1c]"
+              >
+                <QrCode className="h-4 w-4 shrink-0" />
+                <span>{t('scanQRCode')}</span>
+              </button>
+              {!isStaff && (
+                <button
+                  type="button"
+                  onClick={() => setShowAddService(true)}
+                  className="inline-flex items-center gap-2 rounded-lg bg-[#dc2626] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#b91c1c]"
+                >
+                  <Plus className="h-4 w-4 shrink-0" />
+                  <span>{t('addService')}</span>
+                </button>
+              )}
+            </div>
+          </div>
         </div>
-        <p className="text-sm text-gray-600 mt-2">{t('controlRevenueVisibility')}</p>
-      </div>
-      )}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">
-            {isStaff ? t('businessSchedule') : t('businessDashboard')}
-          </h1>
-          <p className="text-gray-600 mt-2">
-            {isStaff 
-              ? `${t('viewScheduleAndBookings')} ${myBusiness?.name || t('theBusiness')}`
-              : t('manageBusinessAndTrack')}
-          </p>
-        </div>
-        <div className="flex gap-3">
-          {!isStaff && (
-            <button
-              onClick={() => navigate('/business-settings')}
-              className="btn btn-outline"
-            >
-              <Settings className="h-4 w-4 mr-2" />
-              {t('settings') || 'Settings'}
-            </button>
-          )}
-          <button
-            onClick={() => navigate('/chat-list')}
-            className="btn btn-outline"
-          >
-            <MessageCircle className="h-4 w-4 mr-2" />
-            {t('messages') || 'Messages'}
-          </button>
-          <button
-            onClick={() => navigate('/qr-scanner')}
-            className="btn btn-primary"
-          >
-            <QrCode className="h-4 w-4 mr-2" />
-            {t('scanQRCode')}
-          </button>
-          {!isStaff && (
-            <button
-              onClick={() => setShowAddService(true)}
-              className="btn btn-primary"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              {t('addService')}
-            </button>
-          )}
-        </div>
-      </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {stats.map((stat) => (
-          <div key={stat.name} className="card p-6">
-            <div className="flex items-center">
-              <div className="p-2 bg-accent-100 rounded-lg">
-                <stat.icon className="h-6 w-6 text-accent-600" />
+        {/* Revenue card (owner only – hide for employees so they never hit the update restriction) */}
+        {!isStaff && user?.role === 'business_owner' && (
+          <div className="mb-6 rounded-lg border border-gray-200 bg-white p-4">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h3 className="text-base font-medium text-gray-900">{t('revenueTracking')}</h3>
+                <p className="mt-1 text-sm text-gray-500">{t('controlRevenueVisibility')}</p>
               </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">{stat.name}</p>
-                <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
-                <p className={`text-sm ${stat.changeType === 'positive' ? 'text-green-600' : stat.changeType === 'negative' ? 'text-red-600' : 'text-gray-600'}`}>
-                  {stat.change} {t('fromLastMonth')}
-                </p>
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-medium text-gray-700">
+                  {myBusiness?.showRevenue ? t('enabled') : t('disabled')}
+                </span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={!!myBusiness?.showRevenue}
+                  aria-busy={revenueToggleLoading}
+                  disabled={revenueToggleLoading}
+                  onClick={toggleRevenue}
+                  className={`relative inline-flex h-7 w-14 shrink-0 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ${
+                    revenueToggleLoading ? 'cursor-wait opacity-80' : 'cursor-pointer'
+                  } ${myBusiness?.showRevenue ? 'bg-[#dc2626]' : 'bg-gray-300'}`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow transition-transform mt-0.5 ml-0.5 ${
+                      myBusiness?.showRevenue ? 'translate-x-7' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
               </div>
             </div>
           </div>
-        ))}
-      </div>
+        )}
+
+        {/* Stats Grid */}
+        <div className="mb-6 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+          {stats.map((stat) => (
+            <div key={stat.name} className="rounded-lg border border-gray-200 bg-white p-6">
+              <div className="flex items-center gap-4">
+                <div className="flex shrink-0 items-center justify-center rounded-lg bg-[#fee2e2] p-3">
+                  <stat.icon className="h-6 w-6 text-[#dc2626]" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-gray-500">{stat.name}</p>
+                  <p className="mt-1 text-3xl font-bold text-gray-900">{stat.value}</p>
+                  <p className={`mt-1 text-sm ${stat.changeType === 'positive' ? 'text-green-600' : stat.changeType === 'negative' ? 'text-red-600' : 'text-gray-500'}`}>
+                    {stat.change === '—' ? '—' : `${stat.change} ${t('fromLastMonth')}`}
+                  </p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
 
       {/* Revenue Chart - Only for business owners with revenue enabled */}
       {!isStaff && myBusiness?.showRevenue && myBusiness?.id && (
         <RevenueChart businessId={myBusiness.id} period="month" />
       )}
 
-      {/* Services Management - Only for business owners */}
-      {!isStaff && (
-      <div className="card p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-gray-900">{t('servicesManagement')}</h3>
-          <button 
-            onClick={() => setShowAddService(true)}
-            className="btn btn-outline btn-sm"
+        {/* Services Management - Only for business owners */}
+        {!isStaff && (
+        <div className="mb-6 overflow-hidden rounded-lg border border-gray-200 bg-white">
+          <button
+            type="button"
+            onClick={() => setServicesSectionOpen((o) => !o)}
+            className="flex w-full items-center justify-between px-5 py-5 text-left transition-colors hover:bg-gray-50"
           >
-            <Plus className="h-4 w-4 mr-2" />
-            {t('addService')}
+            <div className="flex items-center gap-3">
+              <div className="flex items-center justify-center rounded-lg bg-[#fee2e2] p-2">
+                <Building2 className="h-5 w-5 text-[#dc2626]" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900">{t('servicesManagement')}</h3>
+            </div>
+            <ChevronDown className={`h-5 w-5 shrink-0 text-gray-400 transition-transform duration-200 ${servicesSectionOpen ? 'rotate-180' : ''}`} />
           </button>
-        </div>
-        
-        {servicesLoading ? (
-          <div className="flex justify-center py-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent-500"></div>
+          <div className={`overflow-hidden transition-all duration-300 ${servicesSectionOpen ? 'max-h-[2000px]' : 'max-h-0'}`}>
+            <div className="border-t border-gray-200 px-5 pb-6 pt-4">
+              <div className="mb-4 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const isParallel = myBusiness?.businessType === 'parallel';
+                    if (isParallel) {
+                      setNewService({ name: t('tableReservation') || 'Table reservation', price: '0', priceMax: '', duration: '90' });
+                    } else {
+                      setNewService({ name: '', price: '', priceMax: '', duration: '' });
+                    }
+                    setShowAddService(true);
+                  }}
+                  className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+                >
+                  <Plus className="h-4 w-4" />
+                  {t('addService')}
+                </button>
+              </div>
+            {servicesLoading ? (
+              <div className="flex justify-center py-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent-500"></div>
+              </div>
+            ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-accent-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('serviceName')}</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('price')}</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('duration')}</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('status')}</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('actions')}</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {services.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
+                        <p className="text-sm">{t('noServices') || 'No services found. Add your first service to get started.'}</p>
+                      </td>
+                    </tr>
+                  ) : (
+                  services.map((service) => (
+                    <tr key={service.id}>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm font-medium text-gray-900">{service.name}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-900">
+                          {service.priceMax != null && Number(service.priceMax) > Number(service.price)
+                            ? formatPriceRange(Number(service.price), Number(service.priceMax))
+                            : formatPrice(Number(service.price || 0))}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-900">{service.duration} {t('minutes')}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                          service.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                        }`}>
+                          {service.isActive ? t('active') : t('inactive')}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
+                        <button 
+                          onClick={() => {
+                            setEditingService(service);
+                            setEditServiceData({
+                              name: service.name,
+                              price: service.price.toString(),
+                              priceMax: service.priceMax != null ? service.priceMax.toString() : '',
+                              duration: service.duration.toString(),
+                              maxBookingsPerCustomerPerDay: (service.maxBookingsPerCustomerPerDay || 1).toString(),
+                              maxBookingsPerCustomerPerWeek: service.maxBookingsPerCustomerPerWeek?.toString() || '',
+                              bookingCooldownHours: (service.bookingCooldownHours || 0).toString(),
+                              allowMultipleActiveBookings: service.allowMultipleActiveBookings !== false
+                            });
+                            setShowEditService(true);
+                          }}
+                          className="text-indigo-600 hover:text-indigo-900"
+                          title={t('edit') || 'Edit'}
+                        >
+                          <Edit className="h-4 w-4" />
+                        </button>
+                        <button 
+                          onClick={() => toggleServiceStatus(service.id)}
+                          className={`${service.isActive ? 'text-red-600 hover:text-red-900' : 'text-green-600 hover:text-green-900'}`}
+                        >
+                          {service.isActive ? <XCircle className="h-4 w-4" /> : <CheckCircle className="h-4 w-4" />}
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+            )}
           </div>
-        ) : (
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-accent-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('serviceName')}</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('price')}</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('duration')}</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('status')}</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('actions')}</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {services.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
-                    <p className="text-sm">{t('noServices') || 'No services found. Add your first service to get started.'}</p>
-                  </td>
-                </tr>
-              ) : (
-              services.map((service) => (
-                <tr key={service.id}>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-medium text-gray-900">{service.name}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">${service.price}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">{service.duration} {t('minutes')}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                      service.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                    }`}>
-                      {service.isActive ? t('active') : t('inactive')}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
-                    <button 
-                      onClick={() => {
-                        setEditingService(service);
-                        setEditServiceData({
-                          name: service.name,
-                          price: service.price.toString(),
-                          duration: service.duration.toString(),
-                          maxBookingsPerCustomerPerDay: (service.maxBookingsPerCustomerPerDay || 1).toString(),
-                          maxBookingsPerCustomerPerWeek: service.maxBookingsPerCustomerPerWeek?.toString() || '',
-                          bookingCooldownHours: (service.bookingCooldownHours || 0).toString(),
-                          allowMultipleActiveBookings: service.allowMultipleActiveBookings !== false
-                        });
-                        setShowEditService(true);
-                      }}
-                      className="text-indigo-600 hover:text-indigo-900"
-                      title={t('edit') || 'Edit'}
-                    >
-                      <Edit className="h-4 w-4" />
-                    </button>
-                    <button 
-                      onClick={() => toggleServiceStatus(service.id)}
-                      className={`${service.isActive ? 'text-red-600 hover:text-red-900' : 'text-green-600 hover:text-green-900'}`}
-                    >
-                      {service.isActive ? <XCircle className="h-4 w-4" /> : <CheckCircle className="h-4 w-4" />}
-                    </button>
-                  </td>
-                </tr>
-              ))
-              )}
-            </tbody>
-          </table>
         </div>
-        )}
       </div>
       )}
 
-      {/* Waitlist Management - Only for business owners */}
-      {!isStaff && waitlist.length > 0 && (
-        <div className="card p-6">
+        {/* Team Management - Only for business owners */}
+        {!isStaff && (
+        <div id="team" className="mb-6 overflow-hidden rounded-lg border border-gray-200 bg-white">
+          <button
+            type="button"
+            onClick={() => setTeamSectionOpen((o) => !o)}
+            className="flex w-full items-center justify-between px-5 py-5 text-left transition-colors hover:bg-gray-50"
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex items-center justify-center rounded-lg bg-[#fee2e2] p-2">
+                <Users className="h-5 w-5 text-[#dc2626]" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900">{t('teamManagement') || 'Team Management'}</h3>
+            </div>
+            <ChevronDown className={`h-5 w-5 shrink-0 text-gray-400 transition-transform duration-200 ${teamSectionOpen ? 'rotate-180' : ''}`} />
+          </button>
+          <div className={`overflow-hidden transition-all duration-300 ${teamSectionOpen ? 'max-h-[2000px]' : 'max-h-0'}`}>
+            <div className="border-t border-gray-200 px-5 pb-6 pt-4">
+              {(myBusiness?.id ?? (myBusiness as any)?.data?.id) ? (
+                <TeamManagementSection businessId={String(myBusiness?.id ?? (myBusiness as any)?.data?.id)} />
+              ) : (
+                <div className="flex justify-center py-6">
+                  <div className="animate-spin rounded-full h-6 w-6 border-2 border-[#dc2626] border-t-transparent" />
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+        )}
+
+        {/* Waitlist Management - Only for business owners */}
+        {!isStaff && waitlist.length > 0 && (
+        <div className="mb-6 rounded-lg border border-gray-200 bg-white p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
               <Clock className="h-5 w-5 text-accent-600" />
@@ -578,57 +782,52 @@ export const BusinessDashboard: React.FC = () => {
             )}
           </div>
         </div>
-      )}
+        )}
 
-      {/* Recent Bookings */}
-      <div className="card p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-gray-900">{t('bookings')}</h3>
-          {/* Booking Filter Tabs */}
-          <div className="flex gap-2">
-            <button
-              onClick={() => setBookingFilter('all')}
-              className={`px-3 py-1 text-sm rounded-lg transition-colors ${
-                bookingFilter === 'all'
-                  ? 'bg-accent-500 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              {t('all') || 'All'}
-            </button>
-            <button
-              onClick={() => setBookingFilter('upcoming')}
-              className={`px-3 py-1 text-sm rounded-lg transition-colors ${
-                bookingFilter === 'upcoming'
-                  ? 'bg-accent-500 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              {t('upcoming') || 'Upcoming'}
-            </button>
-            <button
-              onClick={() => setBookingFilter('pending')}
-              className={`px-3 py-1 text-sm rounded-lg transition-colors ${
-                bookingFilter === 'pending'
-                  ? 'bg-accent-500 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              {t('pending') || 'Pending'}
-            </button>
-            <button
-              onClick={() => setBookingFilter('done')}
-              className={`px-3 py-1 text-sm rounded-lg transition-colors ${
-                bookingFilter === 'done'
-                  ? 'bg-accent-500 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              {t('done') || 'Done'}
-            </button>
-          </div>
-        </div>
-        <div className="overflow-x-auto">
+        {/* Bookings section */}
+        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+          <button
+            type="button"
+            onClick={() => setBookingsSectionOpen((o) => !o)}
+            className="flex w-full items-center justify-between px-5 py-5 text-left transition-colors hover:bg-gray-50"
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex items-center justify-center rounded-lg bg-[#fee2e2] p-2">
+                <Calendar className="h-5 w-5 text-[#dc2626]" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900">{t('bookings')}</h3>
+            </div>
+            <ChevronDown className={`h-5 w-5 shrink-0 text-gray-400 transition-transform duration-200 ${bookingsSectionOpen ? 'rotate-180' : ''}`} />
+          </button>
+          <div className={`overflow-hidden transition-all duration-300 ${bookingsSectionOpen ? 'max-h-[9999px]' : 'max-h-0'}`}>
+            <div className="border-t border-gray-200 px-5 pb-6 pt-4">
+              <div className="mb-4 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => navigate('/my-bookings')}
+                  className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+                >
+                  <Calendar className="h-4 w-4" />
+                  {t('calendar') || t('bookingCalendar') || 'Calendar'}
+                </button>
+                <div className="flex gap-2">
+                  {bookingFilterOptions.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setBookingFilter(opt.value)}
+                      className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                        bookingFilter === opt.value
+                          ? 'bg-[#dc2626] text-white'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {t(opt.labelKey)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-accent-50">
               <tr>
@@ -660,13 +859,14 @@ export const BusinessDashboard: React.FC = () => {
                   });
                 }
                 
+                const filterLabel = { all: t('all'), upcoming: t('upcoming'), pending: t('pending'), done: t('filterDone') }[bookingFilter];
                 if (filteredBookings.length === 0) {
                   return (
                     <tr>
                       <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
                         {bookingFilter === 'all' 
                           ? `${t('noBookingsFound')}. ${isStaff ? t('bookingsWillAppearStaff') : t('bookingsWillAppearOwner')}`
-                          : `${t('noBookingsFound')} for ${bookingFilter} bookings.`}
+                          : `${t('noBookingsFound')} (${filterLabel}).`}
                       </td>
                     </tr>
                   );
@@ -684,7 +884,7 @@ export const BusinessDashboard: React.FC = () => {
                       <div className="text-sm text-gray-900">{new Date(booking.appointmentDate).toLocaleString()}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">${booking.totalAmount}</div>
+                      <div className="text-sm text-gray-900">{formatPrice(Number(booking.totalAmount || 0))}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
@@ -722,8 +922,13 @@ export const BusinessDashboard: React.FC = () => {
               })()}
             </tbody>
           </table>
+              </div>
+            </div>
+          </div>
         </div>
+
       </div>
+      {/* End container */}
 
       {/* Add Service Modal - Only for business owners */}
       {!isStaff && showAddService && (
@@ -737,29 +942,47 @@ export const BusinessDashboard: React.FC = () => {
                   type="text"
                   value={newService.name}
                   onChange={(e) => setNewService({...newService, name: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  className="w-full max-w-xs px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
                   placeholder="e.g., Haircut & Style"
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">{t('price')} ($)</label>
-                <input
-                  type="number"
-                  value={newService.price}
-                  onChange={(e) => setNewService({...newService, price: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  placeholder="65.00"
-                  step="0.01"
-                />
+              <div className="flex flex-row gap-4">
+                <div className="flex-1 min-w-0">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">{lang === 'ro' ? 'Preț minim' : lang === 'ru' ? 'Мин. цена' : 'Min price'} ({formatPriceTier(1)})</label>
+                  <input
+                    type="number"
+                    min={myBusiness?.businessType === 'parallel' ? 0 : 0.01}
+                    value={newService.price}
+                    onChange={(e) => setNewService({...newService, price: e.target.value})}
+                    className="w-full max-w-[120px] px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    placeholder={myBusiness?.businessType === 'parallel' ? '0' : '65.00'}
+                    step="0.01"
+                  />
+                  {myBusiness?.businessType === 'parallel' && (
+                    <p className="text-xs text-gray-500 mt-1">{t('priceFreeReservationHint')}</p>
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">{lang === 'ro' ? 'Preț maxim' : lang === 'ru' ? 'Макс. цена' : 'Max price'} ({formatPriceTier(1)})</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={newService.priceMax}
+                    onChange={(e) => setNewService({...newService, priceMax: e.target.value})}
+                    className="w-full max-w-[120px] px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    placeholder={lang === 'ro' ? 'Lăsați gol pentru preț fix' : lang === 'ru' ? 'Оставьте пустым для фикс. цены' : 'Leave empty for fixed price'}
+                  />
+                </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">{t('duration')}</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{myBusiness?.businessType === 'parallel' ? (t('slotDuration') || 'Slot duration (minutes)') : t('duration')}</label>
                 <input
                   type="number"
                   value={newService.duration}
                   onChange={(e) => setNewService({...newService, duration: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  placeholder="60"
+                  className="w-full max-w-[100px] px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  placeholder={myBusiness?.businessType === 'parallel' ? '90' : '60'}
                 />
               </div>
             </div>
@@ -793,28 +1016,46 @@ export const BusinessDashboard: React.FC = () => {
                   type="text"
                   value={editServiceData.name}
                   onChange={(e) => setEditServiceData({...editServiceData, name: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  className="w-full max-w-xs px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
                   placeholder="e.g., Haircut & Style"
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">{t('price')} ($)</label>
-                <input
-                  type="number"
-                  value={editServiceData.price}
-                  onChange={(e) => setEditServiceData({...editServiceData, price: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  placeholder="65.00"
-                  step="0.01"
-                />
+              <div className="flex flex-row gap-4">
+                <div className="flex-1 min-w-0">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">{lang === 'ro' ? 'Preț minim' : lang === 'ru' ? 'Мин. цена' : 'Min price'} ({formatPriceTier(1)})</label>
+                  <input
+                    type="number"
+                    min={myBusiness?.businessType === 'parallel' ? 0 : 0.01}
+                    value={editServiceData.price}
+                    onChange={(e) => setEditServiceData({...editServiceData, price: e.target.value})}
+                    className="w-full max-w-[120px] px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    placeholder={myBusiness?.businessType === 'parallel' ? '0' : '65.00'}
+                    step="0.01"
+                  />
+                  {myBusiness?.businessType === 'parallel' && (
+                    <p className="text-xs text-gray-500 mt-1">{t('priceFreeReservationHint')}</p>
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">{lang === 'ro' ? 'Preț maxim' : lang === 'ru' ? 'Макс. цена' : 'Max price'} ({formatPriceTier(1)})</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={editServiceData.priceMax}
+                    onChange={(e) => setEditServiceData({...editServiceData, priceMax: e.target.value})}
+                    className="w-full max-w-[120px] px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    placeholder={lang === 'ro' ? 'Lăsați gol pentru preț fix' : lang === 'ru' ? 'Оставьте пустым для фикс. цены' : 'Leave empty for fixed price'}
+                  />
+                </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">{t('duration')} ({t('minutes') || 'minutes'})</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{myBusiness?.businessType === 'parallel' ? (t('slotDuration') || 'Slot duration (minutes)') : `${t('duration')} (${t('minutes') || 'minutes'})`}</label>
                 <input
                   type="number"
                   value={editServiceData.duration}
                   onChange={(e) => setEditServiceData({...editServiceData, duration: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  className="w-full max-w-[100px] px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
                   placeholder="60"
                 />
               </div>
@@ -891,6 +1132,7 @@ export const BusinessDashboard: React.FC = () => {
                   setEditServiceData({ 
                     name: '', 
                     price: '', 
+                    priceMax: '',
                     duration: '',
                     maxBookingsPerCustomerPerDay: '1',
                     maxBookingsPerCustomerPerWeek: '',

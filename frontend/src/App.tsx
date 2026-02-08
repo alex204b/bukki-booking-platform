@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from 'react-query';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider } from './contexts/AuthContext';
 import { I18nProvider } from './contexts/I18nContext';
+import { CurrencyProvider } from './contexts/CurrencyContext';
 import { SocketProvider } from './contexts/SocketContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import MotifBackground from './components/MotifBackground';
@@ -17,7 +18,6 @@ import { EmailVerification } from './pages/EmailVerification';
 import { ForgotPassword } from './pages/ForgotPassword';
 import { VerifyResetCode } from './pages/VerifyResetCode';
 import { ResetPassword } from './pages/ResetPassword';
-import { BusinessList } from './pages/BusinessList';
 import { BusinessDetails } from './pages/BusinessDetails';
 import { BookingForm } from './pages/BookingForm';
 import { MyBookings } from './pages/MyBookings';
@@ -38,6 +38,7 @@ import InfoPage from './pages/InfoPage';
 import { TermsOfService } from './pages/TermsOfService';
 import { PrivacyPolicy } from './pages/PrivacyPolicy';
 import ResponsiveExample from './components/ResponsiveExample';
+import { AndroidBackHandler } from './components/AndroidBackHandler';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -56,13 +57,54 @@ const queryClient = new QueryClient({
 });
 
 function App() {
+  // Lock screen orientation to portrait
+  useEffect(() => {
+    const lockOrientation = async () => {
+      try {
+        // Check if Screen Orientation API is available
+        if ('screen' in window && 'orientation' in window.screen) {
+          const screen = window.screen as any;
+          if (screen.orientation && screen.orientation.lock) {
+            try {
+              await screen.orientation.lock('portrait');
+              console.log('[App] Screen orientation locked to portrait');
+            } catch (err: any) {
+              // Lock may fail if not in fullscreen or if user has denied permission
+              console.log('[App] Could not lock orientation (may require user gesture or fullscreen):', err.message);
+            }
+          }
+        }
+        
+        // Fallback: Listen for orientation changes and prevent landscape
+        const handleOrientationChange = () => {
+          if (window.orientation === 90 || window.orientation === -90) {
+            // Device is in landscape, show message or prevent it
+            console.log('[App] Device rotated to landscape - orientation should be locked');
+          }
+        };
+        
+        window.addEventListener('orientationchange', handleOrientationChange);
+        
+        return () => {
+          window.removeEventListener('orientationchange', handleOrientationChange);
+        };
+      } catch (error) {
+        console.log('[App] Orientation lock not supported:', error);
+      }
+    };
+
+    lockOrientation();
+  }, []);
+
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <I18nProvider>
+          <CurrencyProvider>
           <AuthProvider>
             <SocketProvider>
               <Router>
+          <AndroidBackHandler />
           <div className="min-h-screen bg-white">
             <MotifBackground density="low" />
             <DecorativeBackground 
@@ -105,14 +147,6 @@ function App() {
                 <ProtectedRoute>
                   <Layout>
                     <Home />
-                  </Layout>
-                </ProtectedRoute>
-              } />
-              
-              <Route path="/businesses" element={
-                <ProtectedRoute>
-                  <Layout>
-                    <BusinessList />
                   </Layout>
                 </ProtectedRoute>
               } />
@@ -295,6 +329,7 @@ function App() {
               </Router>
             </SocketProvider>
           </AuthProvider>
+          </CurrencyProvider>
         </I18nProvider>
       </QueryClientProvider>
     </ErrorBoundary>

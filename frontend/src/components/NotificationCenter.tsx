@@ -247,8 +247,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({ onClose 
                     // Get business ID from notification (could be businessId or business.id)
                     const businessId = notification.businessId || notification.business?.id;
                     
-                    // If it's a chat message, navigate to the conversation
-                    // MessageType.CHAT is 'chat' (lowercase) in the backend
+                    // If it's a chat message, navigate to the conversation (Messages/Chat area)
                     if ((notification.type === 'chat' || notification.type === 'CHAT') && businessId) {
                       if (notification.status === 'unread') {
                         markAsReadMutation.mutate(notification.id);
@@ -258,23 +257,23 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({ onClose 
                       return;
                     }
                     
-                    // If it's a team invitation, navigate to invitations tab
+                    // If it's a team invitation, navigate to messages area (chat-list) with invitations tab
                     if (notification.type === 'team_invitation' || notification.type === 'TEAM_INVITATION') {
                       if (notification.status === 'unread') {
                         markAsReadMutation.mutate(notification.id);
                       }
                       onClose();
-                      navigate('/chat?tab=invitations');
+                      navigate('/chat-list?tab=invitations');
                       return;
                     }
                     
-                    // If it's a promotional offer, navigate to offers tab
+                    // If it's a promotional offer, navigate to messages area with offers tab
                     if (notification.type === 'promotional_offer' || notification.type === 'PROMOTIONAL_OFFER') {
                       if (notification.status === 'unread') {
                         markAsReadMutation.mutate(notification.id);
                       }
                       onClose();
-                      navigate('/chat?tab=offers');
+                      navigate('/chat-list?tab=offers');
                       return;
                     }
                     
@@ -376,7 +375,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({ onClose 
                           <h3 className="font-semibold text-gray-900">
                             {getNotificationTitle(notification)}
                           </h3>
-                          <p className="text-sm text-gray-600 mt-1 line-clamp-2">
+                          <p className="text-sm text-gray-600 mt-1 line-clamp-4 whitespace-pre-line">
                             {notification.content || notification.body || notification.message}
                           </p>
                           <p className="text-xs text-gray-500 mt-2">

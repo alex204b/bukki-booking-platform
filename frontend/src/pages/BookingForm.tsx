@@ -29,6 +29,7 @@ export const BookingForm: React.FC = () => {
   const [showWaitlist, setShowWaitlist] = useState(false);
   const [waitlistNotes, setWaitlistNotes] = useState('');
   const [joiningWaitlist, setJoiningWaitlist] = useState(false);
+  const [partySize, setPartySize] = useState<number>(2);
 
   const { data: service, isLoading } = useQuery(
     ['service', serviceId],
@@ -40,13 +41,15 @@ export const BookingForm: React.FC = () => {
   );
 
   const { data: availableSlots } = useQuery(
-    ['available-slots', serviceId, selectedDate],
-    () => serviceService.getAvailableSlots(serviceId!, selectedDate),
+    ['available-slots', serviceId, selectedDate, partySize],
+    () => serviceService.getAvailableSlots(serviceId!, selectedDate, partySize),
     {
       enabled: !!serviceId && !!selectedDate,
       select: (response) => response.data,
     }
   );
+
+  const isTableService = service?.resourceType === 'table' || service?.resourceType === 'TABLE';
 
   // Build a quick availability map for the selected date - only show available slots
   const buildSchedule = () => {
@@ -78,6 +81,10 @@ export const BookingForm: React.FC = () => {
       toast.error(t('pleaseSelectDateAndTime'));
       return;
     }
+    if (isTableService && (!partySize || partySize < 1)) {
+      toast.error(t('pleaseEnterPartySize') || 'Please enter the number of guests');
+      return;
+    }
 
     setLoading(true);
     
@@ -99,6 +106,7 @@ export const BookingForm: React.FC = () => {
         serviceId,
         appointmentDate: appointmentDateTime.toISOString(),
         notes,
+        partySize: isTableService ? partySize : undefined,
         customFieldValues: Object.keys(customFieldValues).length > 0 ? customFieldValues : undefined,
         isRecurring,
         recurrencePattern: isRecurring ? recurrencePattern : undefined,
@@ -109,7 +117,7 @@ export const BookingForm: React.FC = () => {
       queryClient.invalidateQueries('my-bookings');
       
       // Invalidate available slots cache to refresh the UI
-      queryClient.invalidateQueries(['available-slots', serviceId, selectedDate]);
+      queryClient.invalidateQueries(['available-slots', serviceId, selectedDate, partySize]);
 
       // Handle recurring bookings (array) or single booking
       const booking = Array.isArray(response.data) ? response.data[0] : response.data;
@@ -190,6 +198,23 @@ export const BookingForm: React.FC = () => {
       {/* Booking Form */}
       <form onSubmit={handleSubmit} className="card p-6 space-y-6">
         <h3 className="text-lg font-semibold text-gray-900">{t('selectDateAndTime')}</h3>
+
+        {isTableService && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              {t('partySize') || 'Number of guests'} *
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={50}
+              value={partySize}
+              onChange={(e) => setPartySize(Math.max(1, parseInt(e.target.value, 10) || 1))}
+              className="input"
+              required
+            />
+          </div>
+        )}
         
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">

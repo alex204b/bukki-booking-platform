@@ -8,22 +8,23 @@ import { Service } from '../services/entities/service.entity';
 import { Business } from '../businesses/entities/business.entity';
 import { BusinessMember } from '../businesses/entities/business-member.entity';
 import { User } from '../users/entities/user.entity';
+import { Resource } from '../resources/entities/resource.entity';
 import { ReviewsModule } from '../reviews/reviews.module';
 import { UsersModule } from '../users/users.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { MessagesModule } from '../messages/messages.module';
-import { EmailService } from '../common/services/email.service';
+// EmailService is provided globally by CommonModule - no need to import or provide it here
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Booking, Service, Business, BusinessMember, User]),
+    TypeOrmModule.forFeature([Booking, Service, Business, BusinessMember, User, Resource]),
     ReviewsModule,
     UsersModule,
     NotificationsModule,
     MessagesModule,
   ],
   controllers: [BookingsController],
-  providers: [BookingsService, BookingsScheduler, EmailService],
+  providers: [BookingsService, BookingsScheduler],
   exports: [BookingsService],
 })
 export class BookingsModule {}

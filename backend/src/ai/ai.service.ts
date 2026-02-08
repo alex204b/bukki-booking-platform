@@ -9,34 +9,19 @@ export class AIService {
   private readonly useAI: boolean;
 
   constructor(private configService: ConfigService) {
-    // Try multiple free AI options - check both ConfigService and process.env as fallback
     const geminiKey = this.configService.get<string>('GEMINI_API_KEY') || process.env.GEMINI_API_KEY;
     const hfKey = this.configService.get<string>('HUGGINGFACE_API_KEY') || process.env.HUGGINGFACE_API_KEY;
-    
-    // Debug logging to help troubleshoot
-    this.logger.log(`[AIService] Checking for API keys...`);
-    this.logger.log(`[AIService] GEMINI_API_KEY from ConfigService: ${!!this.configService.get<string>('GEMINI_API_KEY')}`);
-    this.logger.log(`[AIService] GEMINI_API_KEY from process.env: ${!!process.env.GEMINI_API_KEY}`);
-    this.logger.log(`[AIService] Final geminiKey exists: ${!!geminiKey}`);
-    this.logger.log(`[AIService] Final hfKey exists: ${!!hfKey}`);
-    
-    if (geminiKey) {
-      this.logger.log(`[AIService] GEMINI_API_KEY length: ${geminiKey.length}`);
-      this.logger.log(`[AIService] GEMINI_API_KEY starts with: ${geminiKey.substring(0, 10)}...`);
-    }
-    
+
     this.apiKey = geminiKey || hfKey || '';
     this.useAI = !!this.apiKey;
-    
+
     if (!this.useAI) {
-      this.logger.warn('⚠️ No AI API key found. Please add GEMINI_API_KEY (recommended) or HUGGINGFACE_API_KEY to your .env file. Only ONE is needed.');
-      this.logger.warn('⚠️ Make sure the .env file is in the backend/ directory and restart the server after adding the key.');
+      this.logger.warn('⚠️ No AI API key found. Add GEMINI_API_KEY or HUGGINGFACE_API_KEY (for Moldova) to .env');
     } else {
-      if (geminiKey) {
-        this.logger.log('✅ Using Google Gemini API for AI features');
-      } else if (hfKey) {
-        this.logger.log('✅ Using Hugging Face API for AI features');
-      }
+      const provider = (this.configService.get<string>('AI_PROVIDER') || process.env.AI_PROVIDER || 'auto').toLowerCase();
+      this.logger.log(`✅ AI enabled. Provider: ${provider}`);
+      if (geminiKey) this.logger.log('   - Gemini (Google) available');
+      if (hfKey) this.logger.log('   - Hugging Face available (works in Moldova)');
     }
   }
 
@@ -58,30 +43,37 @@ export class AIService {
     };
   }> {
     if (!this.useAI) {
-      throw new Error('AI service is not configured. Please add GEMINI_API_KEY (recommended) or HUGGINGFACE_API_KEY to your .env file. Only ONE is needed.');
+      throw new Error('AI service is not configured. Add GEMINI_API_KEY or HUGGINGFACE_API_KEY (for Moldova) to .env');
     }
 
-    try {
-      // Try Gemini first (free tier, no credit card) - only ONE API key is needed
-      const geminiKey = this.configService.get<string>('GEMINI_API_KEY');
-      if (geminiKey) {
-        this.logger.debug('Using Gemini API for query parsing');
-        return await this.parseWithGemini(userQuery);
+    const provider = (this.configService.get<string>('AI_PROVIDER') || process.env.AI_PROVIDER || 'auto').toLowerCase();
+    const geminiKey = this.configService.get<string>('GEMINI_API_KEY');
+    const hfKey = this.configService.get<string>('HUGGINGFACE_API_KEY');
+
+    const tryOrder: Array<'gemini' | 'huggingface'> =
+      provider === 'huggingface' ? ['huggingface'] :
+      provider === 'gemini' ? ['gemini'] :
+      ['gemini', 'huggingface'];
+
+    let lastError: any = null;
+    for (const p of tryOrder) {
+      try {
+        if (p === 'gemini' && geminiKey) {
+          this.logger.debug('[parseQuery] Trying Gemini...');
+          return await this.parseWithGemini(userQuery);
+        }
+        if (p === 'huggingface' && hfKey) {
+          this.logger.debug('[parseQuery] Trying Hugging Face...');
+          return await this.parseWithHuggingFace(userQuery);
+        }
+      } catch (err: any) {
+        lastError = err;
+        this.logger.warn(`[parseQuery] ${p} failed: ${err.message}. Trying next provider...`);
       }
-      
-      // Fallback to Hugging Face (only if Gemini is not configured)
-      const hfKey = this.configService.get<string>('HUGGINGFACE_API_KEY');
-      if (hfKey) {
-        this.logger.debug('Using Hugging Face API for query parsing');
-        return await this.parseWithHuggingFace(userQuery);
-      }
-      
-      // This should never happen if useAI is true, but just in case
-      throw new Error('No AI API key configured. Please add GEMINI_API_KEY (recommended) or HUGGINGFACE_API_KEY to your .env file. Only ONE is needed.');
-    } catch (error: any) {
-      this.logger.error('AI parsing failed:', error.message);
-      throw error; // Don't fallback, let the error propagate
     }
+
+    this.logger.error('All AI providers failed:', lastError?.message);
+    throw lastError || new Error('No AI provider could parse the query');
   }
 
   /**
@@ -389,10 +381,13 @@ Return the JSON now:`;
   }
 
   /**
-   * Parse using Hugging Face Inference API (free tier)
+   * Parse using Hugging Face Inference API (free tier, works in Moldova)
    * Optimized prompt for smaller models
    */
   private async parseWithHuggingFace(query: string) {
+    const hfKey = this.configService.get<string>('HUGGINGFACE_API_KEY');
+    if (!hfKey) throw new Error('HUGGINGFACE_API_KEY is not configured');
+
     const prompt = `Parse booking query: "${query}"
 
 Extract:
@@ -422,7 +417,7 @@ Now parse: "${query}"`;
         },
         {
           headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
+            'Authorization': `Bearer ${hfKey}`,
             'Content-Type': 'application/json',
           },
           timeout: 15000,

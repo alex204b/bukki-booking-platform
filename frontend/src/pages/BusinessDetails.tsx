@@ -32,6 +32,8 @@ export const BusinessDetails: React.FC = () => {
     {
       enabled: !!id,
       select: (response) => response.data,
+      staleTime: 0,
+      refetchOnMount: 'always',
     }
   );
 
@@ -87,7 +89,7 @@ export const BusinessDetails: React.FC = () => {
             <h1 className="text-2xl font-bold text-gray-900 mb-4">{t('businessNotFound')}</h1>
             <p className="text-gray-600 mb-8">{t('businessDoesNotExist')}</p>
             <Link 
-              to="/businesses"
+              to="/"
               className="inline-flex items-center gap-2 px-4 py-2 text-white bg-[#E7001E] rounded-md hover:bg-[#c50018] transition-colors"
             >
               {t('backToBusinesses')}
@@ -118,7 +120,7 @@ export const BusinessDetails: React.FC = () => {
         {/* Header */}
         <div className="mb-8">
           <div className="flex items-center gap-2 text-sm text-gray-600 mb-2">
-                <Link to="/businesses" className="hover:text-accent-600">Businesses</Link>
+                <Link to="/" className="hover:text-accent-600">Businesses</Link>
             <span>/</span>
             <span className="text-gray-900">{business.name}</span>
           </div>
@@ -265,7 +267,36 @@ export const BusinessDetails: React.FC = () => {
                 ) : (
                   <div className="text-center py-8 text-gray-500">
                     <Calendar className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-                    <p>No services available at this time.</p>
+                    <p className="mb-4">No services available at this time.</p>
+                    {isBusinessApproved && (
+                      <p className="text-sm mb-4">
+                        {['restaurant', 'restaurants', 'food'].some(c => 
+                          (business.category || '').toLowerCase().includes(c)
+                        )
+                          ? (t('contactToReserveTable') || 'Contact the business to reserve a table.')
+                          : (t('contactForBooking') || 'Contact the business to inquire about booking.')}
+                      </p>
+                    )}
+                    {isBusinessApproved && (
+                      <div className="flex flex-wrap justify-center gap-3">
+                        {business.phone && (
+                          <a
+                            href={`tel:${business.phone}`}
+                            className="inline-flex items-center gap-2 px-4 py-2 text-white bg-[#E7001E] rounded-md hover:bg-[#c50018] transition-colors"
+                          >
+                            <Phone className="h-4 w-4" />
+                            {t('callToReserve') || 'Call to reserve'}
+                          </a>
+                        )}
+                        <button
+                          onClick={() => navigate(`/chat/${business.id}`)}
+                          className="inline-flex items-center gap-2 px-4 py-2 text-white bg-[#E7001E] rounded-md hover:bg-[#c50018] transition-colors"
+                        >
+                          <MessageCircle className="h-4 w-4" />
+                          {t('messageToReserve') || 'Message to reserve'}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

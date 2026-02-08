@@ -4,6 +4,7 @@ import { useQuery } from 'react-query';
 import { businessService, serviceService, aiService } from '../services/api';
 import { useNavigate } from 'react-router-dom';
 import { useI18n } from '../contexts/I18nContext';
+import { useCurrency } from '../contexts/CurrencyContext';
 import toast from 'react-hot-toast';
 
 interface AIAssistantProps {
@@ -28,6 +29,7 @@ interface BusinessRecommendation {
     name: string;
     duration: number;
     price: number;
+    priceMax?: number;
   }>;
 }
 
@@ -41,6 +43,7 @@ interface PlanStep {
 }
 
 export const AIAssistant: React.FC<AIAssistantProps> = ({ isOpen, onClose }) => {
+  const { formatPrice, formatPriceRange } = useCurrency();
   const [query, setQuery] = useState('');
   const [recommendations, setRecommendations] = useState<BusinessRecommendation[]>([]);
   const [plan, setPlan] = useState<PlanStep[]>([]);
@@ -367,7 +370,7 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({ isOpen, onClose }) => 
                       id: s.id,
                       name: s.name,
                       duration: s.duration || step.estimatedDuration || 30,
-                      price: s.price || 0,
+                      price: Number(s.price) || 0,
                     })),
                   };
                 })
@@ -454,7 +457,7 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({ isOpen, onClose }) => 
                     id: s.id,
                     name: s.name,
                     duration: s.duration || step.estimatedDuration || 30,
-                    price: s.price || 0,
+                    price: Number(s.price) || 0,
                   })),
                 };
               })
@@ -532,7 +535,7 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({ isOpen, onClose }) => 
                   id: s.id,
                   name: s.name,
                   duration: s.duration || 30,
-                  price: s.price || 0,
+                  price: Number(s.price) || 0,
                 })),
               };
             })
@@ -786,7 +789,7 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({ isOpen, onClose }) => 
                                   <div>
                                     <p className="text-sm font-semibold text-[#330007] group-hover:text-white">{service.name}</p>
                                     <p className="text-xs text-gray-600 group-hover:text-gray-100">
-                                      {service.duration} min • ${service.price.toFixed(2)}
+                                      {service.duration} min • {service.priceMax != null && Number(service.priceMax) > Number(service.price) ? formatPriceRange(Number(service.price), Number(service.priceMax)) : formatPrice(Number(service.price || 0))}
                                     </p>
                                   </div>
                                   <ExternalLink className="h-4 w-4 text-[#E7001E] group-hover:text-white opacity-0 group-hover:opacity-100 transition-all" />
@@ -873,7 +876,7 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({ isOpen, onClose }) => 
                             <div>
                               <p className="text-sm font-semibold text-[#330007] group-hover:text-white">{service.name}</p>
                               <p className="text-xs text-gray-600 group-hover:text-gray-100">
-                                {service.duration} min • ${service.price.toFixed(2)}
+                                {service.duration} min • {service.priceMax != null && Number(service.priceMax) > Number(service.price) ? formatPriceRange(Number(service.price), Number(service.priceMax)) : formatPrice(Number(service.price || 0))}
                               </p>
                             </div>
                             <ExternalLink className="h-4 w-4 text-[#E7001E] group-hover:text-white opacity-0 group-hover:opacity-100 transition-all" />

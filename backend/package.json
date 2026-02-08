@@ -22,6 +22,9 @@
     "migration:012": "ts-node src/database/scripts/apply-migration-012.ts",
     "migration:013": "ts-node src/database/scripts/apply-migration-013.ts",
     "migration:014": "ts-node src/database/scripts/apply-migration-014.ts",
+    "migration:019": "ts-node src/database/scripts/apply-migration-019.ts",
+    "migration:020": "ts-node src/database/scripts/apply-migration-020.ts",
+    "migration:all": "npm run migration:019 && npm run migration:020",
     "migrate:requests": "ts-node src/database/scripts/migrate-businesses-to-requests.ts",
     "ensure:requests-table": "ts-node src/database/scripts/ensure-requests-table.ts",
     "test:request-save": "ts-node src/database/scripts/test-request-save.ts"

@@ -7,7 +7,7 @@ import { User } from '../users/entities/user.entity';
 import { Business } from '../businesses/entities/business.entity';
 import { Service } from '../services/entities/service.entity';
 import { Booking } from '../bookings/entities/booking.entity';
-import { EmailService } from '../common/services/email.service';
+// EmailService is provided globally by CommonModule
 import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
@@ -16,7 +16,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     NotificationsModule,
   ],
   controllers: [WaitlistController],
-  providers: [WaitlistService, EmailService],
+  providers: [WaitlistService],
   exports: [WaitlistService],
 })
 export class WaitlistModule {}

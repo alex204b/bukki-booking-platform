@@ -3,6 +3,7 @@ import { useQuery } from 'react-query';
 import { api } from '../services/api';
 import { DollarSign, TrendingUp, TrendingDown } from 'lucide-react';
 import { useI18n } from '../contexts/I18nContext';
+import { useCurrency } from '../contexts/CurrencyContext';
 
 interface RevenueChartProps {
   businessId: string;
@@ -11,6 +12,7 @@ interface RevenueChartProps {
 
 export const RevenueChart: React.FC<RevenueChartProps> = ({ businessId, period = 'month' }) => {
   const { t } = useI18n();
+  const { formatPrice } = useCurrency();
 
   const { data: revenueData, isLoading } = useQuery(
     ['revenue', businessId, period],
@@ -56,7 +58,7 @@ export const RevenueChart: React.FC<RevenueChartProps> = ({ businessId, period =
         </div>
         <div className="text-right">
           <div className="text-2xl font-bold text-gray-900">
-            ${(totalRevenue / 100).toFixed(2)}
+            {formatPrice(totalRevenue / 100)}
           </div>
           {trend !== 0 && (
             <div className={`flex items-center text-sm ${trend >= 0 ? 'text-green-600' : 'text-red-600'}`}>
@@ -82,7 +84,7 @@ export const RevenueChart: React.FC<RevenueChartProps> = ({ businessId, period =
                   <div
                     className="w-full bg-primary-600 rounded-t transition-all hover:bg-primary-700"
                     style={{ height: `${height}%` }}
-                    title={`${new Date(trend.date).toLocaleDateString()}: $${(trend.revenue / 100).toFixed(2)}`}
+                    title={`${new Date(trend.date).toLocaleDateString()}: ${formatPrice(trend.revenue / 100)}`}
                   />
                   <span className="text-xs text-gray-500 transform -rotate-45 origin-top-left whitespace-nowrap">
                     {new Date(trend.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}

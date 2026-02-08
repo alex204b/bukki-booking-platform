@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery } from 'react-query';
-import { businessService } from '../services/api';
+import { businessService, api, getCurrentApiUrl } from '../services/api';
+import { useAuth } from '../contexts/AuthContext';
 import { Search, Star, Clock, Menu, ChevronLeft, ChevronRight, MapPin, Grid3x3, Layers, Map, Filter, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ListSkeleton } from '../components/LoadingSkeleton';
@@ -11,8 +12,17 @@ import { Motif } from '../components/Motif';
 import { MapView } from '../components/MapView';
 
 export const BusinessList: React.FC = () => {
+  const { user } = useAuth();
   const [searchParams] = useSearchParams();
-  const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000';
+  
+  // Get API URL from api instance (uses dynamic mobile detection)
+  const getImageApiUrl = () => {
+    try {
+      return (api as any).defaults?.baseURL || getCurrentApiUrl() || 'http://localhost:3000';
+    } catch {
+      return 'http://localhost:3000';
+    }
+  };
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedLocation, setSelectedLocation] = useState('');
@@ -96,6 +106,20 @@ export const BusinessList: React.FC = () => {
     }
   );
 
+  const shouldFetchMyBusiness = !!user && (user.role === 'business_owner' || user.role === 'employee');
+  const { data: myBusiness } = useQuery(
+    ['my-business'],
+    () => businessService.getMyBusiness().then((r) => r.data),
+    { enabled: shouldFetchMyBusiness, staleTime: 60_000 }
+  );
+
+  const listData: any[] = useMemo(() => {
+    const list = (businesses || []) as any[];
+    const excludeId = myBusiness?.id;
+    if (!excludeId) return list;
+    return list.filter((b: any) => b.id !== excludeId);
+  }, [businesses, myBusiness?.id]);
+
   const categories = [
     'beauty_salon',
     'restaurant',
@@ -141,8 +165,6 @@ export const BusinessList: React.FC = () => {
       toast.error(`${prefix}Failed to load businesses. ${detail}`);
     }
   }, [error]);
-
-  const listData: any[] = (businesses || []) as any[];
 
   // Card navigation - loops infinitely
   const handleNextCard = () => {
@@ -381,12 +403,17 @@ export const BusinessList: React.FC = () => {
                     {business.images && business.images.length > 0 ? (
                       <div className="relative h-48 bg-gray-200 overflow-hidden">
                         <img
-                          src={`${business.images[0].startsWith('http') ? '' : API_BASE_URL}${business.images[0]}`}
+                          src={(() => {
+                            const img = business.images[0];
+                            if (img.startsWith('http')) return img;
+                            const apiUrl = getImageApiUrl();
+                            const path = img.startsWith('/') ? img : `/${img}`;
+                            return `${apiUrl}${path}`;
+                          })()}
                           alt={business.name}
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                           onError={(e) => {
-                            console.error(`Failed to load business image: ${API_BASE_URL}${business.images[0]}`);
-                            e.currentTarget.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="400" height="300"%3E%3Crect fill="%23f3f4f6" width="400" height="300"/%3E%3C/svg%3E';
+                            (e.target as HTMLImageElement).style.display = 'none';
                           }}
                         />
                         <div className="absolute top-2 right-2 z-10">
@@ -508,14 +535,19 @@ export const BusinessList: React.FC = () => {
                       >
                         {/* Business Image */}
                         {business.images && business.images.length > 0 ? (
-                          <div className="relative h-[200px] bg-gray-200">
+                          <div className="relative h-[200px] bg-gray-200 overflow-hidden">
                             <img
-                              src={`${business.images[0].startsWith('http') ? '' : API_BASE_URL}${business.images[0]}`}
+                              src={(() => {
+                                const img = business.images[0];
+                                if (img.startsWith('http')) return img;
+                                const apiUrl = getImageApiUrl();
+                                const path = img.startsWith('/') ? img : `/${img}`;
+                                return `${apiUrl}${path}`;
+                              })()}
                               alt={business.name}
                               className="w-full h-full object-cover"
                               onError={(e) => {
-                                console.error(`Failed to load business image: ${API_BASE_URL}${business.images[0]}`);
-                                e.currentTarget.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="400" height="300"%3E%3Crect fill="%23f3f4f6" width="400" height="300"/%3E%3C/svg%3E';
+                                (e.target as HTMLImageElement).style.display = 'none';
                               }}
                             />
                             <div className="absolute top-3 right-3">

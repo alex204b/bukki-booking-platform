@@ -3,12 +3,12 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { PaymentsController } from './payments.controller';
 import { PaymentsService } from './payments.service';
 import { Booking } from '../bookings/entities/booking.entity';
-import { EmailService } from '../common/services/email.service';
+// EmailService is provided globally by CommonModule
 
 @Module({
   imports: [TypeOrmModule.forFeature([Booking])],
   controllers: [PaymentsController],
-  providers: [PaymentsService, EmailService],
+  providers: [PaymentsService],
   exports: [PaymentsService],
 })
 export class PaymentsModule {}

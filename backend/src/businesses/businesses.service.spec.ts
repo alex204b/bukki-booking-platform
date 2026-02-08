@@ -214,7 +214,8 @@ describe('BusinessesService', () => {
       expect(messagesService.createTeamInvitationMessage).toHaveBeenCalledWith(
         mockUser.id,
         'business-1',
-        'invite-1'
+        'invite-1',
+        undefined
       );
     });
 
@@ -226,8 +227,18 @@ describe('BusinessesService', () => {
       ).rejects.toThrow(ForbiddenException);
     });
 
+    it('should throw BadRequestException if email not registered', async () => {
+      businessRepository.findOne.mockResolvedValue(mockBusiness);
+      userRepository.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.inviteMember('business-1', 'owner-1', 'unknown@test.com')
+      ).rejects.toThrow(BadRequestException);
+    });
+
     it('should throw BadRequestException if member already exists', async () => {
       businessRepository.findOne.mockResolvedValue(mockBusiness);
+      userRepository.findOne.mockResolvedValue(mockUser);
       businessMemberRepository.findOne.mockResolvedValue({
         id: 'existing-member',
         status: BusinessMemberStatus.ACTIVE,

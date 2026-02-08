@@ -221,7 +221,7 @@ Follow your cloud provider's documentation:
 - `STRIPE_SECRET_KEY`: Payment processing
 - `FIREBASE_*`: Push notifications
 - `GOOGLE_MAPS_API_KEY`: Geocoding
-- `OPENAI_API_KEY`: AI features
+- `GEMINI_API_KEY` or `HUGGINGFACE_API_KEY`: AI features (use Hugging Face for Moldova)
 
 Generate secure secrets:
 ```bash

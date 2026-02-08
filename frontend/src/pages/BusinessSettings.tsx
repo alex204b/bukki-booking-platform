@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
-import { businessService, serviceService } from '../services/api';
+import { businessService, serviceService, offerService } from '../services/api';
 import { useI18n } from '../contexts/I18nContext';
-import { GeometricSymbol } from '../components/GeometricSymbols';
-import { Gift, Send, Image as ImageIcon, Trash2, Upload, AlertTriangle } from 'lucide-react';
+import { useCurrency } from '../contexts/CurrencyContext';
+import { Gift, Send, Image as ImageIcon, Trash2, Upload, AlertTriangle, ChevronDown, Settings, FileText, Tag, Plus } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export const BusinessSettings: React.FC = () => {
@@ -11,6 +11,7 @@ export const BusinessSettings: React.FC = () => {
   const [maxBookings, setMaxBookings] = useState(2);
   const [isEditing, setIsEditing] = useState(false);
   const [autoAccept, setAutoAccept] = useState(false);
+  const [bookingAssignment, setBookingAssignment] = useState<'auto' | 'manual'>('auto');
   const queryClient = useQueryClient();
   const [selectedServiceId, setSelectedServiceId] = useState<string>('');
   const [serviceFields, setServiceFields] = useState<any[]>([]);
@@ -39,6 +40,12 @@ export const BusinessSettings: React.FC = () => {
   const [showUnsuspendForm, setShowUnsuspendForm] = useState(false);
   const [unsuspendReason, setUnsuspendReason] = useState('');
 
+  // Collapsible section state (match dashboard pattern)
+  const [bookingSectionOpen, setBookingSectionOpen] = useState(false);
+  const [formSectionOpen, setFormSectionOpen] = useState(false);
+  const [imageSectionOpen, setImageSectionOpen] = useState(false);
+  const [offersSectionOpen, setOffersSectionOpen] = useState(false);
+
   const { data: business, isLoading, error } = useQuery(
     'my-business',
     () => businessService.getMyBusiness(),
@@ -48,6 +55,7 @@ export const BusinessSettings: React.FC = () => {
         if (data) {
           setMaxBookings(data.maxBookingsPerUserPerDay || 2);
           setAutoAccept(!!data.autoAcceptBookings);
+          setBookingAssignment(data.bookingAssignment === 'manual' ? 'manual' : 'auto');
 
           // Populate business info
           setBusinessInfo({
@@ -180,7 +188,7 @@ export const BusinessSettings: React.FC = () => {
   };
 
   const updateSettingsMutation = useMutation(
-    (data: { maxBookingsPerUserPerDay: number; autoAcceptBookings: boolean }) =>
+    (data: { maxBookingsPerUserPerDay: number; autoAcceptBookings: boolean; bookingAssignment?: 'auto' | 'manual' }) =>
       businessService.update(business?.id.toString() || '', data),
     {
       onSuccess: () => {
@@ -211,20 +219,24 @@ export const BusinessSettings: React.FC = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    updateSettingsMutation.mutate({ maxBookingsPerUserPerDay: maxBookings, autoAcceptBookings: autoAccept });
+    updateSettingsMutation.mutate({
+      maxBookingsPerUserPerDay: maxBookings,
+      autoAcceptBookings: autoAccept,
+      bookingAssignment,
+    });
   };
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent-500"></div>
+      <div className="bg-[#f9fafb] min-h-[50vh] flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#dc2626]"></div>
       </div>
     );
   }
 
   if (!business) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
+      <div className="bg-[#f9fafb] min-h-[50vh] flex items-center justify-center px-4">
         <div className="text-center max-w-md">
           <h2 className="text-xl font-semibold text-gray-900 mb-2">
             {t('noBusinessFound')}
@@ -243,7 +255,7 @@ export const BusinessSettings: React.FC = () => {
             </p>
             <a
               href="/business-onboarding"
-              className="btn btn-primary inline-block"
+              className="inline-block rounded-lg bg-[#dc2626] px-4 py-2 text-sm font-medium text-white hover:bg-[#b91c1c]"
             >
               Go to Business Onboarding
             </a>
@@ -254,23 +266,24 @@ export const BusinessSettings: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-background py-8 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-4xl mx-auto">
+    <div className="bg-[#f9fafb] text-gray-900">
+      <div className="w-full max-w-none px-2 sm:px-3 pt-8">
+        {/* Header - match dashboard */}
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900">{t('businessSettings')}</h1>
+          <p className="mt-2 text-sm text-gray-500">{t('manageYourBusinessSettings')}</p>
+        </div>
+
         {/* Suspension Notice */}
         {business?.status === 'suspended' && (
-          <div className="bg-red-50 border-2 border-red-300 rounded-lg p-6 mb-8">
+          <div className="mb-6 rounded-lg border-2 border-red-300 bg-red-50 p-6">
             <div className="flex items-center gap-3 mb-4">
-              <AlertTriangle className="h-6 w-6 text-red-600" />
+              <AlertTriangle className="h-6 w-6 text-red-600 shrink-0" />
               <div>
-                <h2 className="text-xl font-bold text-red-900">
-                  Business Suspended
-                </h2>
-                <p className="text-sm text-red-700 mt-1">
-                  Your business is currently suspended and not visible to customers
-                </p>
+                <h2 className="text-xl font-bold text-red-900">Business Suspended</h2>
+                <p className="text-sm text-red-700 mt-1">Your business is currently suspended and not visible to customers</p>
               </div>
             </div>
-
             {business?.unsuspensionRequestedAt ? (
               <div className="space-y-3">
                 <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded">
@@ -279,67 +292,40 @@ export const BusinessSettings: React.FC = () => {
                     You submitted an unsuspension request on {new Date(business.unsuspensionRequestedAt).toLocaleDateString()} at {new Date(business.unsuspensionRequestedAt).toLocaleTimeString()}.
                   </p>
                   {business.unsuspensionRequestReason && (
-                    <p className="text-yellow-700 text-sm mt-2">
-                      <strong>Your reason:</strong> {business.unsuspensionRequestReason}
-                    </p>
+                    <p className="text-yellow-700 text-sm mt-2"><strong>Your reason:</strong> {business.unsuspensionRequestReason}</p>
                   )}
-                  <p className="text-yellow-700 text-sm mt-2">
-                    An admin will review your request shortly. You can submit a new request after 24 hours.
-                  </p>
+                  <p className="text-yellow-700 text-sm mt-2">An admin will review your request shortly. You can submit a new request after 24 hours.</p>
                 </div>
               </div>
             ) : !showUnsuspendForm ? (
               <div className="space-y-3">
-                <p className="text-gray-700">
-                  If you believe this suspension was made in error or you have resolved
-                  the issues, you can request unsuspension.
-                </p>
-                <button
-                  onClick={() => setShowUnsuspendForm(true)}
-                  className="btn btn-primary"
-                >
+                <p className="text-gray-700">If you believe this suspension was made in error or you have resolved the issues, you can request unsuspension.</p>
+                <button onClick={() => setShowUnsuspendForm(true)} className="rounded-lg bg-[#dc2626] px-4 py-2 text-sm font-medium text-white hover:bg-[#b91c1c]">
                   Request Unsuspension
                 </button>
               </div>
             ) : (
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Reason for Unsuspension Request <span className="text-red-500">*</span>
-                  </label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Reason for Unsuspension Request <span className="text-red-500">*</span></label>
                   <textarea
                     value={unsuspendReason}
                     onChange={(e) => setUnsuspendReason(e.target.value)}
                     rows={4}
                     placeholder="Please explain why your business should be unsuspended..."
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
                   />
-                  <p className="text-sm text-gray-500 mt-1">
-                    Be specific about what steps you've taken to address the suspension reason
-                  </p>
+                  <p className="text-sm text-gray-500 mt-1">Be specific about what steps you've taken to address the suspension reason</p>
                 </div>
-
                 <div className="flex gap-2">
                   <button
-                    onClick={() => {
-                      if (!unsuspendReason.trim()) {
-                        toast.error('Please provide a reason for unsuspension');
-                        return;
-                      }
-                      requestUnsuspensionMutation.mutate(unsuspendReason);
-                    }}
+                    onClick={() => { if (!unsuspendReason.trim()) { toast.error('Please provide a reason for unsuspension'); return; } requestUnsuspensionMutation.mutate(unsuspendReason); }}
                     disabled={!unsuspendReason.trim() || requestUnsuspensionMutation.isLoading}
-                    className="btn btn-primary disabled:opacity-50"
+                    className="rounded-lg bg-[#dc2626] px-4 py-2 text-sm font-medium text-white hover:bg-[#b91c1c] disabled:opacity-50"
                   >
                     {requestUnsuspensionMutation.isLoading ? 'Submitting...' : 'Submit Request'}
                   </button>
-                  <button
-                    onClick={() => {
-                      setShowUnsuspendForm(false);
-                      setUnsuspendReason('');
-                    }}
-                    className="btn btn-outline"
-                  >
+                  <button onClick={() => { setShowUnsuspendForm(false); setUnsuspendReason(''); }} className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
                     Cancel
                   </button>
                 </div>
@@ -348,129 +334,126 @@ export const BusinessSettings: React.FC = () => {
           </div>
         )}
 
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
-            {t('businessSettings')}
-          </h1>
-          <p className="text-gray-600">{t('manageYourBusinessSettings')}</p>
-        </div>
-
-        <div className="bg-white rounded-lg shadow-sm border p-6 relative">
-          <div className="absolute top-4 right-4 opacity-10">
-            <GeometricSymbol variant="sun" size={40} strokeWidth={4} color="#f97316" />
-          </div>
-
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-semibold text-gray-900">
-              {t('bookingLimits')}
-            </h2>
-            {!isEditing ? (
-              <button
-                onClick={() => setIsEditing(true)}
-                className="btn btn-outline btn-sm"
-              >
-                {t('edit')}
-              </button>
-            ) : (
-              <div className="flex space-x-2">
-                <button
-                  onClick={() => {
-                    setIsEditing(false);
-                    setMaxBookings(business.maxBookingsPerUserPerDay);
-                  }}
-                  className="btn btn-ghost btn-sm"
-                >
-                  {t('cancel')}
-                </button>
-                <button
-                  onClick={handleSubmit}
-                  disabled={updateSettingsMutation.isLoading}
-                  className="btn btn-primary btn-sm"
-                >
-                  {updateSettingsMutation.isLoading ? (
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                  ) : (
-                    t('save')
-                  )}
-                </button>
+        {/* Booking Limits - collapsible */}
+        <div className="mb-6 overflow-hidden rounded-lg border border-gray-200 bg-white">
+          <button
+            type="button"
+            onClick={() => setBookingSectionOpen((o) => !o)}
+            className="flex w-full items-center justify-between px-5 py-5 text-left transition-colors hover:bg-gray-50"
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex shrink-0 items-center justify-center rounded-lg bg-[#fee2e2] p-2">
+                <Settings className="h-5 w-5 text-[#dc2626]" />
               </div>
-            )}
-          </div>
-
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                {t('maxBookingsPerUserPerDay')}
-              </label>
-              <p className="text-sm text-gray-600 mb-4">
-                {t('maxBookingsDescription')}
-              </p>
-              {isEditing ? (
-                <input
-                  type="number"
-                  min="1"
-                  max="10"
-                  value={maxBookings}
-                  onChange={(e) => setMaxBookings(parseInt(e.target.value) || 1)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                />
-              ) : (
-                <div className="text-lg font-semibold text-gray-900">
-                  {business.maxBookingsPerUserPerDay} {t('bookingsPerDay')}
-                </div>
-              )}
+              <h3 className="text-lg font-semibold text-gray-900">{t('bookingLimits')}</h3>
             </div>
-
-            <div>
-              <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-                <input
-                  type="checkbox"
-                  checked={autoAccept}
-                  onChange={(e) => setAutoAccept(e.target.checked)}
-                  disabled={!isEditing}
-                />
-                {t('Auto accept bookings') || 'Automatically accept booking requests'}
-              </label>
-              
-            </div>
-
-            <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
-              <div className="flex">
-                <div className="flex-shrink-0">
-                  <svg className="h-5 w-5 text-blue-400" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-                  </svg>
-                </div>
-                <div className="ml-3">
-                  <h3 className="text-sm font-medium text-blue-800">
-                    {t('important')}
-                  </h3>
-                  <div className="mt-2 text-sm text-blue-700">
-                    <p>{t('bookingLimitInfo')}</p>
+            <ChevronDown className={`h-5 w-5 shrink-0 text-gray-400 transition-transform duration-200 ${bookingSectionOpen ? 'rotate-180' : ''}`} />
+          </button>
+          <div className={`overflow-hidden transition-all duration-300 ${bookingSectionOpen ? 'max-h-[2000px]' : 'max-h-0'}`}>
+            <div className="border-t border-gray-200 px-5 pb-6 pt-4">
+              <div className="flex items-center justify-between mb-4">
+                {!isEditing ? (
+                  <button onClick={() => setIsEditing(true)} className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+                    {t('edit')}
+                  </button>
+                ) : (
+                  <div className="flex gap-2">
+                    <button onClick={() => { setIsEditing(false); setMaxBookings(business.maxBookingsPerUserPerDay); }} className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+                      {t('cancel')}
+                    </button>
+                    <button onClick={handleSubmit} disabled={updateSettingsMutation.isLoading} className="rounded-lg bg-[#dc2626] px-4 py-2 text-sm font-medium text-white hover:bg-[#b91c1c] disabled:opacity-50">
+                      {updateSettingsMutation.isLoading ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /> : t('save')}
+                    </button>
                   </div>
+                )}
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">{t('maxBookingsPerUserPerDay')}</label>
+                  <p className="text-sm text-gray-600 mb-2">{t('maxBookingsDescription')}</p>
+                  {isEditing ? (
+                    <input type="number" min="1" max="10" value={maxBookings} onChange={(e) => setMaxBookings(parseInt(e.target.value) || 1)} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500" />
+                  ) : (
+                    <div className="text-lg font-semibold text-gray-900">{business.maxBookingsPerUserPerDay} {t('bookingsPerDay')}</div>
+                  )}
+                </div>
+                <div>
+                  <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                    <input type="checkbox" checked={autoAccept} onChange={(e) => setAutoAccept(e.target.checked)} disabled={!isEditing} />
+                    {t('Auto accept bookings') || 'Auto accept bookings'}
+                  </label>
+                </div>
+                {(business?.businessType === 'personal_service' || !business?.businessType) && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">{t('assignBookings') || 'Assign bookings'}</label>
+                    <div className="flex gap-4">
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="radio"
+                          name="bookingAssignment"
+                          checked={bookingAssignment === 'auto'}
+                          onChange={() => setBookingAssignment('auto')}
+                          disabled={!isEditing}
+                        />
+                        {t('assignAuto') || 'Automatically distribute'}
+                      </label>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="radio"
+                          name="bookingAssignment"
+                          checked={bookingAssignment === 'manual'}
+                          onChange={() => setBookingAssignment('manual')}
+                          disabled={!isEditing}
+                        />
+                        {t('assignManual') || 'I assign manually'}
+                      </label>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {bookingAssignment === 'auto'
+                        ? (t('assignAutoHint') || 'Bookings are distributed fairly among staff when auto-accept is on')
+                        : (t('assignManualHint') || 'You assign each booking to an employee')}
+                    </p>
+                  </div>
+                )}
+                <div className="rounded-md border border-blue-200 bg-blue-50 p-4">
+                  <h3 className="text-sm font-medium text-blue-800">{t('important')}</h3>
+                  <p className="mt-2 text-sm text-blue-700">{t('bookingLimitInfo')}</p>
                 </div>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Custom Booking Form (per service) */}
-        <div className="bg-white rounded-lg shadow-sm border p-6 mt-8">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-semibold text-gray-900">{t('bookingForm') || 'Booking Form'}</h2>
-            <div className="flex gap-2">
-              {!isEditingFields ? (
-                <button onClick={() => setIsEditingFields(true)} className="btn btn-outline btn-sm">{t('edit') || 'Edit'}</button>
-              ) : (
-                <>
-                  <button onClick={() => { const svc = (services||[]).find((s:any)=>s.id===selectedServiceId); setServiceFields(svc?.customFields||[]); setIsEditingFields(false); }} className="btn btn-ghost btn-sm">{t('cancel') || 'Cancel'}</button>
-                  <button onClick={saveFields} className="btn btn-primary btn-sm">{t('save') || 'Save'}</button>
-                </>
-              )}
+        {/* Booking Form (Custom fields) - collapsible */}
+        <div className="mb-6 overflow-hidden rounded-lg border border-gray-200 bg-white">
+          <button
+            type="button"
+            onClick={() => setFormSectionOpen((o) => !o)}
+            className="flex w-full items-center justify-between px-5 py-5 text-left transition-colors hover:bg-gray-50"
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex shrink-0 items-center justify-center rounded-lg bg-[#fee2e2] p-2">
+                <FileText className="h-5 w-5 text-[#dc2626]" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900">{t('bookingForm') || 'Booking Form'}</h3>
             </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+            <ChevronDown className={`h-5 w-5 shrink-0 text-gray-400 transition-transform duration-200 ${formSectionOpen ? 'rotate-180' : ''}`} />
+          </button>
+          <div className={`overflow-hidden transition-all duration-300 ${formSectionOpen ? 'max-h-[3000px]' : 'max-h-0'}`}>
+            <div className="border-t border-gray-200 px-5 pb-6 pt-4">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex gap-2">
+                  {!isEditingFields ? (
+                    <button onClick={() => setIsEditingFields(true)} className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">{t('edit') || 'Edit'}</button>
+                  ) : (
+                    <>
+                      <button onClick={() => { const svc = (services||[]).find((s:any)=>s.id===selectedServiceId); setServiceFields(svc?.customFields||[]); setIsEditingFields(false); }} className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">{t('cancel') || 'Cancel'}</button>
+                      <button onClick={saveFields} className="rounded-lg bg-[#dc2626] px-4 py-2 text-sm font-medium text-white hover:bg-[#b91c1c]">{t('save') || 'Save'}</button>
+                    </>
+                  )}
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
             <label className="md:col-span-2 text-sm text-gray-700">{t('serviceName') || 'Service'}</label>
             <select
               value={selectedServiceId}
@@ -567,106 +550,61 @@ export const BusinessSettings: React.FC = () => {
 
           {isEditingFields && (
             <div className="flex flex-wrap gap-2 mt-4">
-              <button className="btn btn-outline btn-sm" onClick={() => addField('text')}>{t('textField') || 'Text'}</button>
-              <button className="btn btn-outline btn-sm" onClick={() => addField('number')}>{t('numberField') || 'Number'}</button>
-              <button className="btn btn-outline btn-sm" onClick={() => addField('textarea')}>{t('textarea') || 'Textarea'}</button>
-              <button className="btn btn-outline btn-sm" onClick={() => addField('select')}>{t('selectOnboarding') || 'Select'}</button>
-              <button className="btn btn-outline btn-sm" onClick={() => addField('checkbox')}>{t('checkbox') || 'Checkbox'}</button>
+              <button className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50" onClick={() => addField('text')}>{t('textField') || 'Text'}</button>
+              <button className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50" onClick={() => addField('number')}>{t('numberField') || 'Number'}</button>
+              <button className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50" onClick={() => addField('textarea')}>{t('textarea') || 'Textarea'}</button>
+              <button className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50" onClick={() => addField('select')}>{t('selectOnboarding') || 'Select'}</button>
+              <button className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50" onClick={() => addField('checkbox')}>{t('checkbox') || 'Checkbox'}</button>
             </div>
           )}
+            </div>
+          </div>
         </div>
 
-        {/* Image Management */}
-        <ImageManagementSection businessId={business.id} />
-
-        {/* Team Management */}
-        <TeamSection businessId={business.id} />
-
-        {/* Promotional Offers */}
-        <PromotionalOffersSection businessId={business.id} />
-
-        {/* Contacts Management */}
-        <ContactsSection businessId={business.id} />
-      </div>
-    </div>
-  );
-};
-
-const TeamSection: React.FC<{ businessId: string }> = ({ businessId }) => {
-  const { t } = useI18n();
-  const queryClient = useQueryClient();
-  const [inviteEmail, setInviteEmail] = useState('');
-
-  const { data: members } = useQuery(
-    ['business-members', businessId],
-    () => businessService.listMembers(businessId),
-    { select: (res) => res.data }
-  );
-
-  const inviteMutation = useMutation(
-    (email: string) => businessService.inviteMember(businessId, email),
-    {
-      onSuccess: () => {
-        toast.success(t('inviteSent') || 'Invite sent');
-        setInviteEmail('');
-        queryClient.invalidateQueries(['business-members', businessId]);
-      },
-      onError: (e: any) => { toast.error(e.response?.data?.message || 'Failed to invite'); }
-    }
-  );
-
-  const removeMutation = useMutation(
-    (memberId: string) => businessService.removeMember(businessId, memberId),
-    {
-      onSuccess: () => {
-        toast.success(t('memberRemoved') || 'Member removed');
-        queryClient.invalidateQueries(['business-members', businessId]);
-      },
-      onError: (e: any) => { toast.error(e.response?.data?.message || 'Failed to remove member'); }
-    }
-  );
-
-  return (
-    <div className="bg-white rounded-lg shadow-sm border p-6 mt-8">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-semibold text-gray-900">{t('teamManagement') || 'Team Management'}</h2>
-      </div>
-
-      <div className="flex gap-2 mb-6">
-        <input
-          type="email"
-          value={inviteEmail}
-          onChange={(e) => setInviteEmail(e.target.value)}
-          placeholder={t('inviteEmailPlaceholder') || 'staff@email.com'}
-          className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-        />
-        <button
-          onClick={() => inviteMutation.mutate(inviteEmail)}
-          disabled={!inviteEmail || inviteMutation.isLoading}
-          className="btn btn-primary"
-        >
-          {t('invite') || 'Invite'}
-        </button>
-      </div>
-
-      <div className="divide-y border rounded">
-        {(members || []).map((m: any) => (
-          <div key={m.id} className="flex items-center justify-between p-3">
-            <div>
-              <div className="font-medium text-gray-900">{m.email}</div>
-              <div className="text-sm text-gray-500 capitalize">{m.status}</div>
+        {/* Image Management - collapsible */}
+        <div className="mb-6 overflow-hidden rounded-lg border border-gray-200 bg-white">
+          <button
+            type="button"
+            onClick={() => setImageSectionOpen((o) => !o)}
+            className="flex w-full items-center justify-between px-5 py-5 text-left transition-colors hover:bg-gray-50"
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex shrink-0 items-center justify-center rounded-lg bg-[#fee2e2] p-2">
+                <ImageIcon className="h-5 w-5 text-[#dc2626]" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900">{t('Image Management') || 'Image Management'}</h3>
             </div>
-            <button
-              onClick={() => removeMutation.mutate(m.id)}
-              className="btn btn-outline btn-sm text-red-600 border-red-600 hover:bg-red-50"
-            >
-              {t('remove') || 'Remove'}
-            </button>
+            <ChevronDown className={`h-5 w-5 shrink-0 text-gray-400 transition-transform duration-200 ${imageSectionOpen ? 'rotate-180' : ''}`} />
+          </button>
+          <div className={`overflow-hidden transition-all duration-300 ${imageSectionOpen ? 'max-h-[2000px]' : 'max-h-0'}`}>
+            <div className="border-t border-gray-200 px-5 pb-6 pt-4">
+              <ImageManagementSection businessId={business.id} />
+            </div>
           </div>
-        ))}
-        {(!members || members.length === 0) && (
-          <div className="p-4 text-gray-500">{t('noMembers') || 'No team members yet.'}</div>
-        )}
+        </div>
+
+        {/* Promotional Offers - collapsible */}
+        <div className="mb-6 overflow-hidden rounded-lg border border-gray-200 bg-white">
+          <button
+            type="button"
+            onClick={() => setOffersSectionOpen((o) => !o)}
+            className="flex w-full items-center justify-between px-5 py-5 text-left transition-colors hover:bg-gray-50"
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex shrink-0 items-center justify-center rounded-lg bg-[#fee2e2] p-2">
+                <Gift className="h-5 w-5 text-[#dc2626]" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900">Promotional Offers</h3>
+            </div>
+            <ChevronDown className={`h-5 w-5 shrink-0 text-gray-400 transition-transform duration-200 ${offersSectionOpen ? 'rotate-180' : ''}`} />
+          </button>
+          <div className={`overflow-hidden transition-all duration-300 ${offersSectionOpen ? 'max-h-[3000px]' : 'max-h-0'}`}>
+            <div className="border-t border-gray-200 px-5 pb-6 pt-4">
+              <PromotionalOffersSection businessId={business.id} />
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
   );
@@ -722,18 +660,11 @@ const ImageManagementSection: React.FC<{ businessId: string }> = ({ businessId }
   };
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border p-6 mt-8">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <ImageIcon className="h-5 w-5 text-accent-600" />
-          <h2 className="text-xl font-semibold text-gray-900">{t('imageManagement') || 'Image Management'}</h2>
-        </div>
-      </div>
-
+    <div>
       {/* Upload Section */}
       <div className="mb-6">
         <label className="block text-sm font-medium text-gray-700 mb-2">
-          {t('uploadImages') || 'Upload Images'}
+          {t('Upload Images') || 'Upload Images'}
         </label>
         <p className="text-sm text-gray-500 mb-3">
           Upload up to 10 images (max 5MB each). Supported formats: JPEG, PNG, GIF, WebP
@@ -802,9 +733,9 @@ const ImageManagementSection: React.FC<{ businessId: string }> = ({ businessId }
         ) : (
           <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
             <ImageIcon className="h-12 w-12 mx-auto mb-3 text-gray-400" />
-            <p className="text-gray-500">{t('noImages') || 'No images uploaded yet'}</p>
+            <p className="text-gray-500">{t('No images') || 'No images uploaded yet'}</p>
             <p className="text-sm text-gray-400 mt-1">
-              {t('uploadImagesToShowcase') || 'Upload images to showcase your business'}
+              {t('Upload images to showcase') || 'Upload images to showcase your business'}
             </p>
           </div>
         )}
@@ -814,19 +745,44 @@ const ImageManagementSection: React.FC<{ businessId: string }> = ({ businessId }
 };
 
 const PromotionalOffersSection: React.FC<{ businessId: string }> = ({ businessId }) => {
+  const { formatPrice } = useCurrency();
   const queryClient = useQueryClient();
-  const [showForm, setShowForm] = useState(false);
+  const [showCreateForm, setShowCreateForm] = useState(false);
   const [selectedCustomers, setSelectedCustomers] = useState<string[]>([]);
+  const [customerDropdownOpen, setCustomerDropdownOpen] = useState(false);
+  const customerDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (customerDropdownRef.current && !customerDropdownRef.current.contains(e.target as Node)) {
+        setCustomerDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
   const [subject, setSubject] = useState('');
   const [content, setContent] = useState('');
   const [offerCode, setOfferCode] = useState('');
   const [discount, setDiscount] = useState<number | ''>('');
   const [validUntil, setValidUntil] = useState('');
 
-  const { data: pastCustomers, isLoading: loadingCustomers } = useQuery(
+  const { data: businessOffers = [], isLoading: loadingOffers } = useQuery(
+    ['business-offers', businessId],
+    () => offerService.getBusinessOffers(businessId),
+    { select: (res) => res.data || [], enabled: !!businessId }
+  );
+
+  const {
+    data: pastCustomers,
+    isLoading: loadingCustomers,
+    isError: pastCustomersError,
+    error: pastCustomersErr,
+    refetch: refetchPastCustomers,
+  } = useQuery(
     ['past-customers', businessId],
     () => businessService.getPastCustomers(businessId),
-    { select: (res) => res.data || [], enabled: !!businessId }
+    { select: (res) => res.data || [], enabled: !!businessId && showCreateForm, retry: false }
   );
 
   const sendOfferMutation = useMutation(
@@ -841,7 +797,6 @@ const PromotionalOffersSection: React.FC<{ businessId: string }> = ({ businessId
     {
       onSuccess: () => {
         toast.success('Promotional offers sent successfully!');
-        setShowForm(false);
         setSelectedCustomers([]);
         setSubject('');
         setContent('');
@@ -887,68 +842,96 @@ const PromotionalOffersSection: React.FC<{ businessId: string }> = ({ businessId
     });
   };
 
-  return (
-    <div className="bg-white rounded-lg shadow-sm border p-6 mt-8">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <Gift className="h-5 w-5 text-orange-600" />
-          <h2 className="text-xl font-semibold text-gray-900">Promotional Offers</h2>
-        </div>
-        <button
-          onClick={() => setShowForm(!showForm)}
-          className="btn btn-primary btn-sm"
-        >
-          {showForm ? 'Cancel' : 'Send Offer'}
-        </button>
-      </div>
+  const currentOffers = (businessOffers as any[]).filter(
+    (o: any) => o.isActive && (!o.validUntil || new Date(o.validUntil) > new Date())
+  );
+  const previousOffers = (businessOffers as any[]).filter(
+    (o: any) => !o.isActive || (o.validUntil && new Date(o.validUntil) <= new Date())
+  );
 
-      {showForm ? (
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Select Customers ({selectedCustomers.length} selected)
-            </label>
+  if (showCreateForm) {
+    return (
+      <div className="space-y-4">
+        <div className="flex justify-between items-center">
+          <button
+            type="button"
+            onClick={() => setShowCreateForm(false)}
+            className="text-sm font-medium text-gray-600 hover:text-gray-900 flex items-center gap-2"
+          >
+            <ChevronDown className="h-4 w-4 rotate-90" /> Back to offers
+          </button>
+        </div>
+        <div ref={customerDropdownRef} className="relative">
+          <label className="block text-sm font-medium text-gray-700 mb-2">Select Customers</label>
             {loadingCustomers ? (
               <div className="text-center py-4">Loading customers...</div>
+            ) : pastCustomersError ? (
+              <div className="py-4 text-center">
+                <p className="text-sm text-red-600 mb-2">
+                  {(pastCustomersErr as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Unable to load customers.'}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => refetchPastCustomers()}
+                  className="text-sm font-medium text-[#dc2626] hover:underline"
+                >
+                  Try again
+                </button>
+              </div>
             ) : pastCustomers && pastCustomers.length > 0 ? (
-              <div className="border rounded-lg p-4 max-h-64 overflow-y-auto">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm text-gray-600">
-                    {pastCustomers.length} past customer{pastCustomers.length !== 1 ? 's' : ''}
+              <>
+                <button
+                  type="button"
+                  onClick={() => setCustomerDropdownOpen((o) => !o)}
+                  className="w-full flex items-center justify-between px-4 py-2.5 border border-gray-300 rounded-lg bg-white text-left hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[#dc2626] focus:border-transparent"
+                >
+                  <span className="text-sm text-gray-700 truncate">
+                    Select Customer{selectedCustomers.length > 0 ? ` (${selectedCustomers.length})` : ''}
                   </span>
-                  <button
-                    onClick={selectAll}
-                    className="text-sm text-accent-600 hover:text-accent-700"
-                  >
-                    {selectedCustomers.length === pastCustomers.length ? 'Deselect All' : 'Select All'}
-                  </button>
-                </div>
-                <div className="space-y-2">
-                  {pastCustomers.map((customer: any) => (
-                    <label
-                      key={customer.id}
-                      className="flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer"
-                    >
+                  <ChevronDown className={`h-4 w-4 shrink-0 text-gray-500 transition-transform ${customerDropdownOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {customerDropdownOpen && (
+                  <div className="absolute z-10 mt-1 w-full rounded-lg border border-gray-200 bg-white shadow-lg max-h-64 overflow-y-auto divide-y divide-gray-100">
+                    <label className="flex items-center gap-3 px-4 py-3 bg-gray-50 border-b border-gray-200 cursor-pointer hover:bg-gray-100">
                       <input
                         type="checkbox"
-                        checked={selectedCustomers.includes(customer.id)}
-                        onChange={() => toggleCustomer(customer.id)}
-                        className="rounded border-gray-300 text-accent-600 focus:ring-accent-500"
+                        checked={pastCustomers.length > 0 && selectedCustomers.length === pastCustomers.length}
+                        onChange={() => selectAll()}
+                        className="h-4 w-4 rounded border-gray-300 text-[#dc2626] focus:ring-[#dc2626]"
                       />
-                      <div>
-                        <div className="font-medium text-sm text-gray-900">
-                          {customer.firstName} {customer.lastName}
-                        </div>
-                        <div className="text-xs text-gray-500">{customer.email}</div>
-                      </div>
+                      <span className="text-sm font-medium text-gray-900">Select all ({pastCustomers.length} customers)</span>
                     </label>
-                  ))}
-                </div>
-              </div>
+                    {pastCustomers.map((customer: any) => (
+                      <label
+                        key={customer.id}
+                        className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedCustomers.includes(customer.id)}
+                          onChange={() => toggleCustomer(customer.id)}
+                          className="h-4 w-4 rounded border-gray-300 text-[#dc2626] focus:ring-[#dc2626] shrink-0"
+                        />
+                        <div className="min-w-0 flex-1 grid grid-cols-1 sm:grid-cols-3 gap-1 sm:gap-4">
+                          <span className="font-medium text-sm text-gray-900 truncate">
+                            {customer.firstName || '—'}
+                          </span>
+                          <span className="font-medium text-sm text-gray-900 truncate">
+                            {customer.lastName || '—'}
+                          </span>
+                          <span className="text-sm text-gray-600 truncate" title={customer.email}>
+                            {customer.email || '—'}
+                          </span>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </>
             ) : (
-              <div className="border rounded-lg p-4 text-center text-gray-500">
-                No past customers found. Customers who have completed bookings will appear here.
-              </div>
+              <p className="py-4 text-center text-sm text-gray-500">
+                No customers found. People who have made a reservation (pending, confirmed, or completed) at this business will appear here.
+              </p>
             )}
           </div>
 
@@ -1018,152 +1001,108 @@ const PromotionalOffersSection: React.FC<{ businessId: string }> = ({ businessId
             </div>
           </div>
 
-          <button
-            onClick={handleSend}
-            disabled={sendOfferMutation.isLoading || !subject || !content || selectedCustomers.length === 0}
-            className="btn btn-primary w-full"
-          >
-            {sendOfferMutation.isLoading ? (
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-            ) : (
-              <>
-                <Send className="h-4 w-4 mr-2" />
-                Send to {selectedCustomers.length} Customer{selectedCustomers.length !== 1 ? 's' : ''}
-              </>
-            )}
-          </button>
-        </div>
-      ) : (
-        <div className="text-center py-8 text-gray-500">
-          <Gift className="h-12 w-12 mx-auto mb-3 text-gray-400" />
-          <p>Send special offers to customers who have visited your business.</p>
-          <p className="text-sm mt-1">
-            {pastCustomers?.length || 0} past customer{pastCustomers?.length !== 1 ? 's' : ''} available
-          </p>
-        </div>
-      )}
-    </div>
-  );
-};
-
-const ContactsSection: React.FC<{ businessId: string }> = ({ businessId }) => {
-  const { t } = useI18n();
-  const queryClient = useQueryClient();
-  const [email, setEmail] = useState('');
-  const [name, setName] = useState('');
-  const [subject, setSubject] = useState('');
-  const [html, setHtml] = useState('');
-
-  const { data: contacts } = useQuery(
-    ['business-contacts', businessId],
-    () => businessService.listContacts(businessId),
-    { select: (res) => res.data }
-  );
-
-  const addMutation = useMutation(
-    () => businessService.addContact(businessId, email, name),
-    {
-      onSuccess: () => {
-        toast.success(t('contactAdded') || 'Contact added');
-        setEmail('');
-        setName('');
-        queryClient.invalidateQueries(['business-contacts', businessId]);
-      },
-      onError: (e: any) => { toast.error(e.response?.data?.message || 'Failed to add contact'); }
-    }
-  );
-
-  const deleteMutation = useMutation(
-    (contactId: string) => businessService.removeContact(businessId, contactId),
-    {
-      onSuccess: () => {
-        toast.success(t('contactRemoved') || 'Contact removed');
-        queryClient.invalidateQueries(['business-contacts', businessId]);
-      }
-    }
-  );
-
-  const sendCampaignMutation = useMutation(
-    () => businessService.sendCampaign(businessId, subject, html),
-    {
-      onSuccess: (res: any) => {
-        toast.success((t('campaignQueued') || 'Campaign sent') + ` (${res.data.sent || 0}/${res.data.queued})`);
-      },
-      onError: (e: any) => { toast.error(e.response?.data?.message || 'Failed to send campaign'); }
-    }
-  );
-
-  return (
-    <div className="bg-white rounded-lg shadow-sm border p-6 mt-8">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-semibold text-gray-900">{t('contacts') || 'Contacts'}</h2>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-4">
-        <input
-          type="text"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder={t('name') || 'Name'}
-          className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-        />
-        <input
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder={t('email') || 'Email'}
-          className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-        />
-        <button
-          onClick={() => addMutation.mutate()}
-          disabled={!email}
-          className="btn btn-primary"
-        >
-          {t('add') || 'Add'}
-        </button>
-      </div>
-
-      <div className="divide-y border rounded mb-6">
-        {(contacts || []).map((c: any) => (
-          <div key={c.id} className="flex items-center justify-between p-3">
-            <div>
-              <div className="font-medium text-gray-900">{c.name || '-'}</div>
-              <div className="text-sm text-gray-500">{c.email}</div>
-            </div>
-            <button onClick={() => deleteMutation.mutate(c.id)} className="btn btn-outline btn-sm text-red-600 border-red-600 hover:bg-red-50">
-              {t('remove') || 'Remove'}
+          <div>
+            <button
+              onClick={handleSend}
+              disabled={sendOfferMutation.isLoading || !subject || !content || selectedCustomers.length === 0}
+              className="btn btn-primary w-full py-2.5 px-4"
+            >
+              {sendOfferMutation.isLoading ? (
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+              ) : (
+                <>
+                  <Send className="h-4 w-4 mr-2" />
+                  Send offer
+                </>
+              )}
             </button>
           </div>
-        ))}
-        {(!contacts || contacts.length === 0) && (
-          <div className="p-4 text-gray-500">{t('noContacts') || 'No contacts yet.'}</div>
-        )}
       </div>
+    );
+  }
 
-      <div>
-        <h3 className="text-lg font-semibold text-gray-900 mb-2">{t('sendCampaign') || 'Send Campaign'}</h3>
-        <input
-          type="text"
-          value={subject}
-          onChange={(e) => setSubject(e.target.value)}
-          placeholder={t('subject') || 'Subject'}
-          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent mb-2"
-        />
-        <textarea
-          value={html}
-          onChange={(e) => setHtml(e.target.value)}
-          rows={6}
-          placeholder={t('campaignHtml') || 'HTML content...'}
-          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent mb-2"
-        />
-        <button
-          onClick={() => sendCampaignMutation.mutate()}
-          disabled={!subject || !html}
-          className="btn btn-primary"
-        >
-          {t('send') || 'Send'}
-        </button>
-      </div>
+  return (
+    <div className="space-y-4">
+      <button
+        onClick={() => setShowCreateForm(true)}
+        className="rounded-lg bg-[#dc2626] px-4 py-2 text-sm font-medium text-white hover:bg-[#b91c1c] flex items-center gap-2"
+      >
+        <Plus className="h-4 w-4" />
+        Create offer
+      </button>
+      {loadingOffers ? (
+        <div className="text-center py-6">Loading offers...</div>
+      ) : (
+        <>
+          {currentOffers.length > 0 && (
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900 mb-2">Current offers</h3>
+              <div className="space-y-2">
+                {currentOffers.map((offer: any) => (
+                  <div
+                    key={offer.id}
+                    className="flex items-center justify-between p-3 rounded-lg border border-gray-200 bg-white"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Tag className="h-4 w-4 text-[#dc2626]" />
+                      <div>
+                        <p className="font-medium text-gray-900">{offer.title}</p>
+                        <p className="text-sm text-gray-600 truncate max-w-[200px]">{offer.description}</p>
+                        {offer.discountPercentage && (
+                          <span className="text-xs text-[#dc2626] font-medium">{offer.discountPercentage}% off</span>
+                        )}
+                        {offer.discountAmount && (
+                          <span className="text-xs text-[#dc2626] font-medium">{formatPrice(Number(offer.discountAmount || 0))} off</span>
+                        )}
+                      </div>
+                    </div>
+                    {offer.validUntil && (
+                      <span className="text-xs text-gray-500">
+                        Valid until {new Date(offer.validUntil).toLocaleDateString()}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {previousOffers.length > 0 && (
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900 mb-2">Previous offers</h3>
+              <div className="space-y-2">
+                {previousOffers.map((offer: any) => (
+                  <div
+                    key={offer.id}
+                    className="flex items-center justify-between p-3 rounded-lg border border-gray-200 bg-gray-50"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Tag className="h-4 w-4 text-gray-400" />
+                      <div>
+                        <p className="font-medium text-gray-700">{offer.title}</p>
+                        <p className="text-sm text-gray-500 truncate max-w-[200px]">{offer.description}</p>
+                      </div>
+                    </div>
+                    <span className="text-xs text-gray-500">
+                      {offer.validUntil && new Date(offer.validUntil) <= new Date()
+                        ? `Expired ${new Date(offer.validUntil).toLocaleDateString()}`
+                        : !offer.isActive
+                        ? 'Inactive'
+                        : ''}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {currentOffers.length === 0 && previousOffers.length === 0 && (
+            <div className="text-center py-8 text-gray-500">
+              <Gift className="h-12 w-12 mx-auto mb-3 text-gray-400" />
+              <p>No offers yet.</p>
+              <p className="text-sm mt-1">Click &quot;Create offer&quot; to send a promotional offer to your customers.</p>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 };

@@ -6,8 +6,7 @@ import { Offer } from './entities/offer.entity';
 import { Business } from '../businesses/entities/business.entity';
 import { Booking } from '../bookings/entities/booking.entity';
 import { User } from '../users/entities/user.entity';
-import { EmailService } from '../common/services/email.service';
-import { PushNotificationService } from '../notifications/push-notification.service';
+// EmailService is provided globally by CommonModule
 import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
@@ -16,7 +15,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     NotificationsModule,
   ],
   controllers: [OffersController],
-  providers: [OffersService, EmailService],
+  providers: [OffersService],
   exports: [OffersService],
 })
 export class OffersModule {}

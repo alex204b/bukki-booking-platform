@@ -7,10 +7,13 @@ export class EmailService {
   private transporter: nodemailer.Transporter;
 
   constructor(private configService: ConfigService) {
+    const portString = this.configService.get<string>('SMTP_PORT', '587');
+    const port = parseInt(portString, 10) || 587;
+
     const smtpConfig = {
       host: this.configService.get<string>('SMTP_HOST', 'smtp.gmail.com'),
-      port: this.configService.get<number>('SMTP_PORT', 587),
-      secure: false, // true for 465, false for other ports
+      port: port,
+      secure: port === 465, // true for 465, false for other ports
       auth: {
         user: this.configService.get<string>('SMTP_USER'),
         pass: this.configService.get<string>('SMTP_PASS'),
@@ -54,7 +57,7 @@ export class EmailService {
       subject: 'Verify Your Email - BUKKi Platform',
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-          <div style="background: linear-gradient(135deg, #f97316, #ea580c); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+          <div style="background: #330007; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
             <h1 style="color: white; margin: 0; font-size: 28px;">BUKKi</h1>
             <p style="color: white; margin: 10px 0 0 0; font-size: 16px;">Booking Platform</p>
           </div>
@@ -66,8 +69,8 @@ export class EmailService {
               Thank you for registering with BUKKi! To complete your account setup, please verify your email address using the code below:
             </p>
             
-            <div style="background: #f3f4f6; border: 2px dashed #d1d5db; padding: 20px; text-align: center; border-radius: 8px; margin: 25px 0;">
-              <h3 style="color: #1f2937; margin: 0; font-size: 32px; letter-spacing: 4px; font-family: 'Courier New', monospace;">
+            <div style="background: #fef2f2; border: 2px dashed #330007; padding: 20px; text-align: center; border-radius: 8px; margin: 25px 0;">
+              <h3 style="color: #330007; margin: 0; font-size: 32px; letter-spacing: 4px; font-family: 'Courier New', monospace;">
                 ${verificationCode}
               </h3>
             </div>
@@ -76,8 +79,8 @@ export class EmailService {
               Enter this code in the verification form to activate your account. This code will expire in 15 minutes.
             </p>
             
-            <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0;">
-              <p style="color: #92400e; margin: 0; font-size: 14px;">
+            <div style="background: #fef2f2; border-left: 4px solid #330007; padding: 15px; margin: 20px 0;">
+              <p style="color: #330007; margin: 0; font-size: 14px;">
                 <strong>Security Note:</strong> If you didn't create an account with BUKKi, please ignore this email.
               </p>
             </div>
@@ -116,7 +119,7 @@ export class EmailService {
       subject: 'Reset Your Password - BUKKi Platform',
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-          <div style="background: linear-gradient(135deg, #f97316, #ea580c); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+          <div style="background: #330007; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
             <h1 style="color: white; margin: 0; font-size: 28px;">BUKKi</h1>
             <p style="color: white; margin: 10px 0 0 0; font-size: 16px;">Password Reset</p>
           </div>
@@ -131,18 +134,18 @@ export class EmailService {
             
             <div style="text-align: center; margin: 30px 0;">
               <a href="${resetUrl}" 
-                 style="background: #f97316; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">
+                 style="background: #330007; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">
                 Reset My Password
               </a>
             </div>
             
             <p style="color: #6b7280; line-height: 1.6; margin-bottom: 25px;">
               If the button doesn't work, copy and paste this link into your browser:<br>
-              <a href="${resetUrl}" style="color: #f97316; word-break: break-all;">${resetUrl}</a>
+              <a href="${resetUrl}" style="color: #330007; word-break: break-all;">${resetUrl}</a>
             </p>
             
-            <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0;">
-              <p style="color: #92400e; margin: 0; font-size: 14px;">
+            <div style="background: #fef2f2; border-left: 4px solid #330007; padding: 15px; margin: 20px 0;">
+              <p style="color: #330007; margin: 0; font-size: 14px;">
                 <strong>Security Note:</strong> This link will expire in 1 hour. If you didn't request a password reset, please ignore this email.
               </p>
             </div>
@@ -171,7 +174,7 @@ export class EmailService {
       subject: 'Reset Your Password - BUKKi Platform',
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-          <div style="background: linear-gradient(135deg, #f97316, #ea580c); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+          <div style="background: #330007; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
             <h1 style="color: white; margin: 0; font-size: 28px;">BUKKi</h1>
             <p style="color: white; margin: 10px 0 0 0; font-size: 16px;">Password Reset</p>
           </div>
@@ -184,8 +187,8 @@ export class EmailService {
               We received a request to reset your password for your BUKKi account. Please use the code below to verify your identity:
             </p>
             
-            <div style="background: #f3f4f6; border: 2px dashed #d1d5db; padding: 20px; text-align: center; border-radius: 8px; margin: 25px 0;">
-              <h3 style="color: #1f2937; margin: 0; font-size: 32px; letter-spacing: 4px; font-family: 'Courier New', monospace;">
+            <div style="background: #fef2f2; border: 2px dashed #330007; padding: 20px; text-align: center; border-radius: 8px; margin: 25px 0;">
+              <h3 style="color: #330007; margin: 0; font-size: 32px; letter-spacing: 4px; font-family: 'Courier New', monospace;">
                 ${resetCode}
               </h3>
             </div>
@@ -194,8 +197,8 @@ export class EmailService {
               Enter this code in the password reset form to continue. This code will expire in 15 minutes.
             </p>
             
-            <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0;">
-              <p style="color: #92400e; margin: 0; font-size: 14px;">
+            <div style="background: #fef2f2; border-left: 4px solid #330007; padding: 15px; margin: 20px 0;">
+              <p style="color: #330007; margin: 0; font-size: 14px;">
                 <strong>Security Note:</strong> If you didn't request a password reset, please ignore this email. Your password will remain unchanged.
               </p>
             </div>
@@ -220,14 +223,52 @@ export class EmailService {
     }
   }
 
-  async sendEmail(to: string | string[], subject: string, html: string): Promise<void> {
+  async sendEmail(to: string | string[], subject: string, html: string, attachments?: any[]): Promise<void> {
+    const smtpUser = this.configService.get<string>('SMTP_USER');
+    const smtpPass = this.configService.get<string>('SMTP_PASS');
+    
+    if (!smtpUser || !smtpPass) {
+      console.error('[EmailService] ❌ SMTP credentials not configured!');
+      console.error('[EmailService] SMTP_USER:', smtpUser ? 'SET' : 'NOT SET');
+      console.error('[EmailService] SMTP_PASS:', smtpPass ? 'SET' : 'NOT SET');
+      throw new Error('SMTP credentials not configured. Please set SMTP_USER and SMTP_PASS environment variables.');
+    }
+    
+    // CRITICAL: Always send from BUKKI platform email, never from business email
+    const fromAddress = `"BUKKi Platform" <${smtpUser}>`;
     const mailOptions = {
-      from: `"BUKKi Platform" <${this.configService.get<string>('SMTP_USER')}>`,
+      from: fromAddress,
       to,
       subject,
       html,
+      attachments: attachments || [],
     } as any;
-    await this.transporter.sendMail(mailOptions);
+    
+    console.log(`[EmailService] 📤 Sending email from: ${fromAddress}`);
+    console.log(`[EmailService] 📥 Sending email to: ${Array.isArray(to) ? to.join(', ') : to}`);
+    console.log(`[EmailService] 📋 Subject: ${subject}`);
+    if (attachments && attachments.length > 0) {
+      console.log(`[EmailService] 📎 Attachments: ${attachments.length} file(s)`);
+    }
+    
+    try {
+      const result = await this.transporter.sendMail(mailOptions);
+      console.log(`[EmailService] ✅ Email sent successfully! Message ID: ${result.messageId}`);
+      console.log(`[EmailService] Response: ${result.response}`);
+    } catch (error: any) {
+      console.error(`[EmailService] ❌ Failed to send email:`, error);
+      console.error(`[EmailService] Error code: ${error?.code}`);
+      console.error(`[EmailService] Error command: ${error?.command}`);
+      console.error(`[EmailService] Error response: ${error?.response}`);
+      console.error(`[EmailService] Full error:`, {
+        message: error?.message,
+        code: error?.code,
+        command: error?.command,
+        response: error?.response,
+        stack: error?.stack
+      });
+      throw error;
+    }
   }
 
   async sendNewBookingNotification(to: string | string[], params: {
@@ -240,7 +281,7 @@ export class EmailService {
     const { businessName, serviceName, appointmentDate, customerName, totalAmount } = params;
     const html = `
       <div style="font-family: Arial, sans-serif; max-width:600px; margin:0 auto; padding:20px;">
-        <div style="background: linear-gradient(135deg, #f97316, #ea580c); padding: 20px; color:#fff; border-radius:8px 8px 0 0;">
+        <div style="background: #330007; padding: 20px; color:#fff; border-radius:8px 8px 0 0;">
           <h2 style="margin:0;">New Booking Request</h2>
           <p style="margin:6px 0 0;">${businessName}</p>
         </div>
@@ -268,27 +309,60 @@ export class EmailService {
       business: { name: string; address?: string; phone?: string };
       appointmentDate: Date | string;
       totalAmount: number;
+      qrCode?: string; // Base64 QR code data URL
+      bookingId?: string;
     },
   ): Promise<void> {
-    const { customer, service, business, appointmentDate, totalAmount } = bookingData;
-    const appointmentDateFormatted = new Date(appointmentDate).toLocaleString();
+    console.log(`[EmailService] ========== sendBookingConfirmation CALLED ==========`);
+    console.log(`[EmailService] 📧 Received customerEmail parameter: "${customerEmail}"`);
+    console.log(`[EmailService] 📋 Booking data:`, {
+      customer: bookingData.customer,
+      service: bookingData.service.name,
+      business: bookingData.business.name,
+      appointmentDate: bookingData.appointmentDate,
+      hasQRCode: !!bookingData.qrCode
+    });
     
+    if (!customerEmail || !customerEmail.includes('@')) {
+      console.error(`[EmailService] ❌ INVALID EMAIL PROVIDED: "${customerEmail}"`);
+      throw new Error(`Invalid email address: ${customerEmail}`);
+    }
+    
+    const { customer, service, business, appointmentDate, totalAmount, qrCode, bookingId } = bookingData;
+    const appointmentDateFormatted = new Date(appointmentDate).toLocaleString();
+
+    // QR Code section - only show if qrCode is provided
+    // Use CID (Content-ID) for embedded images to ensure email clients display them
+    const qrCodeCid = 'booking-qrcode'; // Unique identifier for the embedded image
+    const qrCodeSection = qrCode ? `
+      <div style="background: #f0fdf4; padding: 20px; border-radius: 8px; margin: 25px 0; text-align: center; border: 2px dashed #22c55e;">
+        <h3 style="color: #166534; margin: 0 0 15px 0; font-size: 18px;">📱 Your Booking QR Code</h3>
+        <p style="color: #15803d; font-size: 14px; margin-bottom: 15px;">
+          Show this QR code when you arrive for quick check-in
+        </p>
+        <img src="cid:${qrCodeCid}" alt="Booking QR Code" style="width: 200px; height: 200px; border-radius: 8px; border: 2px solid #22c55e; display: block; margin: 0 auto;" />
+        ${bookingId ? `<p style="color: #6b7280; font-size: 12px; margin-top: 10px;">Booking ID: ${bookingId.slice(0, 8).toUpperCase()}</p>` : ''}
+      </div>
+    ` : '';
+
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-        <div style="background: linear-gradient(135deg, #f97316, #ea580c); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+        <div style="background: #330007; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
           <h1 style="color: white; margin: 0; font-size: 28px;">Booking Confirmed! 🎉</h1>
           <p style="color: white; margin: 10px 0 0 0; font-size: 16px;">Your appointment has been accepted</p>
         </div>
-        
+
         <div style="background: #ffffff; padding: 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 10px 10px;">
           <p style="color: #1f2937; font-size: 16px; margin: 0 0 20px 0;">
             Hello ${customer.firstName},
           </p>
-          
+
           <p style="color: #6b7280; line-height: 1.6; margin-bottom: 25px;">
             Great news! Your booking request has been <strong style="color: #22c55e;">confirmed</strong> by ${business.name}.
           </p>
-          
+
+          ${qrCodeSection}
+
           <div style="background: #f3f4f6; padding: 20px; border-radius: 8px; margin: 25px 0;">
             <h3 style="color: #1f2937; margin: 0 0 15px 0; font-size: 18px;">Booking Details</h3>
             <div style="color: #374151; line-height: 1.8;">
@@ -296,22 +370,22 @@ export class EmailService {
               <p style="margin: 8px 0;"><strong>Business:</strong> ${business.name}</p>
               <p style="margin: 8px 0;"><strong>Date & Time:</strong> ${appointmentDateFormatted}</p>
               <p style="margin: 8px 0;"><strong>Duration:</strong> ${service.duration} minutes</p>
-              <p style="margin: 8px 0;"><strong>Total Amount:</strong> $${totalAmount.toFixed(2)}</p>
+              <p style="margin: 8px 0;"><strong>Total Amount:</strong> $${typeof totalAmount === 'number' ? totalAmount.toFixed(2) : parseFloat(totalAmount || 0).toFixed(2)}</p>
               ${business.address ? `<p style="margin: 8px 0;"><strong>Address:</strong> ${business.address}</p>` : ''}
               ${business.phone ? `<p style="margin: 8px 0;"><strong>Phone:</strong> ${business.phone}</p>` : ''}
             </div>
           </div>
-          
-          <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0; border-radius: 4px;">
-            <p style="color: #92400e; margin: 0; font-size: 14px; font-weight: bold;">
+
+          <div style="background: #fef2f2; border-left: 4px solid #330007; padding: 15px; margin: 20px 0; border-radius: 4px;">
+            <p style="color: #330007; margin: 0; font-size: 14px; font-weight: bold;">
               ⏰ Please arrive 5 minutes before your appointment time.
             </p>
           </div>
-          
+
           <p style="color: #6b7280; font-size: 14px; margin-top: 30px;">
             If you need to cancel or reschedule, please contact the business directly or use the app.
           </p>
-          
+
           <p style="color: #6b7280; font-size: 14px; margin-top: 20px;">
             Thank you for using BUKKi!<br>
             The BUKKi Team
@@ -320,7 +394,44 @@ export class EmailService {
       </div>
     `;
 
-    await this.sendEmail(customerEmail, 'Booking Confirmed - BUKKi', html);
+    // Ensure email is sent from BUKKI platform email, not business email
+    const smtpUser = this.configService.get<string>('SMTP_USER');
+    console.log(`[EmailService] ✅ HTML email template prepared.`);
+    console.log(`[EmailService] 📧 Email will be sent FROM: "BUKKi Platform" <${smtpUser}>`);
+    console.log(`[EmailService] 📧 Email will be sent TO: "${customerEmail}"`);
+    console.log(`[EmailService] 📧 Subject: "Booking Confirmed - BUKKi"`);
+    console.log(`[EmailService] 📧 Has QR Code: ${!!qrCode}`);
+    
+    // Send email with QR code as embedded attachment if available
+    // Many email clients (Gmail, Outlook) block base64 data URLs, so we use CID attachments
+    if (qrCode) {
+      // Extract base64 data from data URL (format: data:image/png;base64,<data>)
+      const base64Match = qrCode.match(/^data:image\/(png|jpg|jpeg);base64,(.+)$/);
+      if (base64Match) {
+        const base64Data = base64Match[2];
+        const qrCodeCid = 'booking-qrcode';
+        
+        // Attach QR code as embedded image using CID
+        const attachments = [{
+          filename: 'booking-qrcode.png',
+          content: base64Data,
+          cid: qrCodeCid, // Content-ID for embedding in HTML
+          contentType: 'image/png',
+          encoding: 'base64',
+        }];
+        
+        console.log(`[EmailService] 📎 Attaching QR code as embedded image (CID: ${qrCodeCid})`);
+        await this.sendEmail(customerEmail, 'Booking Confirmed - BUKKi', html, attachments);
+      } else {
+        console.error(`[EmailService] ⚠️ Invalid QR code format, sending email without QR code`);
+        await this.sendEmail(customerEmail, 'Booking Confirmed - BUKKi', html);
+      }
+    } else {
+      // Send email without QR code
+      await this.sendEmail(customerEmail, 'Booking Confirmed - BUKKi', html);
+    }
+    
+    console.log(`[EmailService] ✅ sendEmail completed successfully for: "${customerEmail}"`);
   }
 
   async sendBookingReminder(
@@ -339,7 +450,7 @@ export class EmailService {
     
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-        <div style="background: linear-gradient(135deg, #f97316, #ea580c); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+        <div style="background: #330007; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
           <h1 style="color: white; margin: 0; font-size: 28px;">⏰ Booking Reminder</h1>
           <p style="color: white; margin: 10px 0 0 0; font-size: 16px;">Your appointment is in ${reminderText}</p>
         </div>
@@ -364,8 +475,8 @@ export class EmailService {
             </div>
           </div>
           
-          <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0; border-radius: 4px;">
-            <p style="color: #92400e; margin: 0; font-size: 14px; font-weight: bold;">
+          <div style="background: #fef2f2; border-left: 4px solid #330007; padding: 15px; margin: 20px 0; border-radius: 4px;">
+            <p style="color: #330007; margin: 0; font-size: 14px; font-weight: bold;">
               💡 Please arrive 5 minutes early. If you need to cancel or reschedule, please do so as soon as possible.
             </p>
           </div>
@@ -396,7 +507,7 @@ export class EmailService {
     
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-        <div style="background: linear-gradient(135deg, #ef4444, #dc2626); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+        <div style="background: #330007; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
           <h1 style="color: white; margin: 0; font-size: 28px;">Booking Cancelled</h1>
         </div>
         
@@ -420,7 +531,7 @@ export class EmailService {
           
           <div style="text-align: center; margin: 30px 0;">
             <a href="${this.configService.get<string>('FRONTEND_URL')}/businesses/${business.name}" 
-               style="background: #f97316; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">
+               style="background: #330007; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">
               Book Again
             </a>
           </div>
@@ -446,7 +557,7 @@ export class EmailService {
   ): Promise<void> {
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-        <div style="background: linear-gradient(135deg, #f97316, #ea580c); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+        <div style="background: #330007; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
           <h1 style="color: white; margin: 0; font-size: 28px;">BUKKi</h1>
           <p style="color: white; margin: 10px 0 0 0; font-size: 16px;">Special Offer from ${businessName}</p>
         </div>
@@ -464,9 +575,9 @@ export class EmailService {
           </div>
 
           ${metadata?.offerCode ? `
-            <div style="background: #fef3c7; border: 2px dashed #f59e0b; padding: 15px; text-align: center; border-radius: 8px; margin: 20px 0;">
-              <p style="color: #92400e; margin: 0; font-size: 14px; font-weight: bold;">Use Code:</p>
-              <p style="color: #92400e; margin: 5px 0 0; font-size: 24px; font-weight: bold; letter-spacing: 2px;">${metadata.offerCode}</p>
+            <div style="background: #fef2f2; border: 2px dashed #330007; padding: 15px; text-align: center; border-radius: 8px; margin: 20px 0;">
+              <p style="color: #330007; margin: 0; font-size: 14px; font-weight: bold;">Use Code:</p>
+              <p style="color: #330007; margin: 5px 0 0; font-size: 24px; font-weight: bold; letter-spacing: 2px;">${metadata.offerCode}</p>
             </div>
           ` : ''}
 
@@ -486,7 +597,7 @@ export class EmailService {
 
           <div style="text-align: center; margin: 30px 0;">
             <a href="${this.configService.get<string>('FRONTEND_URL')}/businesses"
-               style="background: #f97316; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">
+               style="background: #330007; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">
               Book Now
             </a>
           </div>
@@ -511,7 +622,7 @@ export class EmailService {
 
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-        <div style="background: linear-gradient(135deg, #22c55e, #16a34a); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+        <div style="background: #330007; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
           <h1 style="color: white; margin: 0; font-size: 32px;">🎉 Congratulations!</h1>
           <p style="color: white; margin: 10px 0 0 0; font-size: 16px;">Your business has been approved</p>
         </div>
@@ -543,13 +654,13 @@ export class EmailService {
 
           <div style="text-align: center; margin: 30px 0;">
             <a href="${dashboardUrl}"
-               style="background: #f97316; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block; font-size: 16px;">
+               style="background: #330007; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block; font-size: 16px;">
               Go to Dashboard
             </a>
           </div>
 
-          <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0; border-radius: 4px;">
-            <p style="color: #92400e; margin: 0; font-size: 14px;">
+          <div style="background: #fef2f2; border-left: 4px solid #330007; padding: 15px; margin: 20px 0; border-radius: 4px;">
+            <p style="color: #330007; margin: 0; font-size: 14px;">
               <strong>💡 Tip:</strong> Complete your business profile and add high-quality images to attract more customers!
             </p>
           </div>
@@ -579,7 +690,7 @@ export class EmailService {
 
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-        <div style="background: linear-gradient(135deg, #ef4444, #dc2626); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+        <div style="background: #330007; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
           <h1 style="color: white; margin: 0; font-size: 28px;">Business Application Update</h1>
           <p style="color: white; margin: 10px 0 0 0; font-size: 16px;">Regarding: ${businessName}</p>
         </div>
@@ -615,13 +726,13 @@ export class EmailService {
 
           <div style="text-align: center; margin: 30px 0;">
             <a href="${supportUrl}"
-               style="background: #f97316; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block; font-size: 16px;">
+               style="background: #330007; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block; font-size: 16px;">
               Contact Support
             </a>
           </div>
 
-          <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0; border-radius: 4px;">
-            <p style="color: #92400e; margin: 0; font-size: 14px;">
+          <div style="background: #fef2f2; border-left: 4px solid #330007; padding: 15px; margin: 20px 0; border-radius: 4px;">
+            <p style="color: #330007; margin: 0; font-size: 14px;">
               <strong>💡 Note:</strong> This decision is based on our platform guidelines. We encourage you to address the feedback and reapply.
             </p>
           </div>
@@ -649,7 +760,7 @@ export class EmailService {
   ): Promise<void> {
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-        <div style="background: linear-gradient(135deg, #ef4444, #dc2626); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+        <div style="background: #330007; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
           <h1 style="color: white; margin: 0; font-size: 28px;">⚠️ Business Suspended</h1>
           <p style="color: white; margin: 10px 0 0 0; font-size: 16px;">Action Required</p>
         </div>
@@ -681,13 +792,13 @@ export class EmailService {
 
           <div style="text-align: center; margin: 30px 0;">
             <a href="${this.configService.get<string>('FRONTEND_URL')}/business-settings"
-               style="background: #f97316; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block; font-size: 16px;">
+               style="background: #330007; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block; font-size: 16px;">
               Request Unsuspension
             </a>
           </div>
 
-          <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0; border-radius: 4px;">
-            <p style="color: #92400e; margin: 0; font-size: 14px;">
+          <div style="background: #fef2f2; border-left: 4px solid #330007; padding: 15px; margin: 20px 0; border-radius: 4px;">
+            <p style="color: #330007; margin: 0; font-size: 14px;">
               <strong>💡 Need Help?</strong> Contact our support team for assistance or to request unsuspension.
             </p>
           </div>
@@ -712,7 +823,7 @@ export class EmailService {
 
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-        <div style="background: linear-gradient(135deg, #22c55e, #16a34a); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+        <div style="background: #330007; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
           <h1 style="color: white; margin: 0; font-size: 32px;">🎉 Business Reactivated!</h1>
           <p style="color: white; margin: 10px 0 0 0; font-size: 16px;">Your business is now live again</p>
         </div>
@@ -733,7 +844,7 @@ export class EmailService {
 
           <div style="text-align: center; margin: 30px 0;">
             <a href="${dashboardUrl}"
-               style="background: #f97316; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block; font-size: 16px;">
+               style="background: #330007; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block; font-size: 16px;">
               Go to Dashboard
             </a>
           </div>

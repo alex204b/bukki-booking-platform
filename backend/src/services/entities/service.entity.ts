@@ -15,6 +15,9 @@ export class Service extends BaseEntity {
   @Column({ type: 'decimal', precision: 10, scale: 2 })
   price: number;
 
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  priceMax?: number;
+
   @Column({ type: 'int', default: 30 })
   duration: number; // in minutes
 

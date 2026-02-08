@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
+import { useI18n } from '../contexts/I18nContext';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -42,15 +43,17 @@ const MapClickHandler: React.FC<{
       try {
         // Reverse geocoding to get address from coordinates
         const response = await fetch(
-          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`
+          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`,
+          { headers: { 'User-Agent': 'BUKKi-Booking/1.0' } }
         );
+        if (!response.ok) throw new Error(`Geocoding failed: ${response.status}`);
         const data = await response.json();
         
-        const address = data.display_name || `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+        const address = data?.display_name || `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
         
         // Extract address details
         const addressDetails: AddressDetails = {};
-        if (data.address) {
+        if (data?.address) {
           addressDetails.postalCode = data.address.postcode || data.address.postal_code || '';
           addressDetails.city = data.address.city || data.address.town || data.address.village || '';
           addressDetails.state = data.address.state || data.address.region || '';
@@ -75,6 +78,7 @@ export const MapAddressSelector: React.FC<MapAddressSelectorProps> = ({
   initialLng = 26.1025,
   initialAddress = ''
 }) => {
+  const { t } = useI18n();
   const [location, setLocation] = useState<LocationData>({
     lat: initialLat,
     lng: initialLng,
@@ -103,7 +107,8 @@ export const MapAddressSelector: React.FC<MapAddressSelectorProps> = ({
     setIsLoading(true);
     try {
       const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchTerm)}&limit=1&addressdetails=1`
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchTerm)}&limit=1&addressdetails=1`,
+        { headers: { 'User-Agent': 'BUKKi-Booking/1.0' } }
       );
       const data = await response.json();
       
@@ -140,13 +145,13 @@ export const MapAddressSelector: React.FC<MapAddressSelectorProps> = ({
     <div className="w-full">
       <div className="mb-4">
         <label className="block text-sm font-medium text-gray-700 mb-2">
-          Search Address (Optional)
+          {t('searchAddressOptional')}
         </label>
         <div className="flex gap-2">
           <input
             type="text"
             className="input flex-1"
-            placeholder="Type your business address to search..."
+            placeholder={t('searchAddressPlaceholder')}
             onKeyPress={(e) => {
               if (e.key === 'Enter') {
                 handleSearchAddress(e.currentTarget.value);
@@ -160,33 +165,33 @@ export const MapAddressSelector: React.FC<MapAddressSelectorProps> = ({
               handleSearchAddress(input.value);
             }}
             disabled={isLoading}
-            className="btn btn-primary disabled:opacity-50"
+            className="btn bg-[#330007] hover:bg-[#4a000a] text-white border-0 disabled:opacity-50 px-6 py-3 min-w-[100px]"
           >
-            {isLoading ? 'Searching...' : 'Search'}
+            {isLoading ? t('searching') : t('search')}
           </button>
         </div>
         <p className="text-xs text-gray-500 mt-1">
-          💡 You can search for your address or click directly on the map to select your location
+          {t('searchAddressHint')}
         </p>
       </div>
 
       <div className="mb-4">
         <label className="block text-sm font-medium text-gray-700 mb-2">
-          Selected Location
+          {t('selectedLocation')}
         </label>
         <div className="p-3 bg-gray-50 rounded-lg">
           <p className="text-sm text-gray-600">
-            <strong>Address:</strong> {location.address}
+            <strong>{t('addressLabel')}</strong> {location.address}
           </p>
           <p className="text-sm text-gray-500 mt-1">
-            <strong>Coordinates:</strong> {location.lat.toFixed(6)}, {location.lng.toFixed(6)}
+            <strong>{t('coordinates')}</strong> {location.lat.toFixed(6)}, {location.lng.toFixed(6)}
           </p>
         </div>
       </div>
 
       <div className="mb-4">
         <p className="text-sm text-gray-600 mb-2">
-          <strong>Step 2:</strong> Click on the map to select your exact business location:
+          {t('mapClickInstruction')}
         </p>
         <div className="border-2 border-gray-300 rounded-lg overflow-hidden" style={{ height: '400px' }}>
           <MapContainer
@@ -205,14 +210,14 @@ export const MapAddressSelector: React.FC<MapAddressSelectorProps> = ({
         </div>
       </div>
 
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-        <div className="text-sm text-blue-800">
-          <strong>📍 Location Selection:</strong>
-          <ul className="mt-1 text-xs text-blue-700 list-disc list-inside">
-            <li>Search for your address above, or</li>
-            <li>Click directly on the map to select your exact business location</li>
-            <li>The red marker shows your selected location</li>
-            <li>You can drag the map to explore and find the perfect spot</li>
+      <div className="bg-[#fef2f2] border border-[#fecaca] rounded-lg p-3">
+        <div className="text-sm text-[#330007]">
+          <strong>📍 {t('locationSelection')}</strong>
+          <ul className="mt-1 text-xs text-[#991b1b] list-disc list-inside">
+            <li>{t('locationHint1')}</li>
+            <li>{t('locationHint2')}</li>
+            <li>{t('locationHint3')}</li>
+            <li>{t('locationHint4')}</li>
           </ul>
         </div>
       </div>

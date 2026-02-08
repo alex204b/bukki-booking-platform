@@ -58,6 +58,7 @@ export class ServicesService {
         name: createServiceDto.name || '',
         description: createServiceDto.description || null,
         price: parseFloat(createServiceDto.price) || 0,
+        priceMax: createServiceDto.priceMax != null ? parseFloat(createServiceDto.priceMax) : null,
         duration: parseInt(createServiceDto.duration) || 30,
         isActive: createServiceDto.isActive !== undefined ? createServiceDto.isActive : true,
         images: imagesJson,
@@ -65,6 +66,15 @@ export class ServicesService {
         maxBookingsPerSlot: parseInt(createServiceDto.maxBookingsPerSlot) || 1,
         advanceBookingDays: parseInt(createServiceDto.advanceBookingDays) || 0,
         cancellationHours: parseInt(createServiceDto.cancellationHours) || 0,
+        // New booking limitation fields
+        maxBookingsPerCustomerPerDay: parseInt(createServiceDto.maxBookingsPerCustomerPerDay) || 1,
+        maxBookingsPerCustomerPerWeek: createServiceDto.maxBookingsPerCustomerPerWeek ? parseInt(createServiceDto.maxBookingsPerCustomerPerWeek) : null,
+        bookingCooldownHours: parseInt(createServiceDto.bookingCooldownHours) || 0,
+        allowMultipleActiveBookings: createServiceDto.allowMultipleActiveBookings !== undefined ? createServiceDto.allowMultipleActiveBookings : true,
+        // Resource fields
+        resourceType: createServiceDto.resourceType || null,
+        allowAnyResource: createServiceDto.allowAnyResource !== undefined ? createServiceDto.allowAnyResource : true,
+        requireResourceSelection: createServiceDto.requireResourceSelection !== undefined ? createServiceDto.requireResourceSelection : false,
         rating: 0,
         reviewCount: 0,
         bookingCount: 0,
@@ -79,15 +89,17 @@ export class ServicesService {
       // CRITICAL: Use DataSource directly to ensure INSERT commits to database
       let result;
       try {
-        // Handle JSON columns - cast to jsonb only if not null
-        const imagesParam = serviceData.images ? serviceData.images : null;
-        const customFieldsParam = serviceData.customFields ? serviceData.customFields : null;
-        
+        // Handle JSON columns - always pass as string or '[]' for empty
+        const imagesParam = serviceData.images || '[]';
+        const customFieldsParam = serviceData.customFields || '[]';
+
+        const priceMaxParam = serviceData.priceMax != null ? serviceData.priceMax.toString() : null;
         result = await this.dataSource.query(
           `INSERT INTO services (
             name,
             description,
             price,
+            "priceMax",
             duration,
             "isActive",
             images,
@@ -95,6 +107,13 @@ export class ServicesService {
             "maxBookingsPerSlot",
             "advanceBookingDays",
             "cancellationHours",
+            "maxBookingsPerCustomerPerDay",
+            "maxBookingsPerCustomerPerWeek",
+            "bookingCooldownHours",
+            "allowMultipleActiveBookings",
+            "resourceType",
+            "allowAnyResource",
+            "requireResourceSelection",
             rating,
             "reviewCount",
             "bookingCount",
@@ -102,16 +121,18 @@ export class ServicesService {
             "createdAt",
             "updatedAt"
           ) VALUES (
-            $1, $2, $3::decimal, $4, $5, 
-            CASE WHEN $6 IS NULL THEN NULL ELSE $6::jsonb END,
-            CASE WHEN $7 IS NULL THEN NULL ELSE $7::jsonb END,
-            $8, $9, $10, $11::decimal, $12, $13, $14::uuid, $15, $16
+            $1, $2, $3::decimal, $4::decimal, $5, $6,
+            $7::jsonb,
+            $8::jsonb,
+            $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
+            $19::decimal, $20, $21, $22::uuid, $23, $24
           )
           RETURNING id, "createdAt", "updatedAt"`,
           [
             serviceData.name,
             serviceData.description,
             serviceData.price.toString(),
+            priceMaxParam,
             serviceData.duration,
             serviceData.isActive,
             imagesParam,
@@ -119,6 +140,13 @@ export class ServicesService {
             serviceData.maxBookingsPerSlot,
             serviceData.advanceBookingDays,
             serviceData.cancellationHours,
+            serviceData.maxBookingsPerCustomerPerDay,
+            serviceData.maxBookingsPerCustomerPerWeek,
+            serviceData.bookingCooldownHours,
+            serviceData.allowMultipleActiveBookings,
+            serviceData.resourceType,
+            serviceData.allowAnyResource,
+            serviceData.requireResourceSelection,
             serviceData.rating.toString(),
             serviceData.reviewCount,
             serviceData.bookingCount,
@@ -227,13 +255,44 @@ export class ServicesService {
     
     try {
       // Use raw SQL to ensure data is fetched from remote database
-      const services = await this.dataSource.query(
+      let services = await this.dataSource.query(
         `SELECT * FROM services 
          WHERE "businessId" = $1 
          AND "deletedAt" IS NULL
          ORDER BY "createdAt" DESC`,
         [businessId]
       );
+      
+      // Auto-create default "Table reservation" service for restaurants/parallel businesses (or any business) with no services
+      if (services.length === 0) {
+        const businessRows = await this.dataSource.query(
+          `SELECT id, "businessType", "category" FROM businesses WHERE id = $1 AND "deletedAt" IS NULL`,
+          [businessId]
+        );
+        const business = businessRows?.[0];
+        if (business) {
+          try {
+            const defaultResult = await this.dataSource.query(
+              `INSERT INTO services (
+                name, description, price, duration, "isActive", images, "customFields",
+                "maxBookingsPerSlot", "advanceBookingDays", "cancellationHours",
+                "resourceType", "businessId"
+              ) VALUES (
+                'Table reservation', 'Reserve a table', 0, 90, true, '[]'::jsonb, '[]'::jsonb,
+                1, 30, 24, 'table', $1::uuid
+              )
+              RETURNING *`,
+              [businessId]
+            );
+            if (defaultResult?.length > 0) {
+              services = defaultResult;
+              console.log(`[ServicesService] Auto-created default Table reservation service for business ${businessId}`);
+            }
+          } catch (autoCreateErr: any) {
+            console.error(`[ServicesService] Failed to auto-create default service:`, autoCreateErr);
+          }
+        }
+      }
       
       console.log(`[ServicesService] Found ${services.length} service(s) for business ${businessId}`);
       
@@ -304,6 +363,10 @@ export class ServicesService {
       if (updateServiceDto.price !== undefined) {
         updateFields.push(`price = $${paramIndex++}`);
         updateValues.push(updateServiceDto.price.toString());
+      }
+      if (updateServiceDto.priceMax !== undefined) {
+        updateFields.push(`"priceMax" = $${paramIndex++}`);
+        updateValues.push(updateServiceDto.priceMax != null ? updateServiceDto.priceMax.toString() : null);
       }
       if (updateServiceDto.duration !== undefined) {
         updateFields.push(`duration = $${paramIndex++}`);
@@ -487,8 +550,51 @@ export class ServicesService {
 
     console.log('Open time:', openTime, 'Close time:', closeTime);
 
-    // Generate base time slots using service duration
-    const slots = this.generateTimeSlots(openTime, closeTime, service.duration);
+    // For parallel and personal_service businesses, use 20-minute slot intervals
+    const slotInterval = ['parallel', 'personal_service'].includes(business?.businessType || '') ? 20 : (service.duration || 30);
+    const slots = this.generateTimeSlots(openTime, closeTime, slotInterval);
+
+    // For parallel businesses / table services: use business table resources even if service has none linked
+    let resources = service.resources?.filter(r => r.isActive !== false) || [];
+    const isParallelOrTable = business?.businessType === 'parallel' || service.resourceType === ResourceType.TABLE;
+    if (isParallelOrTable && resources.length === 0 && business?.id) {
+      const tableRows = await this.dataSource.query(
+        `SELECT r.* FROM resources r 
+         WHERE r."businessId" = $1 
+         AND (r.type = 'table' OR r.type = 'TABLE') 
+         AND (r."isActive" IS NULL OR r."isActive" = true)
+         AND r."deletedAt" IS NULL`,
+        [business.id]
+      );
+      resources = tableRows || [];
+      if (resources.length > 0) {
+        console.log(`[ServicesService] Using ${resources.length} business table(s) for availability`);
+      }
+    }
+
+    // If we have table resources, check per-slot availability (hide fully-booked slots)
+    if (resources.length > 0 && isParallelOrTable) {
+      const slotsWithAvailability = await Promise.all(
+        slots.map(async (slot) => {
+          const availableCount = await this.countAvailableResources(
+            service,
+            resources as Resource[],
+            date,
+            slot.time,
+            partySize
+          );
+          return {
+            time: slot.time,
+            available: availableCount > 0,
+            availableResourceCount: availableCount,
+          };
+        })
+      );
+      // Only return slots that have at least one table available (fully-booked slots disappear)
+      const availableOnly = slotsWithAvailability.filter(s => s.available);
+      console.log(`[ServicesService] Showing ${availableOnly.length} of ${slots.length} slots (fully-booked hidden)`);
+      return availableOnly;
+    }
 
     // If service doesn't use resources, check booking availability for each slot
     if (!service.resourceType || (!service.requireResourceSelection && !service.resources?.length)) {
@@ -527,9 +633,7 @@ export class ServicesService {
       return slotsWithAvailability;
     }
 
-    // For resource-based services, check per-slot availability
-    const resources = service.resources?.filter(r => r.isActive) || [];
-
+    // For resource-based services (staff, etc.), check per-slot availability
     if (resources.length === 0) {
       console.log('No active resources found for this service');
       return slots.map(slot => ({ ...slot, available: false }));
@@ -555,8 +659,10 @@ export class ServicesService {
       })
     );
 
-    console.log('Generated', slotsWithAvailability.length, 'slots with availability');
-    return slotsWithAvailability;
+    // Hide fully-booked slots (all workers busy) - same as parallel businesses
+    const availableOnly = slotsWithAvailability.filter(s => s.available);
+    console.log(`[ServicesService] Showing ${availableOnly.length} of ${slots.length} slots (fully-booked hidden)`);
+    return availableOnly;
   }
 
   private generateTimeSlots(openTime: string, closeTime: string, serviceDuration: number): { time: string }[] {
@@ -652,7 +758,8 @@ export class ServicesService {
   ): Promise<boolean> {
     const conflict = await this.bookingRepository
       .createQueryBuilder('booking')
-      .where('booking.resourceId = :resourceId', { resourceId })
+      .leftJoin('booking.resource', 'res')
+      .where('res.id = :resourceId', { resourceId })
       .andWhere('booking.status IN (:...statuses)', {
         statuses: ['pending', 'confirmed']
       })

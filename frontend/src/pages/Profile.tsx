@@ -1,21 +1,63 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { userService, businessService, favoritesService } from '../services/api';
-import { User, Mail, Phone, MapPin, Save, Edit3, Heart, Star, ExternalLink } from 'lucide-react';
+import { userService, businessService, favoritesService, bookingService, api } from '../services/api';
+import {
+  User,
+  Mail,
+  Save,
+  Edit3,
+  Heart,
+  Star,
+  ExternalLink,
+  ChevronDown,
+  Settings,
+  Check,
+  Calendar,
+  Eye,
+  LogOut,
+} from 'lucide-react';
 import toast from 'react-hot-toast';
 import { TrustScore } from '../components/TrustScore';
 import { TrustScoreBreakdown } from '../components/TrustScoreBreakdown';
 import { NotificationSettings } from '../components/NotificationSettings';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useI18n } from '../contexts/I18nContext';
+import { useCurrency, CURRENCY_SYMBOLS } from '../contexts/CurrencyContext';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { useNavigate } from 'react-router-dom';
 
+type AccordionKey = 'personal' | 'settings' | 'activity' | 'favorites' | 'invites' | 'trust' | null;
+
+/** Use fallback when translation is missing (i18n often returns the key, e.g. "accountSettings"). */
+function sectionLabel(t: (k: string) => string, key: string, fallback: string): string {
+  const val = t(key);
+  return val && val !== key ? val : fallback;
+}
+
 export const Profile: React.FC = () => {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const { t } = useI18n();
+  const { currency, setCurrency } = useCurrency();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [openSection, setOpenSection] = useState<AccordionKey>(null);
+  const [currencyDropdownOpen, setCurrencyDropdownOpen] = useState(false);
+  const currencyDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (currencyDropdownRef.current && !currencyDropdownRef.current.contains(e.target as Node)) {
+        setCurrencyDropdownOpen(false);
+      }
+    };
+    if (currencyDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [currencyDropdownOpen]);
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [formData, setFormData] = useState({
     firstName: user?.firstName || '',
     lastName: user?.lastName || '',
@@ -28,30 +70,39 @@ export const Profile: React.FC = () => {
     country: user?.country || '',
   });
 
-  // Note: Trust score functionality removed as it's not implemented in the new review system
-  // const { data: trustScore } = useQuery(
-  //   'trustScore',
-  //   () => reviewService.getTrustScore(),
-  //   {
-  //     select: (response) => response.data.trustScore,
-  //   }
-  // );
+  const { data: invites } = useQuery('my-invites', () => businessService.myInvites(), {
+    select: (res) => res.data,
+  });
 
-  const queryClient = useQueryClient();
-  const { data: invites } = useQuery(
-    'my-invites',
-    () => businessService.myInvites(),
-    { select: (res) => res.data }
-  );
-
-  // Fetch favorite businesses
   const { data: favorites, isLoading: favoritesLoading } = useQuery(
     'favorites',
     () => favoritesService.getAll(),
-    { 
-      select: (res) => res.data,
-      enabled: !!user
-    }
+    { select: (res) => res.data, enabled: !!user }
+  );
+
+  const { data: bookings = [] } = useQuery(
+    ['my-bookings', user?.id, user?.role],
+    async () => {
+      const res = await bookingService.getAll();
+      let all: any[] = Array.isArray(res.data) ? res.data : res.data?.data ?? [];
+      if (user?.role === 'business_owner' || user?.role === 'employee') {
+        try {
+          const biz = (await api.get('/businesses/my-business')).data;
+          const work = biz?.id ? all.filter((b: any) => b.business?.id === biz.id || b.businessId === biz.id) : [];
+          const personal = all.filter((b: any) => b.customer?.id === user?.id || b.customerId === user?.id);
+          const seen = new Set<string>();
+          return [...work, ...personal].filter((b: any) => {
+            if (seen.has(b.id)) return false;
+            seen.add(b.id);
+            return true;
+          });
+        } catch {
+          return all.filter((b: any) => b.customer?.id === user?.id || b.customerId === user?.id);
+        }
+      }
+      return all.filter((b: any) => b.customer?.id === user?.id || b.customerId === user?.id);
+    },
+    { enabled: !!user }
   );
 
   const acceptInviteMutation = useMutation(
@@ -61,7 +112,9 @@ export const Profile: React.FC = () => {
         toast.success(t('invitationAcceptedYouAreNowEmployee'));
         queryClient.invalidateQueries('my-invites');
       },
-      onError: (e: any) => { toast.error(e.response?.data?.message || t('failedToAcceptInvitation')); }
+      onError: (e: any) => {
+        toast.error(e.response?.data?.message || t('failedToAcceptInvitation'));
+      },
     }
   );
 
@@ -74,26 +127,21 @@ export const Profile: React.FC = () => {
       },
       onError: () => {
         toast.error(t('failedToRemoveFavorite') || 'Failed to remove favorite');
-      }
+      },
     }
   );
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value,
-    });
+    setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    
     try {
       await userService.updateProfile(formData);
       toast.success('Profile updated successfully');
       setIsEditing(false);
-      // Refresh user data
       window.location.reload();
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Failed to update profile');
@@ -117,347 +165,647 @@ export const Profile: React.FC = () => {
     setIsEditing(false);
   };
 
+  const toggle = (key: AccordionKey) => {
+    setOpenSection((prev) => (prev === key ? null : key));
+  };
+
+  const totalBookings = bookings.length;
+  const completedBookings = bookings.filter((b: any) => b.status === 'completed').length;
+  const upcomingBookings = bookings.filter((b: any) => ['pending', 'confirmed'].includes(b.status)).length;
+  const favCount = Array.isArray(favorites) ? favorites.length : 0;
+  const recentActivity = [...bookings]
+    .sort((a: any, b: any) => new Date(b.appointmentDate || b.createdAt).getTime() - new Date(a.appointmentDate || a.createdAt).getTime())
+    .slice(0, 8);
+
+  const formatRole = (r: string) => {
+    if (r === 'business_owner') return 'Business Owner';
+    if (r === 'super_admin') return 'Admin';
+    return (r || '').replace(/_/g, ' ');
+  };
+
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Profile</h1>
-        <p className="text-gray-600 mt-2">Manage your account information</p>
-      </div>
-
-      {/* Profile Header */}
-      <div className="card p-6 border-[#E7001E]">
-        <div className="flex items-center space-x-4">
-          <div className="h-20 w-20 rounded-full bg-red-100 flex items-center justify-center">
-            {user?.avatar ? (
-              <img
-                src={user.avatar}
-                alt="Profile"
-                className="h-20 w-20 rounded-full object-cover"
-              />
-            ) : (
-              <User className="h-10 w-10 text-[#E7001E]" />
-            )}
-          </div>
-          <div>
-            <h2 className="text-2xl font-bold text-gray-900">
-              {user?.firstName} {user?.lastName}
-            </h2>
-            <p className="text-gray-600 capitalize">{user?.role}</p>
-            <p className="text-sm text-gray-500">Member since {new Date(user?.createdAt || '').toLocaleDateString()}</p>
-          </div>
-          {user?.trustScore !== undefined && (
-            <div className="ml-auto">
-              <TrustScore score={user.trustScore} size="lg" />
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Trust Score Breakdown */}
-      {user?.role === 'customer' && (
-        <TrustScoreBreakdown />
-      )}
-
-      {/* Profile Form */}
-      <form onSubmit={handleSubmit} className="card p-6 border-[#E7001E]">
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="text-lg font-semibold text-gray-900">Personal Information</h3>
-          {!isEditing ? (
-            <button
-              type="button"
-              onClick={() => setIsEditing(true)}
-              className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-[#E7001E] border border-[#E7001E] rounded-md hover:bg-[#c50018] transition-colors"
-            >
-              <Edit3 className="h-4 w-4" />
-              Edit
-            </button>
-          ) : (
-            <div className="flex space-x-2">
-              <button
-                type="button"
-                onClick={handleCancel}
-                className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+    <div className="profile-page bg-white">
+      <div className="w-full mx-auto px-3 sm:px-4 md:px-6 pt-8 pb-24 lg:pb-4">
+        {/* Profile Hero - single column, original sizing; only tighter spacing */}
+        <div className="profile-hero-card bg-white rounded-[20px] p-4 sm:p-5 md:p-6 shadow-[0_4px_20px_rgba(0,0,0,0.08)] mb-3 relative">
+          <div className="flex flex-col md:flex-row md:items-center gap-4 md:gap-6 mb-5 relative z-10">
+            <div className="profile-avatar-wrap shrink-0">
+              <div
+                className="w-24 h-24 sm:w-[120px] sm:h-[120px] rounded-full flex items-center justify-center text-white text-2xl sm:text-3xl font-bold shadow-[0_8px_30px_rgba(220,20,60,0.3)]"
+                style={{ background: 'linear-gradient(135deg, #DC143C, #4A0E0E)' }}
               >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={loading}
-                className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-[#E7001E] border border-[#E7001E] rounded-md hover:bg-[#c50018] transition-colors disabled:opacity-50"
-              >
-                {loading ? (
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                {user?.avatar ? (
+                  <img src={user.avatar} alt="" className="w-full h-full rounded-full object-cover" />
                 ) : (
-                  <>
-                    <Save className="h-4 w-4" />
-                    Save
-                  </>
+                  (() => {
+                    const f = user?.firstName?.[0]?.toUpperCase() || '';
+                    const l = user?.lastName?.[0]?.toUpperCase() || '';
+                    return (f + l) || '?';
+                  })()
                 )}
-              </button>
-            </div>
-          )}
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              First Name
-            </label>
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <User className="h-5 w-5 text-gray-400" />
               </div>
-              <input
-                type="text"
-                name="firstName"
-                value={formData.firstName}
-                onChange={handleChange}
-                disabled={!isEditing}
-                className="input pl-10"
-              />
             </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Last Name
-            </label>
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <User className="h-5 w-5 text-gray-400" />
-              </div>
-              <input
-                type="text"
-                name="lastName"
-                value={formData.lastName}
-                onChange={handleChange}
-                disabled={!isEditing}
-                className="input pl-10"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Email
-            </label>
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Mail className="h-5 w-5 text-gray-400" />
-              </div>
-              <input
-                type="email"
-                name="email"
-                value={formData.email}
-                onChange={handleChange}
-                disabled={!isEditing}
-                className="input pl-10"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Phone
-            </label>
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Phone className="h-5 w-5 text-gray-400" />
-              </div>
-              <input
-                type="tel"
-                name="phone"
-                value={formData.phone}
-                onChange={handleChange}
-                disabled={!isEditing}
-                className="input pl-10"
-              />
-            </div>
-          </div>
-
-          <div className="md:col-span-2">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Address
-            </label>
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <MapPin className="h-5 w-5 text-gray-400" />
-              </div>
-              <input
-                type="text"
-                name="address"
-                value={formData.address}
-                onChange={handleChange}
-                disabled={!isEditing}
-                className="input pl-10"
-                placeholder="Street address"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              City
-            </label>
-            <input
-              type="text"
-              name="city"
-              value={formData.city}
-              onChange={handleChange}
-              disabled={!isEditing}
-              className="input"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              State
-            </label>
-            <input
-              type="text"
-              name="state"
-              value={formData.state}
-              onChange={handleChange}
-              disabled={!isEditing}
-              className="input"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              ZIP Code
-            </label>
-            <input
-              type="text"
-              name="zipCode"
-              value={formData.zipCode}
-              onChange={handleChange}
-              disabled={!isEditing}
-              className="input"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Country
-            </label>
-            <input
-              type="text"
-              name="country"
-              value={formData.country}
-              onChange={handleChange}
-              disabled={!isEditing}
-              className="input"
-            />
-          </div>
-        </div>
-      </form>
-
-      {/* Favorite Businesses */}
-      <div className="card p-6 border-[#E7001E]">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-              <Heart className="h-5 w-5 text-[#E7001E]" />
-              {t('favoriteBusinesses') || 'Favorite Businesses'}
-            </h3>
-          </div>
-          {favoritesLoading ? (
-            <div className="text-center py-8">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#E7001E] mx-auto"></div>
-            </div>
-          ) : favorites && favorites.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {favorites.map((fav: any) => (
-                <div key={fav.id} className="border border-[#E7001E] rounded-lg p-4 hover:shadow-md transition-shadow">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <h4 className="font-semibold text-gray-900 mb-1">{fav.business?.name}</h4>
-                      {fav.business?.category && (
-                        <p className="text-sm text-gray-600 mb-2">{fav.business.category}</p>
-                      )}
-                      {fav.business?.rating !== undefined && fav.business?.rating !== null && !isNaN(Number(fav.business.rating)) && (
-                        <div className="flex items-center gap-1 mb-2">
-                          <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-                          <span className="text-sm font-medium">{Number(fav.business.rating).toFixed(1)}</span>
-                        </div>
-                      )}
-                    </div>
-                    <button
-                      onClick={() => removeFavoriteMutation.mutate(fav.business.id)}
-                      className="p-2 text-[#E7001E] hover:bg-red-50 rounded-full transition-colors"
-                      title={t('removeFromFavorites') || 'Remove from favorites'}
-                    >
-                      <Heart className="h-5 w-5 fill-current" />
-                    </button>
-                  </div>
-                  <button
-                    onClick={() => navigate(`/businesses/${fav.business.id}`)}
-                    className="w-full mt-3 inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[#E7001E] rounded-md hover:bg-[#c50018] transition-colors"
-                  >
-                    {t('viewDetails') || 'View Details'}
-                    <ExternalLink className="h-4 w-4" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-center py-8">
-              <Heart className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-              <p className="text-gray-500">{t('noFavoriteBusinesses') || 'No favorite businesses yet'}</p>
-              <button
-                onClick={() => navigate('/businesses')}
-                className="mt-4 inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[#E7001E] rounded-md hover:bg-[#c50018] transition-colors"
-              >
-                {t('discoverBusinesses') || 'Discover Businesses'}
-              </button>
-            </div>
-          )}
-        </div>
-
-      {/* Pending Invites */}
-      {Array.isArray(invites) && invites.length > 0 && (
-        <div className="card p-6 border-[#E7001E]">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">{t('pendingInvites') || 'Pending Business Invites'}</h3>
-          <div className="space-y-3">
-            {invites.map((inv: any) => (
-              <div key={inv.id} className="flex items-center justify-between border border-[#E7001E] rounded p-3">
-                <div>
-                  <div className="font-medium text-gray-900">{inv.business?.name || t('business')}</div>
-                  <div className="text-sm text-gray-500">{inv.email}</div>
-                </div>
-                <button
-                  onClick={() => acceptInviteMutation.mutate(inv.business.id)}
-                  className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-[#E7001E] rounded-md hover:bg-[#c50018] transition-colors"
+            <div className="flex-1 min-w-0">
+              <h1 className="text-2xl sm:text-3xl font-bold text-[#1A1A1A] mb-2">
+                {user?.firstName} {user?.lastName}
+              </h1>
+              <div className="flex flex-wrap gap-2 sm:gap-3 items-center">
+                <span
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-[10px] text-sm font-semibold"
+                  style={{
+                    background: 'linear-gradient(135deg, #FFF7ED, #FED7AA)',
+                    color: '#F59E0B',
+                  }}
                 >
-                  {t('accept') || 'Accept'}
-                </button>
+                  <User className="w-4 h-4" />
+                  {formatRole(user?.role || '')}
+                </span>
+                <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-[10px] text-sm bg-[#F5F5F5] text-[#666]">
+                  <Calendar className="w-4 h-4" />
+                  Member since {user?.createdAt ? new Date(user.createdAt).toLocaleDateString() : '—'}
+                </span>
+                {user?.trustScore !== undefined && (
+                  <span
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-[10px] text-sm font-semibold"
+                    style={{
+                      background: 'linear-gradient(135deg, #ECFDF5, #D1FAE5)',
+                      color: '#10B981',
+                    }}
+                  >
+                    <Check className="w-4 h-4" />
+                    <span className="font-bold" style={{ fontFamily: 'var(--profile-font)' }}>{user.trustScore}/100</span>
+                    <span className="text-xs opacity-80">Trust Score</span>
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 relative z-10">
+            {[
+              { label: 'Total Bookings', value: totalBookings },
+              { label: 'Completed', value: completedBookings },
+              { label: 'Upcoming', value: upcomingBookings },
+              { label: 'Favorites', value: favCount },
+            ].map(({ label, value }) => (
+              <div
+                key={label}
+                className="profile-stat-card bg-gradient-to-br from-[#F5F5F5] to-white p-3 sm:p-4 rounded-[15px] border border-[#E0E0E0] h-24 sm:h-39"
+              >
+                <div className="text-xs sm:text-sm text-[#666] uppercase tracking-wider font-semibold mb-1" style={{ fontFamily: 'var(--profile-font)' }}>
+                  {label}
+                </div>
+                <div className="text-xl sm:text-2xl font-bold text-[#1A1A1A]" style={{ fontFamily: 'var(--profile-font)' }}>{value}</div>
               </div>
             ))}
           </div>
         </div>
-      )}
 
-      {/* Account Settings */}
-      <div className="card p-6 border-[#E7001E]">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Account Settings</h3>
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="font-medium text-gray-900">Change Password</p>
-              <p className="text-sm text-gray-600">Update your account password</p>
+        {/* Collapsible: Personal Information */}
+        <div className="mt-5 mb-5">
+          <button
+            type="button"
+            onClick={() => toggle('personal')}
+            className={`profile-section-toggle w-full flex justify-between items-center px-4 sm:px-6 py-4 sm:py-5 bg-white rounded-[20px] shadow-[0_4px_20px_rgba(0,0,0,0.08)] border-0 cursor-pointer text-left ${openSection === 'personal' ? 'active' : ''}`}
+          >
+            <div className="flex items-center gap-3">
+              <User className="w-6 h-6 text-[#DC143C]" />
+              <span className="text-lg sm:text-xl font-bold text-[#1A1A1A]">
+                {sectionLabel(t, 'personalInformation', 'Personal Information')}
+              </span>
             </div>
-            <button className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-[#E7001E] border border-[#E7001E] rounded-md hover:bg-[#c50018] transition-colors">
-              Change Password
-            </button>
+            <ChevronDown className="profile-chevron w-6 h-6 text-[#1A1A1A] transition-transform duration-300" />
+          </button>
+          <div className={`profile-section-content ${openSection === 'personal' ? 'active' : ''}`}>
+            <div className="pt-3">
+              <div className="bg-white rounded-[20px] p-4 sm:p-5 md:p-6 shadow-[0_4px_20px_rgba(0,0,0,0.08)]">
+                <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-5">
+                  <div className="flex flex-wrap items-center justify-between gap-3 mb-4 pb-3 border-b-2 border-[#E8E8E8]">
+                    <span className="text-sm text-[#666]">Edit your details</span>
+                    {!isEditing ? (
+                      <button
+                        type="button"
+                        onClick={() => setIsEditing(true)}
+                        className="profile-btn-primary inline-flex items-center gap-2 px-5 py-2.5 rounded-[10px] font-semibold"
+                      >
+                        <Edit3 className="w-4 h-4" />
+                        Edit Information
+                      </button>
+                    ) : (
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={handleCancel}
+                          className="profile-btn-secondary inline-flex items-center gap-2 px-5 py-2.5 rounded-[10px] font-semibold"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={loading}
+                          className="profile-btn-primary inline-flex items-center gap-2 px-5 py-2.5 rounded-[10px] font-semibold disabled:opacity-50"
+                        >
+                          {loading ? (
+                            <span className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
+                          ) : (
+                            <>
+                              <Save className="w-4 h-4" />
+                              Save
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <div className="grid gap-4 sm:gap-5">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="flex flex-col gap-2">
+                        <label className="text-sm font-semibold text-[#1A1A1A]">First Name</label>
+                        <input
+                          type="text"
+                          name="firstName"
+                          value={formData.firstName}
+                          onChange={handleChange}
+                          disabled={!isEditing}
+                          className="profile-form-input w-full px-4 py-3.5 border-2 border-[#E0E0E0] rounded-[10px] text-[#1A1A1A] bg-[#F5F5F5] disabled:bg-[#E8E8E8] disabled:text-[#666] disabled:cursor-not-allowed"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <label className="text-sm font-semibold text-[#1A1A1A]">Last Name</label>
+                        <input
+                          type="text"
+                          name="lastName"
+                          value={formData.lastName}
+                          onChange={handleChange}
+                          disabled={!isEditing}
+                          className="profile-form-input w-full px-4 py-3.5 border-2 border-[#E0E0E0] rounded-[10px] text-[#1A1A1A] bg-[#F5F5F5] disabled:bg-[#E8E8E8] disabled:text-[#666] disabled:cursor-not-allowed"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="flex flex-col gap-2">
+                        <label className="text-sm font-semibold text-[#1A1A1A]">Email</label>
+                        <input
+                          type="email"
+                          name="email"
+                          value={formData.email}
+                          onChange={handleChange}
+                          disabled={!isEditing}
+                          className="profile-form-input w-full px-4 py-3.5 border-2 border-[#E0E0E0] rounded-[10px] text-[#1A1A1A] bg-[#F5F5F5] disabled:bg-[#E8E8E8] disabled:text-[#666] disabled:cursor-not-allowed"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <label className="text-sm font-semibold text-[#1A1A1A]">Phone</label>
+                        <input
+                          type="tel"
+                          name="phone"
+                          value={formData.phone}
+                          onChange={handleChange}
+                          disabled={!isEditing}
+                          placeholder="Not provided"
+                          className="profile-form-input w-full px-4 py-3.5 border-2 border-[#E0E0E0] rounded-[10px] text-[#1A1A1A] bg-[#F5F5F5] placeholder:text-[#666] disabled:bg-[#E8E8E8] disabled:text-[#666] disabled:cursor-not-allowed"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <label className="text-sm font-semibold text-[#1A1A1A]">Address</label>
+                      <input
+                        type="text"
+                        name="address"
+                        value={formData.address}
+                        onChange={handleChange}
+                        disabled={!isEditing}
+                        placeholder="Street address"
+                        className="profile-form-input w-full px-4 py-3.5 border-2 border-[#E0E0E0] rounded-[10px] text-[#1A1A1A] bg-[#F5F5F5] placeholder:text-[#666] disabled:bg-[#E8E8E8] disabled:text-[#666] disabled:cursor-not-allowed"
+                      />
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="flex flex-col gap-2">
+                        <label className="text-sm font-semibold text-[#1A1A1A]">City</label>
+                        <input
+                          type="text"
+                          name="city"
+                          value={formData.city}
+                          onChange={handleChange}
+                          disabled={!isEditing}
+                          className="profile-form-input w-full px-4 py-3.5 border-2 border-[#E0E0E0] rounded-[10px] bg-[#F5F5F5] disabled:bg-[#E8E8E8] disabled:text-[#666] disabled:cursor-not-allowed"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <label className="text-sm font-semibold text-[#1A1A1A]">State</label>
+                        <input
+                          type="text"
+                          name="state"
+                          value={formData.state}
+                          onChange={handleChange}
+                          disabled={!isEditing}
+                          className="profile-form-input w-full px-4 py-3.5 border-2 border-[#E0E0E0] rounded-[10px] bg-[#F5F5F5] disabled:bg-[#E8E8E8] disabled:text-[#666] disabled:cursor-not-allowed"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="flex flex-col gap-2">
+                        <label className="text-sm font-semibold text-[#1A1A1A]">ZIP Code</label>
+                        <input
+                          type="text"
+                          name="zipCode"
+                          value={formData.zipCode}
+                          onChange={handleChange}
+                          disabled={!isEditing}
+                          className="profile-form-input w-full px-4 py-3.5 border-2 border-[#E0E0E0] rounded-[10px] bg-[#F5F5F5] disabled:bg-[#E8E8E8] disabled:text-[#666] disabled:cursor-not-allowed"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <label className="text-sm font-semibold text-[#1A1A1A]">Country</label>
+                        <input
+                          type="text"
+                          name="country"
+                          value={formData.country}
+                          onChange={handleChange}
+                          disabled={!isEditing}
+                          className="profile-form-input w-full px-4 py-3.5 border-2 border-[#E0E0E0] rounded-[10px] bg-[#F5F5F5] disabled:bg-[#E8E8E8] disabled:text-[#666] disabled:cursor-not-allowed"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </form>
+              </div>
+            </div>
           </div>
-          
+        </div>
+
+        {/* Collapsible: Account Settings */}
+        <div className="mb-5">
+          <button
+            type="button"
+            onClick={() => toggle('settings')}
+            className={`profile-section-toggle w-full flex justify-between items-center px-4 sm:px-6 py-4 sm:py-5 bg-white rounded-[20px] shadow-[0_4px_20px_rgba(0,0,0,0.08)] border-0 cursor-pointer text-left ${openSection === 'settings' ? 'active' : ''}`}
+          >
+            <div className="flex items-center gap-3">
+              <Settings className="w-6 h-6 text-[#DC143C]" />
+              <span className="text-lg sm:text-xl font-bold text-[#1A1A1A]">
+                {sectionLabel(t, 'accountSettings', 'Account Settings')}
+              </span>
+            </div>
+            <ChevronDown className="profile-chevron w-6 h-6 text-[#1A1A1A] transition-transform duration-300" />
+          </button>
+          <div className={`profile-section-content ${openSection === 'settings' ? 'active' : ''}`}>
+            <div className="pt-3">
+              <div className="bg-white rounded-[20px] p-4 sm:p-5 md:p-6 shadow-[0_4px_20px_rgba(0,0,0,0.08)] space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-4 p-4 bg-[#F5F5F5] rounded-xl hover:bg-[#E8E8E8] transition-colors">
+                  <div>
+                    <h4 className="font-semibold text-[#1A1A1A] mb-1">Change Password</h4>
+                    <p className="text-sm text-[#666]">Update your account password</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/forgot-password')}
+                    className="profile-btn-secondary px-5 py-2.5 rounded-[10px] font-semibold"
+                  >
+                    Change
+                  </button>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-4 p-4 bg-[#F5F5F5] rounded-xl">
+                  <div>
+                    <h4 className="font-semibold text-[#1A1A1A] mb-1">{t('currencyPreference')}</h4>
+                    <p className="text-sm text-[#666]">{t('currencyNote')}</p>
+                  </div>
+                  <div ref={currencyDropdownRef} className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setCurrencyDropdownOpen((o) => !o)}
+                      className="flex items-center gap-2 px-4 py-2.5 border-2 border-[#E0E0E0] rounded-[10px] bg-white text-[#1A1A1A] font-medium hover:border-[#DC143C] focus:border-[#DC143C] focus:outline-none transition-colors"
+                    >
+                      <span className="text-base font-bold">{CURRENCY_SYMBOLS[currency]}</span>
+                      <span>{currency}</span>
+                      <ChevronDown className={`h-4 w-4 text-gray-500 transition-transform ${currencyDropdownOpen ? 'rotate-180' : ''}`} />
+                    </button>
+                    {currencyDropdownOpen && (
+                      <div className="absolute right-0 top-full mt-1 min-w-[180px] py-1 rounded-[10px] bg-white shadow-lg border-2 border-[#E0E0E0] z-50">
+                        {[
+                          { code: 'USD' as const, label: t('currencyUSD') },
+                          { code: 'GBP' as const, label: t('currencyGBP') },
+                          { code: 'EUR' as const, label: t('currencyEUR') },
+                          { code: 'RON' as const, label: t('currencyRON') },
+                          { code: 'MDL' as const, label: t('currencyMDL') },
+                        ].map(({ code }) => (
+                          <button
+                            key={code}
+                            type="button"
+                            onClick={() => {
+                              setCurrency(code);
+                              setCurrencyDropdownOpen(false);
+                            }}
+                            className={`w-full flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+                              currency === code
+                                ? 'bg-[#330007] text-white'
+                                : 'text-gray-800 hover:bg-gray-100'
+                            }`}
+                          >
+                            <span className="text-base font-bold w-8">{CURRENCY_SYMBOLS[code]}</span>
+                            <span>{code}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <NotificationSettings />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Collapsible: Recent Activity */}
+        <div className="mb-5">
+          <button
+            type="button"
+            onClick={() => toggle('activity')}
+            className={`profile-section-toggle w-full flex justify-between items-center px-4 sm:px-6 py-4 sm:py-5 bg-white rounded-[20px] shadow-[0_4px_20px_rgba(0,0,0,0.08)] border-0 cursor-pointer text-left ${openSection === 'activity' ? 'active' : ''}`}
+          >
+            <div className="flex items-center gap-3">
+              <Calendar className="w-6 h-6 text-[#DC143C]" />
+              <span className="text-lg sm:text-xl font-bold text-[#1A1A1A]">
+                {sectionLabel(t, 'recentActivity', 'Recent Activity')}
+              </span>
+              {recentActivity.length > 0 && (
+                <span
+                  className="px-2.5 py-1 rounded-lg text-xs font-semibold"
+                  style={{ background: 'rgba(220,20,60,0.1)', color: '#DC143C' }}
+                >
+                  {recentActivity.length} new
+                </span>
+              )}
+            </div>
+            <ChevronDown className="profile-chevron w-6 h-6 text-[#1A1A1A] transition-transform duration-300" />
+          </button>
+          <div className={`profile-section-content ${openSection === 'activity' ? 'active' : ''}`}>
+            <div className="pt-3">
+              <div className="bg-white rounded-[20px] p-4 sm:p-5 md:p-6 shadow-[0_4px_20px_rgba(0,0,0,0.08)]">
+                {recentActivity.length > 0 ? (
+                  <div className="space-y-3">
+                    {recentActivity.map((b: any) => (
+                      <div
+                        key={b.id}
+                        className="flex items-center gap-4 p-4 bg-[#F5F5F5] rounded-xl hover:bg-[#E8E8E8] transition-all cursor-pointer"
+                        onClick={() => navigate('/my-bookings')}
+                      >
+                        <div
+                          className="w-10 h-10 rounded-[10px] flex items-center justify-center shrink-0"
+                          style={{ background: 'rgba(220,20,60,0.15)' }}
+                        >
+                          {b.status === 'completed' ? (
+                            <Check className="w-5 h-5 text-[#DC143C]" />
+                          ) : ['pending', 'confirmed'].includes(b.status) ? (
+                            <Calendar className="w-5 h-5 text-[#DC143C]" />
+                          ) : (
+                            <Eye className="w-5 h-5 text-[#DC143C]" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold text-[#1A1A1A]">
+                            {b.service?.name || 'Booking'} {b.status === 'completed' ? 'Completed' : ''}
+                          </div>
+                          <div className="text-sm text-[#666] truncate">
+                            {b.business?.name || '—'} •{' '}
+                            {b.appointmentDate
+                              ? new Date(b.appointmentDate).toLocaleDateString(undefined, {
+                                  month: 'short',
+                                  day: 'numeric',
+                                  year: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })
+                              : '—'}
+                          </div>
+                        </div>
+                        {['completed', 'confirmed'].includes(b.status) && (
+                          <span
+                            className="px-2 py-0.5 rounded text-[10px] font-semibold uppercase shrink-0"
+                            style={{
+                              background: '#D1FAE5',
+                              color: '#10B981',
+                            }}
+                          >
+                            {b.status === 'completed' ? 'Completed' : 'Confirmed'}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-10">
+                    <Calendar className="w-16 h-16 mx-auto mb-4 text-[#E0E0E0]" />
+                    <h3 className="text-lg font-semibold text-[#1A1A1A] mb-2">No activity yet</h3>
+                    <p className="text-[#666] mb-4">Your bookings and activity will appear here</p>
+                    <button
+                      type="button"
+                      onClick={() => navigate('/')}
+                      className="profile-btn-primary inline-flex items-center gap-2 px-5 py-2.5 rounded-[10px] font-semibold"
+                    >
+                      Discover Businesses
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Collapsible: Favorite Businesses */}
+        <div className="mb-5">
+          <button
+            type="button"
+            onClick={() => toggle('favorites')}
+            className={`profile-section-toggle w-full flex justify-between items-center px-4 sm:px-6 py-4 sm:py-5 bg-white rounded-[20px] shadow-[0_4px_20px_rgba(0,0,0,0.08)] border-0 cursor-pointer text-left ${openSection === 'favorites' ? 'active' : ''}`}
+          >
+            <div className="flex items-center gap-3">
+              <Heart className="w-6 h-6 text-[#DC143C]" />
+              <span className="text-lg sm:text-xl font-bold text-[#1A1A1A]">
+                {sectionLabel(t, 'favoriteBusinesses', 'Favorite Businesses')}
+              </span>
+            </div>
+            <ChevronDown className="profile-chevron w-6 h-6 text-[#1A1A1A] transition-transform duration-300" />
+          </button>
+          <div className={`profile-section-content ${openSection === 'favorites' ? 'active' : ''}`}>
+            <div className="pt-3">
+              <div className="bg-white rounded-[20px] p-4 sm:p-5 md:p-6 shadow-[0_4px_20px_rgba(0,0,0,0.08)]">
+                {favoritesLoading ? (
+                  <div className="flex justify-center py-10">
+                    <span className="animate-spin rounded-full h-10 w-10 border-2 border-[#DC143C]/30 border-t-[#DC143C]" />
+                  </div>
+                ) : favorites && favorites.length > 0 ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {favorites.map((fav: any) => (
+                      <div
+                        key={fav.id}
+                        className="flex items-start justify-between p-4 rounded-xl border border-[#E0E0E0] bg-[#F5F5F5] hover:bg-[#E8E8E8] transition-all"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <h4 className="font-semibold text-[#1A1A1A] mb-1 truncate">
+                            {fav.business?.name}
+                          </h4>
+                          {fav.business?.category && (
+                            <p className="text-sm text-[#666] capitalize truncate">
+                              {(fav.business.category || '').replace(/_/g, ' ')}
+                            </p>
+                          )}
+                          {fav.business?.rating != null && !isNaN(Number(fav.business.rating)) && (
+                            <div className="flex items-center gap-1 mt-1">
+                              <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
+                              <span className="text-sm font-medium">{Number(fav.business.rating).toFixed(1)}</span>
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0 ml-2">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removeFavoriteMutation.mutate(fav.business.id);
+                            }}
+                            className="p-2 text-[#330007] hover:bg-[#330007]/10 rounded-lg transition-colors"
+                            title={t('removeFromFavorites') || 'Remove'}
+                          >
+                            <Heart className="w-5 h-5 fill-current" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => navigate(`/businesses/${fav.business.id}`)}
+                            className="p-2 text-[#330007] hover:bg-[#330007]/10 rounded-lg transition-colors"
+                            title={t('viewDetails') || 'View'}
+                          >
+                            <ExternalLink className="w-5 h-5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-10">
+                    <Heart className="w-20 h-20 mx-auto mb-4 text-[#E0E0E0]" />
+                    <h3 className="text-lg font-semibold text-[#1A1A1A] mb-2">
+                      {t('noFavoriteBusinesses') || 'No Favorites Yet'}
+                    </h3>
+                    <p className="text-[#666] mb-6">
+                      Start adding your favorite businesses to quickly book again
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => navigate('/')}
+                      className="profile-btn-primary inline-flex items-center gap-2 px-5 py-2.5 rounded-[10px] font-semibold"
+                    >
+                      {t('discoverBusinesses') || 'Discover Businesses'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Collapsible: Pending Invites */}
+        {Array.isArray(invites) && invites.length > 0 && (
+          <div className="mb-5">
+            <button
+              type="button"
+              onClick={() => toggle('invites')}
+              className={`profile-section-toggle w-full flex justify-between items-center px-4 sm:px-6 py-4 sm:py-5 bg-white rounded-[20px] shadow-[0_4px_20px_rgba(0,0,0,0.08)] border-0 cursor-pointer text-left ${openSection === 'invites' ? 'active' : ''}`}
+            >
+              <div className="flex items-center gap-3">
+                <Mail className="w-6 h-6 text-[#DC143C]" />
+                <span className="text-lg sm:text-xl font-bold text-[#1A1A1A]">
+                  {sectionLabel(t, 'pendingInvites', 'Pending Invites')}
+                </span>
+                <span
+                  className="px-2.5 py-1 rounded-lg text-xs font-semibold"
+                  style={{ background: 'rgba(220,20,60,0.1)', color: '#DC143C' }}
+                >
+                  {invites.length}
+                </span>
+              </div>
+              <ChevronDown className="profile-chevron w-6 h-6 text-[#1A1A1A] transition-transform duration-300" />
+            </button>
+            <div className={`profile-section-content ${openSection === 'invites' ? 'active' : ''}`}>
+              <div className="pt-3">
+                <div className="bg-white rounded-[20px] p-4 sm:p-5 md:p-6 shadow-[0_4px_20px_rgba(0,0,0,0.08)] space-y-3">
+                  {invites.map((inv: any) => (
+                    <div
+                      key={inv.id}
+                      className="flex flex-wrap items-center justify-between gap-4 p-4 bg-[#F5F5F5] rounded-xl"
+                    >
+                      <div className="min-w-0">
+                        <p className="font-semibold text-[#1A1A1A] truncate">
+                          {inv.business?.name || t('business')}
+                        </p>
+                        <p className="text-sm text-[#666] truncate">{inv.email}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => acceptInviteMutation.mutate(inv.business.id)}
+                        className="profile-btn-primary shrink-0 px-4 py-2 rounded-lg font-semibold text-sm"
+                      >
+                        {t('accept') || 'Accept'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Collapsible: Trust Score (customers only) */}
+        {user?.role === 'customer' && (
+          <div className="mb-5">
+            <button
+              type="button"
+              onClick={() => toggle('trust')}
+              className={`profile-section-toggle w-full flex justify-between items-center px-4 sm:px-6 py-4 sm:py-5 bg-white rounded-[20px] shadow-[0_4px_20px_rgba(0,0,0,0.08)] border-0 cursor-pointer text-left ${openSection === 'trust' ? 'active' : ''}`}
+            >
+              <div className="flex items-center gap-3">
+                <Star className="w-6 h-6 text-[#DC143C]" />
+                <span className="text-lg sm:text-xl font-bold text-[#1A1A1A]">Trust Score</span>
+              </div>
+              <ChevronDown className="profile-chevron w-6 h-6 text-[#1A1A1A] transition-transform duration-300" />
+            </button>
+            <div className={`profile-section-content ${openSection === 'trust' ? 'active' : ''}`}>
+              <div className="pt-3">
+                <div className="bg-white rounded-[20px] p-4 sm:p-5 md:p-6 shadow-[0_4px_20px_rgba(0,0,0,0.08)]">
+                  <TrustScoreBreakdown />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Logout button - phones only (hidden on md and up) */}
+        <div className="mt-5 mb-4 md:hidden">
+          <button
+            type="button"
+            onClick={() => setShowLogoutConfirm(true)}
+            className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-[12px] font-semibold text-[#E7001E] bg-red-50 border border-red-200 hover:bg-red-100 transition-colors"
+          >
+            <LogOut className="w-5 h-5" />
+            {t('Log out') || 'Log out'}
+          </button>
         </div>
       </div>
 
-      {/* Push Notification Settings */}
-      <div className="card p-6 border-[#E7001E]">
-        <NotificationSettings />
-      </div>
+      {/* Logout confirmation - styled modal */}
+      <ConfirmDialog
+        isOpen={showLogoutConfirm}
+        title={t('Log out') || 'Log out'}
+        message={t('Confirm logout lessage') || "Are you sure you want to log out? You'll need to sign in again to access your account."}
+        confirmText={t('Log out') || 'Log Out'}
+        cancelText={t('Cancel') || 'Cancel'}
+        variant="danger"
+        onConfirm={() => {
+          logout();
+          setShowLogoutConfirm(false);
+        }}
+        onCancel={() => setShowLogoutConfirm(false)}
+      />
     </div>
   );
 };

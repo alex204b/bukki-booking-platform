@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { useAuth } from './AuthContext';
+import { authStorage } from '../utils/authStorage';
 
 interface SocketContextType {
   socket: Socket | null;
@@ -30,10 +32,10 @@ interface SocketProviderProps {
 export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const { token: authToken } = useAuth();
 
   const connect = useCallback(() => {
-    // Get token from localStorage
-    const token = localStorage.getItem('token');
+    const token = authStorage.getToken();
     if (!token) {
       console.warn('[SocketContext] No token found, cannot connect to WebSocket');
       return;
@@ -92,41 +94,23 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     }
   }, [socket]);
 
-  // Auto-connect when token is available
+  // Connect when token is available, disconnect when logged out
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (token && !socket) {
+    if (authToken && !socket?.connected) {
       connect();
+    } else if (!authToken && socket) {
+      disconnect();
     }
+  }, [authToken]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Cleanup on unmount
+  // Cleanup on unmount
+  useEffect(() => {
     return () => {
       if (socket) {
         socket.disconnect();
       }
     };
-  }, []); // Only run once on mount
-
-  // Listen for token changes in localStorage (login/logout)
-  useEffect(() => {
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'token') {
-        if (e.newValue) {
-          // User logged in, connect
-          connect();
-        } else {
-          // User logged out, disconnect
-          disconnect();
-        }
-      }
-    };
-
-    window.addEventListener('storage', handleStorageChange);
-
-    return () => {
-      window.removeEventListener('storage', handleStorageChange);
-    };
-  }, [connect, disconnect]);
+  }, [socket]);
 
   const value: SocketContextType = {
     socket,

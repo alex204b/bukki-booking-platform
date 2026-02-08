@@ -9,6 +9,7 @@ import toast from 'react-hot-toast';
 import { useI18n } from '../contexts/I18nContext';
 import { format, formatDistanceToNow } from 'date-fns';
 import { useChat } from '../hooks/useChat';
+import { authStorage } from '../utils/authStorage';
 
 interface ChatMessage {
   id: string;
@@ -85,7 +86,12 @@ export const Chat: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
-  const { data: conversations = [], isLoading: conversationsLoading } = useQuery(
+  const {
+    data: conversations = [],
+    isLoading: conversationsLoading,
+    isError: conversationsError,
+    refetch: refetchConversations,
+  } = useQuery(
     'chat-conversations',
     () => messageService.getConversations(),
     {
@@ -99,7 +105,10 @@ export const Chat: React.FC = () => {
         return convs;
       },
       refetchInterval: 5000,
-      retry: false,
+      retry: 2,
+      onError: (err: any) => {
+        toast.error(err.response?.data?.message || 'Failed to load conversations');
+      },
     }
   );
 
@@ -168,6 +177,9 @@ export const Chat: React.FC = () => {
   const teamInvitations = systemMessages.filter((msg: SystemMessage) =>
     msg.type === 'team_invitation' && msg.status !== 'archived'
   );
+
+  const messagesUnreadCount = conversations.reduce((s, c) => s + (c.unreadCount || 0), 0);
+  const invitationsUnreadCount = teamInvitations.filter((m: SystemMessage) => m.status === 'unread').length;
 
   const promotionalOffers: SystemMessage[] = offers.map((offer: any) => ({
     id: offer.id,
@@ -263,9 +275,13 @@ export const Chat: React.FC = () => {
       refetchOnWindowFocus: true,
       cacheTime: 0,
       staleTime: 0,
-      onSuccess: (data) => {
+      onSuccess: () => {
         if (businessId) {
-          messageService.markConversationAsRead(businessId).catch(() => {});
+          const conv = conversations.find((c: Conversation) => c.business.id === businessId);
+          const customerId = (user?.role === 'business_owner' || user?.role === 'employee') ? conv?.customer?.id : undefined;
+          messageService.markConversationAsRead(businessId, customerId).then(() => {
+            queryClient.invalidateQueries('chat-conversations');
+          }).catch(() => {});
         }
       },
     }
@@ -314,8 +330,13 @@ export const Chat: React.FC = () => {
       }
       await messageService.sendChatMessage(businessId, content.trim(), bookingId || undefined);
       setMessage('');
+      // Mark conversation as read so unread badge disappears after replying
+      const readCustomerId = (user?.role === 'business_owner' || user?.role === 'employee') ? customerId : undefined;
+      await messageService.markConversationAsRead(businessId, readCustomerId ?? undefined).catch(() => {});
       await queryClient.invalidateQueries(['chat-conversation', businessId]);
+      await queryClient.invalidateQueries('chat-conversations');
       await queryClient.refetchQueries(['chat-conversation', businessId]);
+      await queryClient.refetchQueries('chat-conversations');
     } catch (error: any) {
       const errorMessage = error.response?.data?.message || error.message || 'Failed to send message';
       toast.error(errorMessage, { duration: 5000 });
@@ -325,17 +346,26 @@ export const Chat: React.FC = () => {
   };
 
   const acceptInviteMutation = useMutation(
-    ({ businessId, email }: { businessId: string; email: string }) =>
+    ({ businessId, email, messageId }: { businessId: string; email: string; messageId?: string }) =>
       businessService.acceptInvite(businessId, email),
     {
-      onSuccess: async (data: any) => {
+      onSuccess: async (data: any, variables) => {
         toast.success(t('invitationAcceptedRedirecting') || 'Invitation accepted!');
+        // Archive the invitation before reload so it moves to Archived tab
+        if (variables.messageId) {
+          try {
+            await messageService.archiveMessage(variables.messageId);
+            queryClient.invalidateQueries('all-messages');
+          } catch (archiveErr) {
+            console.warn('Failed to archive invitation:', archiveErr);
+          }
+        }
         queryClient.invalidateQueries('all-messages');
         queryClient.invalidateQueries('my-business-memberships');
         try {
           const profileRes = await api.get('/auth/profile');
           const updatedUser = profileRes.data;
-          localStorage.setItem('user', JSON.stringify(updatedUser));
+          authStorage.setUser(JSON.stringify(updatedUser));
           window.location.reload();
         } catch (err) {
           setTimeout(() => navigate('/business-dashboard'), 1500);
@@ -360,12 +390,27 @@ export const Chat: React.FC = () => {
     }
   );
 
+  const markAsReadMutation = useMutation(
+    (id: string) => messageService.markAsRead(id),
+    {
+      onSuccess: (_, id) => {
+        queryClient.invalidateQueries('all-messages');
+        queryClient.invalidateQueries(['unread-notifications-count', user?.id]);
+      },
+    }
+  );
+
   const handleAcceptInvite = async (msg: SystemMessage) => {
     if (!msg.business?.id || !user?.email) return;
-    await acceptInviteMutation.mutateAsync({
-      businessId: msg.business.id,
-      email: user.email,
-    });
+    try {
+      await acceptInviteMutation.mutateAsync({
+        businessId: msg.business.id,
+        email: user.email,
+        messageId: msg.id,
+      });
+    } catch (err) {
+      // Error already handled by mutation
+    }
   };
 
   const handleArchive = async (id: string) => {
@@ -405,8 +450,13 @@ export const Chat: React.FC = () => {
           setSearchParams(newSearchParams, { replace: true });
         }
       }
+      // Mark this conversation as read when viewing it (so badge clears even if onSuccess didn't run)
+      const readCustomerId = (user?.role === 'business_owner' || user?.role === 'employee') ? conv?.customer?.id : undefined;
+      messageService.markConversationAsRead(businessId, readCustomerId).then(() => {
+        queryClient.invalidateQueries('chat-conversations');
+      }).catch(() => {});
     }
-  }, [businessId, conversations, searchParams, setSearchParams]);
+  }, [businessId, conversations, searchParams, setSearchParams, user?.role]);
 
   // Prevent body scrollbar on mount, restore on unmount
   useEffect(() => {
@@ -481,19 +531,23 @@ export const Chat: React.FC = () => {
   };
 
   const tabs = [
-    { id: 'messages', label: t('messages') || 'Messages', icon: MessageCircle, count: conversations.length },
-    { id: 'invitations', label: t('invitations') || 'Invitations', icon: Mail, count: teamInvitations.length },
+    { id: 'messages', label: t('messages') || 'Messages', icon: MessageCircle, count: messagesUnreadCount },
+    { id: 'invitations', label: t('invitations') || 'Invitations', icon: Mail, count: invitationsUnreadCount },
     { id: 'offers', label: t('offers') || 'Offers', icon: Gift, count: offers.length },
     { id: 'archived', label: t('archived') || 'Archived', icon: Archive, count: archivedMessages.length },
   ];
 
   const currentConversations = getCurrentTabConversations();
 
+  const selectedSystemMessage = selectedConversation && 'type' in selectedConversation ? (selectedConversation as SystemMessage) : null;
+  const showListOnMobile = !businessId && !selectedSystemMessage;
+  const showChatOnMobile = !!businessId || !!selectedSystemMessage;
+
   return (
-    <div className="h-full bg-white overflow-hidden">
-        <div className="flex gap-0 h-full overflow-hidden">
-          {/* Sidebar */}
-          <div className="w-64 bg-white border-r border-gray-200 flex flex-col overflow-hidden">
+    <div className="h-full min-h-0 bg-white overflow-hidden flex flex-col">
+        <div className="flex gap-0 flex-1 min-h-0 overflow-hidden">
+          {/* Sidebar - on mobile: full width when no conversation, hidden when viewing conversation */}
+          <div className={`${showListOnMobile ? 'flex w-full' : 'hidden'} lg:flex lg:w-64 lg:flex-shrink-0 bg-white border-r border-gray-200 flex-col overflow-hidden min-h-0`}>
             {/* Search */}
             <div className="p-3 border-b border-gray-200">
               <div className="relative">
@@ -534,7 +588,7 @@ export const Chat: React.FC = () => {
                     style={activeTab === tab.id ? { borderBottomColor: '#330007', color: '#330007' } : undefined}
                   >
                     <Icon className="h-4 w-4" />
-                    {tab.count > 0 && (
+                    {tab.count > 0 && tab.id !== 'archived' && (
                       <span className="bg-[#330007] text-white text-[10px] px-1 rounded-full" style={{ backgroundColor: '#330007' }}>
                         {tab.count}
                       </span>
@@ -545,15 +599,30 @@ export const Chat: React.FC = () => {
             </div>
 
             {/* Conversations List */}
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 min-h-0 overflow-y-auto">
               {conversationsLoading ? (
                 <div className="flex justify-center py-6">
                   <div className="animate-spin rounded-full h-6 w-6 border-2 border-[#330007] border-t-transparent"></div>
                 </div>
+              ) : conversationsError ? (
+                <div className="flex flex-col items-center justify-center h-full text-center px-3 py-6">
+                  <MessageCircle className="h-10 w-10 text-gray-300 mb-2" />
+                  <p className="text-xs text-red-600 mb-2">Failed to load conversations</p>
+                  <button
+                    onClick={() => refetchConversations()}
+                    className="text-xs font-medium text-[#330007] hover:underline"
+                    style={{ color: '#330007' }}
+                  >
+                    Try again
+                  </button>
+                </div>
               ) : currentConversations.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full text-center px-3 py-6">
                   <MessageCircle className="h-10 w-10 text-gray-300 mb-2" />
-                  <p className="text-xs text-gray-500">No conversations yet</p>
+                  <p className="text-xs text-gray-500">{t('noConversations') || 'No conversations yet'}</p>
+                  {activeTab === 'messages' && (
+                    <p className="text-[10px] text-gray-400 mt-1">{t('startChatFromBooking') || 'Start a chat from a booking or business page'}</p>
+                  )}
                 </div>
               ) : (
                 currentConversations.map((conv: Conversation | SystemMessage) => {
@@ -572,7 +641,15 @@ export const Chat: React.FC = () => {
                       onClick={() => {
                         setSelectedConversation(conv);
                         if ('business' in conv && 'lastMessage' in conv) {
-                          navigate(`/chat/${(conv as Conversation).business.id}`);
+                          const convAsChat = conv as Conversation;
+                          const bid = convAsChat.business.id;
+                          const customerId = (user?.role === 'business_owner' || user?.role === 'employee') ? convAsChat.customer?.id : undefined;
+                          messageService.markConversationAsRead(bid, customerId).then(() => {
+                            queryClient.invalidateQueries('chat-conversations');
+                          }).catch(() => {});
+                          navigate(`/chat/${bid}`);
+                        } else if ('type' in conv && (conv as SystemMessage).type === 'team_invitation' && (conv as SystemMessage).status === 'unread') {
+                          markAsReadMutation.mutate((conv as SystemMessage).id);
                         }
                       }}
                       className={`flex items-center gap-2 p-2 border-b border-gray-100 cursor-pointer hover:bg-gray-50 ${
@@ -587,8 +664,10 @@ export const Chat: React.FC = () => {
                           <h3 className="font-semibold text-xs text-gray-900 truncate">{display.name}</h3>
                           <span className="text-[10px] text-gray-500 ml-2">{display.time}</span>
                         </div>
-                        <p className="text-[10px] text-gray-600 truncate">{display.lastMessage}</p>
-                        {isSystemMessage && (conv as SystemMessage).type === 'team_invitation' && !isAlreadyMember(conv as SystemMessage) && (
+                        <p className={`text-[10px] text-gray-600 ${isSystemMessage ? 'whitespace-pre-line line-clamp-5' : 'truncate'}`}>
+                          {display.lastMessage}
+                        </p>
+                        {isSystemMessage && (conv as SystemMessage).type === 'team_invitation' && (conv as SystemMessage).status !== 'archived' && !isAlreadyMember(conv as SystemMessage) && (
                           <div className="flex gap-1.5 mt-1.5">
                             <button
                               onClick={(e) => {
@@ -625,21 +704,28 @@ export const Chat: React.FC = () => {
             </div>
           </div>
 
-          {/* Chat Area */}
-          <div className="flex-1 bg-white flex flex-col overflow-hidden">
+          {/* Chat Area - on mobile: full width when viewing conversation, hidden when on list */}
+          <div className={`${showChatOnMobile ? 'flex flex-1' : 'hidden'} lg:flex flex-1 min-h-0 bg-white flex-col overflow-hidden`}>
             {businessId ? (
               <>
-                {/* Header */}
-                <div className="bg-white border-b border-gray-200 p-3 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-full bg-[#330007] flex items-center justify-center text-white font-semibold text-xs" style={{ backgroundColor: '#330007' }}>
+                {/* Header - back button on mobile */}
+                <div className="bg-white border-b border-gray-200 p-3 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <button
+                      onClick={() => navigate('/chat')}
+                      className="lg:hidden p-1.5 -ml-1 hover:bg-gray-100 rounded-lg shrink-0"
+                      aria-label={t('back') || 'Back'}
+                    >
+                      <ArrowLeft className="h-5 w-5 text-gray-700" />
+                    </button>
+                    <div className="w-8 h-8 rounded-full bg-[#330007] flex items-center justify-center text-white font-semibold text-xs shrink-0" style={{ backgroundColor: '#330007' }}>
                       {displayName.substring(0, 2).toUpperCase()}
                     </div>
-                    <div>
-                      <h2 className="font-semibold text-sm text-gray-900">{displayName}</h2>
+                    <div className="min-w-0 flex-1">
+                      <h2 className="font-semibold text-sm text-gray-900 truncate">{displayName}</h2>
                     </div>
                   </div>
-                  <button className="p-1.5 hover:bg-gray-100 rounded-lg">
+                  <button className="p-1.5 hover:bg-gray-100 rounded-lg shrink-0">
                     <MoreVertical className="h-4 w-4 text-gray-600" />
                   </button>
                 </div>
@@ -647,7 +733,7 @@ export const Chat: React.FC = () => {
                 {/* Messages */}
                 <div
                   ref={chatContainerRef}
-                  className="flex-1 p-3 bg-gray-50 overflow-y-auto"
+                  className="flex-1 min-h-0 p-3 bg-gray-50 overflow-y-auto"
                 >
                   {messagesLoading ? (
                     <div className="flex justify-center py-6">
@@ -731,6 +817,63 @@ export const Chat: React.FC = () => {
                       )}
                     </button>
                   </form>
+                </div>
+              </>
+            ) : selectedSystemMessage ? (
+              <>
+                {/* Header for system message (invitation / offer) */}
+                <div className="bg-white border-b border-gray-200 p-3 flex items-center justify-between gap-2">
+                  <button
+                    onClick={() => setSelectedConversation(null)}
+                    className="lg:hidden p-1.5 -ml-1 hover:bg-gray-100 rounded-lg shrink-0"
+                    aria-label={t('back') || 'Back'}
+                  >
+                    <ArrowLeft className="h-5 w-5 text-gray-700" />
+                  </button>
+                  <div className="w-10 h-10 rounded-full bg-[#330007] flex items-center justify-center text-white font-semibold text-sm shrink-0" style={{ backgroundColor: '#330007' }}>
+                    {selectedSystemMessage.type === 'team_invitation' ? 'TI' : 'PO'}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h2 className="font-semibold text-gray-900 truncate">
+                      {selectedSystemMessage.business?.name || selectedSystemMessage.subject}
+                    </h2>
+                    <p className="text-xs text-gray-500">
+                      {formatDistanceToNow(new Date(selectedSystemMessage.createdAt), { addSuffix: true })}
+                    </p>
+                  </div>
+                </div>
+                {/* Message content - large readable area */}
+                <div className="flex-1 min-h-0 p-4 md:p-6 overflow-y-auto bg-gray-50">
+                  <div className="max-w-2xl mx-auto bg-white rounded-xl shadow-sm border border-gray-200 p-5 md:p-6">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                      {selectedSystemMessage.type === 'team_invitation'
+                        ? (t('teamInvitation') || 'Team invitation')
+                        : (t('offer') || 'Offer')}
+                    </h3>
+                    <p className="text-base text-gray-700 whitespace-pre-line leading-relaxed">
+                      {selectedSystemMessage.content}
+                    </p>
+                    {selectedSystemMessage.type === 'team_invitation' && selectedSystemMessage.status !== 'archived' && !isAlreadyMember(selectedSystemMessage) && (
+                      <div className="flex flex-wrap gap-3 mt-6 pt-4 border-t border-gray-200">
+                        <button
+                          type="button"
+                          onClick={() => handleAcceptInvite(selectedSystemMessage)}
+                          disabled={acceptInviteMutation.isLoading}
+                          className="px-4 py-2.5 text-sm font-medium text-white rounded-lg hover:opacity-90 disabled:opacity-50 transition-opacity"
+                          style={{ backgroundColor: '#330007' }}
+                        >
+                          {acceptInviteMutation.isLoading ? '...' : (t('accept') || 'Accept')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleArchive(selectedSystemMessage.id)}
+                          className="px-4 py-2.5 text-sm font-medium text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 transition-colors"
+                        >
+                          {t('decline') || 'Decline'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </>
             ) : (

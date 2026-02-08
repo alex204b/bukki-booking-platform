@@ -121,7 +121,7 @@ export const Offers: React.FC = () => {
               </ul>
             </div>
             <div className="flex gap-3 justify-center">
-              <Link to="/businesses" className="btn btn-primary">
+              <Link to="/" className="btn btn-primary">
                 Browse Businesses
               </Link>
               <Link to="/my-bookings" className="btn btn-outline">
