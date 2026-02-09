@@ -16,11 +16,12 @@ Complete documentation index for the Bukki multi-business booking platform.
 
 ## 📖 Core Documentation
 
-### Backend API
+### Application Components
 
 | Document | Description |
 |----------|-------------|
-| [Backend README](backend/README.md) | **⭐ Backend overview** - API structure, setup, and testing |
+| [Backend README](backend/README.md) | **⭐ Backend API** - NestJS API structure, setup, and testing |
+| [Frontend README](frontend/README.md) | **⭐ Frontend App** - React web & mobile app guide |
 | [Implementation Summary](docs/development/IMPLEMENTATION_SUMMARY.md) | Complete feature implementation summary |
 
 ### Deployment
