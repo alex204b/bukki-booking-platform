@@ -16,6 +16,13 @@ Complete documentation index for the Bukki multi-business booking platform.
 
 ## 📖 Core Documentation
 
+### Backend API
+
+| Document | Description |
+|----------|-------------|
+| [Backend README](backend/README.md) | **⭐ Backend overview** - API structure, setup, and testing |
+| [Implementation Summary](docs/development/IMPLEMENTATION_SUMMARY.md) | Complete feature implementation summary |
+
 ### Deployment
 
 | Document | Description |
@@ -39,12 +46,15 @@ Complete documentation index for the Bukki multi-business booking platform.
 | Document | Description |
 |----------|-------------|
 | [SETUP_DEV_DATABASE.md](docs/database/SETUP_DEV_DATABASE.md) | Database setup and configuration |
+| [DATABASE_INDEXES_GUIDE.md](docs/database/guides/DATABASE_INDEXES_GUIDE.md) | Database indexing strategies |
+| [APPLY_MIGRATION.md](docs/database/guides/APPLY_MIGRATION.md) | Migration application guide |
 
 ### Implementation Guides
 
 | Document | Description |
 |----------|-------------|
 | [LOGIN_PROTECTION_IMPLEMENTATION.md](docs/guides/LOGIN_PROTECTION_IMPLEMENTATION.md) | Anti-brute-force login protection |
+| [PAGINATION_IMPLEMENTATION_GUIDE.md](docs/guides/PAGINATION_IMPLEMENTATION_GUIDE.md) | API pagination implementation |
 | [RESPONSIVE_DESIGN_GUIDE.md](docs/RESPONSIVE_DESIGN_GUIDE.md) | Responsive UI implementation |
 | [PUSH_NOTIFICATIONS_SETUP.md](docs/development/PUSH_NOTIFICATIONS_SETUP.md) | Firebase push notifications setup |
 
