@@ -26,6 +26,7 @@ import Motif from './Motif';
 import { ConfirmDialog } from './ConfirmDialog';
 import { NotificationCenter } from './NotificationCenter';
 import { AIAssistant } from './AIAssistant';
+import { Capacitor } from '@capacitor/core';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -54,6 +55,9 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [currencyDropdownOpen, setCurrencyDropdownOpen] = useState(false);
   const langDropdownRef = useRef<HTMLDivElement>(null);
   const currencyDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Detect if running in native mobile app (Capacitor) vs web browser
+  const isNativeApp = Capacitor.isNativePlatform();
 
   // Emit sidebar state changes as custom events
   React.useEffect(() => {
@@ -176,18 +180,23 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
   return (
     <div className="min-h-screen bg-white">
-      {/* Safe-area top bar for phones (under status bar/notch) - matches Login page implementation */}
-      <div
-        className="fixed inset-x-0 top-0 z-50 pointer-events-none md:hidden"
-        style={{
-          height: 'max(env(safe-area-inset-top, 0px), 1.5vh)',
-          backgroundColor: '#330007',
-        }}
-      />
+      {/* Safe-area top bar for phones (under status bar/notch) - Only in native app */}
+      {isNativeApp && (
+        <div
+          className="fixed inset-x-0 top-0 z-50 pointer-events-none"
+          style={{
+            height: 'env(safe-area-inset-top, 0px)',
+            backgroundColor: '#330007',
+          }}
+        />
+      )}
       
       {/* Sticky Header Logo - extends full width with all top bar content */}
-      <header 
-        className="fixed left-0 right-0 z-50 bg-[#330007] border-b border-[#330007] h-16 top-[max(env(safe-area-inset-top,0px),1.5vh)] md:top-0"
+      <header
+        className="fixed left-0 right-0 z-50 bg-[#330007] border-b border-[#330007] h-16"
+        style={{
+          top: isNativeApp ? 'env(safe-area-inset-top, 0px)' : '0px'
+        }}
       >
         <div className="h-full w-full px-2 sm:px-3 md:px-5 lg:px-6 flex items-center justify-between gap-2">
           {/* Left side: Language dropdown on mobile only */}
@@ -374,7 +383,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
       <div className={`fixed inset-0 z-[45] lg:hidden ${sidebarOpen ? 'block' : 'hidden'}`}>
         <div className="fixed inset-0 bg-gray-600 bg-opacity-75 z-[45]" onClick={() => setSidebarOpen(false)} />
         <div className="fixed bottom-0 left-0 flex w-52 flex-col backdrop-blur-md z-[46]" style={{
-          top: 'calc(64px + max(env(safe-area-inset-top, 0px), 1.5vh))',
+          top: isNativeApp ? 'calc(64px + env(safe-area-inset-top, 0px))' : '64px',
           background: 'linear-gradient(to right, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.75))'
         }}>
           <div className="flex h-10 items-center justify-between px-2.5">
@@ -433,7 +442,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
             sidebarOpen ? 'w-56' : 'w-14'
           }`}
           style={{
-            top: 'calc(64px + max(env(safe-area-inset-top, 0px), 1.5vh))',
+            top: isNativeApp ? 'calc(64px + env(safe-area-inset-top, 0px))' : '64px',
           }}
         >
           <div className="flex flex-col flex-grow backdrop-blur-md" style={{
@@ -528,10 +537,10 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
       </>
 
       {/* Main content - always centered, sidebar overlays */}
-      <div 
+      <div
         className={`${sidebarOpen ? 'lg:ml-56' : 'lg:ml-14'} ${sidebarOpen ? 'lg:pointer-events-auto pointer-events-none' : ''} h-screen overflow-hidden`}
         style={{
-          paddingTop: 'calc(64px + env(safe-area-inset-top, 0px))',
+          paddingTop: isNativeApp ? 'calc(64px + env(safe-area-inset-top, 0px))' : '64px',
         }}
       >
         {/* Page content - for Chat, use overflow-hidden and full height so messages fill the screen */}
