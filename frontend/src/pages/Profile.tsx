@@ -15,6 +15,7 @@ import {
   Calendar,
   Eye,
   LogOut,
+  Info,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { TrustScore } from '../components/TrustScore';
@@ -24,7 +25,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useI18n } from '../contexts/I18nContext';
 import { useCurrency, CURRENCY_SYMBOLS } from '../contexts/CurrencyContext';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 
 type AccordionKey = 'personal' | 'settings' | 'activity' | 'favorites' | 'invites' | 'trust' | null;
 
@@ -704,56 +705,21 @@ export const Profile: React.FC = () => {
           </div>
         </div>
 
-        {/* Collapsible: Pending Invites */}
-        {Array.isArray(invites) && invites.length > 0 && (
-          <div className="mb-5">
-            <button
-              type="button"
-              onClick={() => toggle('invites')}
-              className={`profile-section-toggle w-full flex justify-between items-center px-4 sm:px-6 py-4 sm:py-5 bg-white rounded-[20px] shadow-[0_4px_20px_rgba(0,0,0,0.08)] border-0 cursor-pointer text-left ${openSection === 'invites' ? 'active' : ''}`}
-            >
-              <div className="flex items-center gap-3">
-                <Mail className="w-6 h-6 text-[#DC143C]" />
-                <span className="text-lg sm:text-xl font-bold text-[#1A1A1A]">
-                  {sectionLabel(t, 'pendingInvites', 'Pending Invites')}
-                </span>
-                <span
-                  className="px-2.5 py-1 rounded-lg text-xs font-semibold"
-                  style={{ background: 'rgba(220,20,60,0.1)', color: '#DC143C' }}
-                >
-                  {invites.length}
-                </span>
-              </div>
-              <ChevronDown className="profile-chevron w-6 h-6 text-[#1A1A1A] transition-transform duration-300" />
-            </button>
-            <div className={`profile-section-content ${openSection === 'invites' ? 'active' : ''}`}>
-              <div className="pt-3">
-                <div className="bg-white rounded-[20px] p-4 sm:p-5 md:p-6 shadow-[0_4px_20px_rgba(0,0,0,0.08)] space-y-3">
-                  {invites.map((inv: any) => (
-                    <div
-                      key={inv.id}
-                      className="flex flex-wrap items-center justify-between gap-4 p-4 bg-[#F5F5F5] rounded-xl"
-                    >
-                      <div className="min-w-0">
-                        <p className="font-semibold text-[#1A1A1A] truncate">
-                          {inv.business?.name || t('business')}
-                        </p>
-                        <p className="text-sm text-[#666] truncate">{inv.email}</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => acceptInviteMutation.mutate(inv.business.id)}
-                        className="profile-btn-primary shrink-0 px-4 py-2 rounded-lg font-semibold text-sm"
-                      >
-                        {t('accept') || 'Accept'}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
+        {/* Info page link - visible on smaller screens only (since removed from bottom nav) */}
+        <div className="mb-5 lg:hidden">
+          <Link
+            to="/info"
+            className="w-full flex justify-between items-center px-4 sm:px-6 py-4 sm:py-5 bg-white rounded-[20px] shadow-[0_4px_20px_rgba(0,0,0,0.08)] border-0 cursor-pointer text-left"
+          >
+            <div className="flex items-center gap-3">
+              <Info className="w-6 h-6 text-[#DC143C]" />
+              <span className="text-lg sm:text-xl font-bold text-[#1A1A1A]">
+                {t('info') || 'Info'}
+              </span>
             </div>
-          </div>
-        )}
+            <ChevronDown className="w-6 h-6 text-[#1A1A1A] -rotate-90" />
+          </Link>
+        </div>
 
         {/* Collapsible: Trust Score (customers only) */}
         {user?.role === 'customer' && (

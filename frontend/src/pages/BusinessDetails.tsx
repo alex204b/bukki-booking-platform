@@ -10,6 +10,7 @@ import { ReviewStats } from '../components/ReviewStats';
 import { BusinessGallery } from '../components/BusinessGallery';
 import { Review } from '../types/reviews';
 import { useI18n } from '../contexts/I18nContext';
+import toast from 'react-hot-toast';
 
 export const BusinessDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -51,9 +52,10 @@ export const BusinessDetails: React.FC = () => {
     if (window.confirm(t('delete') + '?')) {
       try {
         await reviewService.delete(review.id);
-        // The ReviewList component will refetch automatically
+        toast.success(t('reviewDeletedSuccessfully') || 'Review deleted successfully');
       } catch (error) {
         console.error('Failed to delete review:', error);
+        toast.error(t('failedToDeleteReview') || 'Failed to delete review');
       }
     }
   };
@@ -115,7 +117,7 @@ export const BusinessDetails: React.FC = () => {
   };
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] sm:min-h-[calc(100vh-5rem)] bg-gray-50 pt-8 pb-0">
+    <div className="min-h-[calc(100vh-4rem)] sm:min-h-[calc(100vh-5rem)] bg-gray-50 pt-4 pb-20 sm:pb-8">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <div className="mb-8">

@@ -60,6 +60,13 @@ export const Home: React.FC = () => {
 
   // Bookings state
   const [showBookings, setShowBookings] = useState(false);
+
+  // Listen for toggleBookings event from bottom nav
+  useEffect(() => {
+    const handleToggleBookings = () => setShowBookings(prev => !prev);
+    window.addEventListener('toggleBookings', handleToggleBookings);
+    return () => window.removeEventListener('toggleBookings', handleToggleBookings);
+  }, []);
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'confirmed' | 'cancelled' | 'completed'>('all');
   const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'upcoming' | 'past'>('all');
   const [bookingCardIndex, setBookingCardIndex] = useState(0);
@@ -438,11 +445,11 @@ export const Home: React.FC = () => {
                 <Filter className="h-4 w-4 text-gray-700" />
               )}
             </button>
-            {/* Bookings Toggle Button - always show for logged-in users so they can access their bookings */}
+            {/* Bookings Toggle Button - hidden on mobile (available in bottom nav), shown on desktop */}
             {user && (
               <button
                 onClick={() => setShowBookings(!showBookings)}
-                className={`p-2 transition-colors rounded-md relative ${
+                className={`hidden lg:block p-2 transition-colors rounded-md relative ${
                   showBookings ? 'bg-[#E7001E]/10 text-[#E7001E]' : 'hover:bg-gray-100 text-gray-700'
                 }`}
                 title={t('myBookings') || 'My Bookings'}
@@ -827,12 +834,12 @@ export const Home: React.FC = () => {
                           } else if (offset > 0) {
                             transform = `translateX(${offset * 100}px) translateY(${offset * 50}px) rotateY(-8deg)`;
                             zIndex = 30 - offset * 10;
-                            opacity = 1 - offset * 0.15;
+                            opacity = 1 - offset * 0.08;
                             scale = 1 - offset * 0.06;
                           } else {
                             transform = `translateX(${offset * 100}px) translateY(${Math.abs(offset) * 50}px) rotateY(8deg)`;
                             zIndex = 30 + offset * 10;
-                            opacity = 1 + offset * 0.15;
+                            opacity = 1 + offset * 0.08;
                             scale = 1 + offset * 0.06;
                           }
 
@@ -1316,12 +1323,12 @@ export const Home: React.FC = () => {
                       } else if (offset > 0) {
                         transform = `translateX(${Math.min(offset * 70, 100)}px) translateY(${offset * 35}px)`;
                         zIndex = 30 - offset * 5;
-                        opacity = 1 - offset * 0.15;
+                        opacity = 1 - offset * 0.08;
                         scale = 1 - offset * 0.05;
                       } else {
                         transform = `translateX(${Math.max(offset * 70, -100)}px) translateY(${Math.abs(offset) * 40}px)`;
                         zIndex = 30 + offset * 5;
-                        opacity = 0.85 + offset * 0.1;
+                        opacity = 1 + offset * 0.08;
                         scale = 1 + offset * 0.04;
                       }
                       return (
@@ -1332,7 +1339,7 @@ export const Home: React.FC = () => {
                           style={{
                             transform: `${transform} scale(${scale})`,
                             zIndex,
-                            opacity: Math.max(0.5, Math.min(1, opacity)),
+                            opacity: Math.max(0.75, Math.min(1, opacity)),
                           }}
                         >
                           <div className="bg-white rounded-2xl overflow-hidden shadow-xl hover:shadow-2xl transition-all border border-gray-100 cursor-pointer">

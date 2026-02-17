@@ -302,3 +302,45 @@ Both images use multi-stage builds for optimized production size.
 ## License
 
 MIT License
+
+# 🤖 AI Integration — Current & Roadmap
+
+## Current AI Features
+
+BUKKi currently leverages AI to enhance the booking experience for both customers and business owners:
+
+- **Smart Business Recommendations** — powered by Google APIs (Places, Maps) to surface nearby, relevant businesses based on user location and preferences.
+- **Natural Language Understanding** — powered by Hugging Face models to help customers search for services using conversational language (e.g. *"I need a haircut near me on Saturday afternoon"*).
+- **Automated Review Sentiment Analysis** — Hugging Face NLP models analyze customer reviews to generate quality signals and surface insights for business owners.
+
+---
+
+## 🚀 Planned Migration to Claude (Anthropic)
+
+We are actively planning to migrate and expand our AI capabilities using **Claude by Anthropic**, pending API credit approval through Anthropic's Startup Program.
+
+### Why Claude?
+
+Claude offers superior reasoning, multilingual support (critical for our EN/RO/RU user base), and a safety-first design that aligns with BUKKi's commitment to user trust and data privacy.
+
+### Planned Claude-Powered Features
+
+| Feature | Description | Priority |
+|---|---|---|
+| **AI Booking Assistant** | Conversational chatbot that helps customers find the right service, pick a time, and complete a booking — all in natural language | High |
+| **Smart Business Onboarding** | Claude guides new business owners through setup, auto-generating service descriptions, pricing suggestions, and working hour templates | High |
+| **Personalized Recommendations** | Claude analyzes booking history and preferences to recommend relevant services and businesses to returning customers | Medium |
+| **Automated Email Campaigns** | Business owners describe their campaign goal in plain language; Claude drafts the HTML email campaign for review and sending | Medium |
+| **Review Response Assistant** | Claude helps business owners craft professional, personalized responses to customer reviews | Medium |
+| **Multilingual Content Generation** | Claude auto-translates and adapts business listings, service descriptions, and notifications across EN/RO/RU | High |
+| **No-Show Prediction & Alerts** | Claude analyzes booking patterns to flag high-risk no-show bookings and suggest preventive actions | Low |
+
+### Migration Timeline
+
+- **Phase 1 (Immediate upon credit approval):** Replace Hugging Face NLP with Claude for search and sentiment analysis
+- **Phase 2 (Month 1–2):** Launch AI Booking Assistant and Smart Onboarding
+- **Phase 3 (Month 3+):** Roll out personalized recommendations and multilingual content generation
+
+---
+
+> 💡 *We are applying for Anthropic's Startup Credit Program to accelerate this roadmap. Claude's multilingual reasoning and API reliability make it the ideal long-term AI backbone for BUKKi.*

@@ -78,7 +78,7 @@ export const BusinessDetail: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-4 pb-8">
       {/* Back Button */}
       <Link to="/" className="btn btn-ghost">
         ← Back to Businesses
@@ -168,6 +168,8 @@ export const BusinessDetail: React.FC = () => {
       <div>
         <h2 className="text-2xl font-bold text-gray-900 mb-6">Available Services</h2>
         
+
+
         {servicesLoading ? (
           <div className="flex justify-center py-8">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>

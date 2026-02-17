@@ -15,14 +15,13 @@ import {
   Heart,
   Bell,
   Sparkles,
-  Tag,
-  Info,
+  Calendar,
   ChevronDown,
-  Globe
+  Globe,
+  Info
 } from 'lucide-react';
 import { useI18n } from '../contexts/I18nContext';
 import { useCurrency, CURRENCY_SYMBOLS } from '../contexts/CurrencyContext';
-import Motif from './Motif';
 import { ConfirmDialog } from './ConfirmDialog';
 import { NotificationCenter } from './NotificationCenter';
 import { AIAssistant } from './AIAssistant';
@@ -140,8 +139,10 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     navigation.splice(1, 0, { name: t('adminDashboard'), href: '/admin-dashboard', icon: Shield });
   }
 
-  // Add Info page at the end
-  navigation.push({ name: t('appInfo'), href: '/info', icon: Info });
+  // Add My Bookings for all logged-in users
+  if (user) {
+    navigation.push({ name: t('myBookings') || 'My Bookings', href: '/my-bookings', icon: Calendar });
+  }
 
   // Close modals when route changes (but keep sidebar state)
   React.useEffect(() => {
@@ -488,6 +489,19 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                   </Link>
                 );
               })}
+              {/* Info - desktop sidebar only */}
+              <Link
+                to="/info"
+                className={`group flex items-center ${sidebarOpen ? 'px-2.5 py-2' : 'px-2 py-2'} text-sm font-medium rounded-md ${
+                  location.pathname === '/info'
+                    ? 'bg-red-100 text-red-900'
+                    : 'text-gray-600 hover:bg-red-50 hover:text-red-900'
+                } ${sidebarOpen ? 'justify-start' : 'justify-center'}`}
+                title={!sidebarOpen ? (t('appInfo') || 'Info') : undefined}
+              >
+                <Info className={`${sidebarOpen ? 'h-4.5 w-4.5 mr-2' : 'h-5 w-5'}`} />
+                {sidebarOpen && <span>{t('appInfo') || 'Info'}</span>}
+              </Link>
             </nav>
             {sidebarOpen ? (
               <div className="p-3">
@@ -582,6 +596,33 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         <nav className="flex items-center justify-around px-1 py-2">
           {navigation.map((item) => {
             const isActive = location.pathname === item.href;
+            // My Bookings: open half-screen overlay instead of navigating
+            if (item.href === '/my-bookings') {
+              return (
+                <button
+                  key={item.name}
+                  type="button"
+                  className={`flex flex-col items-center justify-center px-2 py-1.5 rounded-lg transition-colors flex-1 ${
+                    isActive
+                      ? 'text-[#E7001E]'
+                      : 'text-gray-600'
+                  }`}
+                  onClick={() => {
+                    setSidebarOpen(false);
+                    if (location.pathname !== '/') {
+                      navigate('/');
+                      // Slight delay to let Home mount before dispatching
+                      setTimeout(() => window.dispatchEvent(new CustomEvent('toggleBookings')), 300);
+                    } else {
+                      window.dispatchEvent(new CustomEvent('toggleBookings'));
+                    }
+                  }}
+                >
+                  <item.icon className="h-5 w-5 mb-0.5" />
+                  <span className="text-[9px] font-medium text-center leading-tight">{item.name}</span>
+                </button>
+              );
+            }
             return (
               <Link
                 key={item.name}
