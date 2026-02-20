@@ -76,6 +76,15 @@ export const Login: React.FC = () => {
  
   const from = location.state?.from?.pathname || '/';
 
+  // Auto-switch to signup if ?signup=true is in the URL
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('signup') === 'true') {
+      setIsSignUp(true);
+      setViewMode('signup');
+    }
+  }, [location.search]);
+
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   const phoneRegex = /^[0-9+\-()\s]{7,20}$/;
   const passwordStrongEnough = (p: string) => p.length >= 8 && /[A-Za-z]/.test(p) && /\d/.test(p);
@@ -1185,13 +1194,7 @@ export const Login: React.FC = () => {
         }
       `}</style>
 
-      {/* Connection Error Modal */}
-      <ConnectionErrorModal
-        isOpen={connectionError.show}
-        onClose={() => setConnectionError({ ...connectionError, show: false })}
-        baseURL={connectionError.baseURL}
-        isMobile={connectionError.isMobile}
-      />
+      {/* Connection Error Modal - disabled */}
     </LoginBackground>
   );
 };

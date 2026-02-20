@@ -639,5 +639,16 @@ export const favoritesService = {
 
 // AI API calls
 export const aiService = {
-  parseQuery: (query: string) => api.post('/ai/parse-query', { query }),
+  parseQuery: (query: string, language?: string) =>
+    api.post('/ai/parse-query', { query, language }),
+  getSmartSlots: (serviceId: string, days?: number) =>
+    api.get(`/ai/smart-slots/${serviceId}`, { params: days ? { days } : {} }),
+  getReviewSummary: (businessId: string, language?: string) =>
+    api.get(`/ai/review-summary/${businessId}`, { params: language ? { language } : {} }),
+  getSimilar: (businessId: string, limit?: number) =>
+    api.get(`/ai/similar/${businessId}`, { params: limit ? { limit } : {} }),
+  getPersonalized: (category?: string, limit?: number) =>
+    api.get('/ai/personalized', { params: { category, limit } }),
+  chat: (message: string, conversationState?: any, language?: string) =>
+    api.post('/ai/chat', { message, conversationState, language }),
 };

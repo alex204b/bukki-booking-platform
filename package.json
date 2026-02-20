@@ -12,7 +12,13 @@
     "build:frontend": "cd frontend && npm run build",
     "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install",
     "start": "cd backend && node dist/main.js",
-    "start:prod": "cd backend && node dist/main.js"
+    "start:prod": "cd backend && node dist/main.js",
+    "lint": "cd backend && npm run lint",
+    "lint:frontend": "cd frontend && npx eslint src/",
+    "test": "cd backend && npm test -- --passWithNoTests",
+    "test:frontend": "cd frontend && npx react-scripts test --watchAll=false --passWithNoTests",
+    "check": "npm run lint && npm run build",
+    "check:all": "npm run lint && npm run test && npm run build"
   },
   "keywords": [
     "booking",

@@ -12,12 +12,12 @@ export const EmailVerification: React.FC = () => {
   const [success, setSuccess] = useState(false);
   const [resending, setResending] = useState(false);
   const [emailInput, setEmailInput] = useState('');
-  
+
   const { user } = useAuth();
   const { t, lang, setLang } = useI18n();
   const navigate = useNavigate();
   const location = useLocation();
-  
+
   // Prioritize email from signup/login flow - NOT from user (may be stale from previous session)
   const email = location.state?.email || localStorage.getItem('pendingVerificationEmail') || user?.email || emailInput;
 
@@ -35,21 +35,21 @@ export const EmailVerification: React.FC = () => {
       if (data.success) {
         setSuccess(true);
         localStorage.removeItem('pendingVerificationEmail');
-        toast.success('Email verified successfully!');
+        toast.success(t('emailVerifiedSuccess'));
         setTimeout(() => {
-          navigate('/login', { 
-            state: { message: 'Email verified successfully! You can now log in.' }
+          navigate('/login', {
+            state: { message: t('emailVerifiedRedirecting') }
           });
         }, 2000);
       } else {
-        toast.error(data.message || 'Verification failed');
+        toast.error(data.message || t('verificationFailed'));
       }
     } catch (error: any) {
       console.error('Verification error:', error);
       if (error.response?.data?.message) {
         toast.error(error.response.data.message);
       } else {
-        toast.error('Network error. Please try again.');
+        toast.error(t('networkErrorTryAgain'));
       }
     } finally {
       setLoading(false);
@@ -63,16 +63,16 @@ export const EmailVerification: React.FC = () => {
       const { data } = await authApi.post('/auth/resend-verification', { email });
 
       if (data.success) {
-        toast.success('Verification code sent successfully!');
+        toast.success(t('verificationCodeSentSuccess'));
       } else {
-        toast.error(data.message || 'Failed to resend verification code');
+        toast.error(data.message || t('failedToResendCode'));
       }
     } catch (error: any) {
       console.error('Resend error:', error);
       if (error.response?.data?.message) {
         toast.error(error.response.data.message);
       } else {
-        toast.error('Failed to resend verification code');
+        toast.error(t('failedToResendCode'));
       }
     } finally {
       setResending(false);
@@ -84,11 +84,41 @@ export const EmailVerification: React.FC = () => {
     setVerificationCode(value);
   };
 
+  const LanguageSwitcher = () => (
+    <div
+      className="absolute right-2 sm:right-3 md:right-4 z-30 text-sm sm:text-sm select-none touch-manipulation language-switcher-safe-area"
+    >
+      <button
+        type="button"
+        className={`px-2 sm:px-2.5 py-1 transition-colors ${lang === 'ro' ? 'text-red-600 font-bold' : 'text-red-500 hover:text-red-600 active:text-red-600'}`}
+        onClick={() => setLang('ro')}
+      >
+        RO
+      </button>
+      <span className="px-0.5 sm:px-1 text-red-500/70">|</span>
+      <button
+        type="button"
+        className={`px-2 sm:px-2.5 py-1 transition-colors ${lang === 'en' ? 'text-red-600 font-bold' : 'text-red-500 hover:text-red-600 active:text-red-600'}`}
+        onClick={() => setLang('en')}
+      >
+        EN
+      </button>
+      <span className="px-0.5 sm:px-1 text-red-500/70">|</span>
+      <button
+        type="button"
+        className={`px-2 sm:px-2.5 py-1 transition-colors ${lang === 'ru' ? 'text-red-600 font-bold' : 'text-red-500 hover:text-red-600 active:text-red-600'}`}
+        onClick={() => setLang('ru')}
+      >
+        RU
+      </button>
+    </div>
+  );
+
   if (success) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-start p-0 relative overflow-hidden" style={{ backgroundColor: '#330007' }}>
         {/* Precision Diagonal White Section */}
-        <div 
+        <div
           className="absolute bg-white"
           style={{
             width: '200vw',
@@ -100,32 +130,7 @@ export const EmailVerification: React.FC = () => {
           }}
         />
 
-        {/* Corner language switcher */}
-        <div className="absolute top-4 right-4 z-30 text-xs sm:text-sm select-none">
-          <button 
-            type="button"
-            className={`px-2 transition-colors ${lang === 'ro' ? 'text-white font-bold' : 'text-white/70 hover:text-white'}`} 
-            onClick={() => setLang('ro')}
-          >
-            RO
-          </button>
-          <span className="px-1 text-white/50">|</span>
-          <button 
-            type="button"
-            className={`px-2 transition-colors ${lang === 'en' ? 'text-white font-bold' : 'text-white/70 hover:text-white'}`} 
-            onClick={() => setLang('en')}
-          >
-            EN
-          </button>
-          <span className="px-1 text-white/50">|</span>
-          <button 
-            type="button"
-            className={`px-2 transition-colors ${lang === 'ru' ? 'text-white font-bold' : 'text-white/70 hover:text-white'}`} 
-            onClick={() => setLang('ru')}
-          >
-            RU
-          </button>
-        </div>
+        <LanguageSwitcher />
 
         {/* Content Card */}
         <div className="relative w-full max-w-2xl z-10">
@@ -134,14 +139,14 @@ export const EmailVerification: React.FC = () => {
             <div className="relative z-10">
               {/* Logo */}
               <div className="text-center" style={{ marginTop: 'calc(5rem - 70px)', marginBottom: '2rem' }}>
-                <img 
-                  src="/bukki-text.png" 
-                  alt="BUKKi" 
+                <img
+                  src="/bukki-text.png"
+                  alt="BUKKi"
                   className="w-[24rem] max-w-[80vw] h-auto mx-auto"
                   style={{ mixBlendMode: 'screen' }}
                 />
               </div>
-              
+
               {/* Success Message */}
               <div className="relative mx-auto space-y-5" style={{ width: '60%', fontSize: '0.9rem', marginTop: 'calc(-4rem - 90px)' }}>
                 <div className="bg-green-500/20 border border-green-500 rounded-2xl p-6 text-center">
@@ -151,10 +156,10 @@ export const EmailVerification: React.FC = () => {
                     </svg>
                   </div>
                   <h3 className="text-lg font-medium text-white mb-2">
-                    Email Verified!
+                    {t('emailVerifiedSuccess')}
                   </h3>
                   <p className="text-sm text-white/70">
-                    Your email has been successfully verified. Redirecting to login...
+                    {t('emailVerifiedRedirecting')}
                   </p>
                 </div>
               </div>
@@ -168,7 +173,7 @@ export const EmailVerification: React.FC = () => {
   return (
     <div className="min-h-screen flex flex-col items-center justify-start p-0 relative overflow-hidden" style={{ backgroundColor: '#330007' }}>
       {/* Precision Diagonal White Section */}
-      <div 
+      <div
         className="absolute bg-white"
         style={{
           width: '200vw',
@@ -180,32 +185,7 @@ export const EmailVerification: React.FC = () => {
         }}
       />
 
-      {/* Corner language switcher */}
-      <div className="absolute top-4 right-4 z-30 text-xs sm:text-sm select-none">
-        <button 
-          type="button"
-          className={`px-2 transition-colors ${lang === 'ro' ? 'text-white font-bold' : 'text-white/70 hover:text-white'}`} 
-          onClick={() => setLang('ro')}
-        >
-          RO
-        </button>
-        <span className="px-1 text-white/50">|</span>
-        <button 
-          type="button"
-          className={`px-2 transition-colors ${lang === 'en' ? 'text-white font-bold' : 'text-white/70 hover:text-white'}`} 
-          onClick={() => setLang('en')}
-        >
-          EN
-        </button>
-        <span className="px-1 text-white/50">|</span>
-        <button 
-          type="button"
-          className={`px-2 transition-colors ${lang === 'ru' ? 'text-white font-bold' : 'text-white/70 hover:text-white'}`} 
-          onClick={() => setLang('ru')}
-        >
-          RU
-        </button>
-      </div>
+      <LanguageSwitcher />
 
       {/* Verification Card */}
       <div className="relative w-full max-w-2xl z-10">
@@ -214,14 +194,14 @@ export const EmailVerification: React.FC = () => {
           <div className="relative z-10">
             {/* Logo */}
             <div className="text-center" style={{ marginTop: 'calc(5rem - 70px)', marginBottom: '2rem' }}>
-              <img 
-                src="/bukki-text.png" 
-                alt="BUKKi" 
+              <img
+                src="/bukki-text.png"
+                alt="BUKKi"
                 className="w-[24rem] max-w-[80vw] h-auto mx-auto"
                 style={{ mixBlendMode: 'screen' }}
               />
             </div>
-            
+
             {/* Form Container */}
             <div className="relative mx-auto" style={{ marginTop: 'calc(-4rem - 90px)' }}>
               <form onSubmit={handleVerify} className="space-y-5 mx-auto" style={{ width: '60%', fontSize: '0.9rem' }}>
@@ -229,12 +209,12 @@ export const EmailVerification: React.FC = () => {
                   <p className="text-white/80 text-sm">
                     {email ? (
                       <>
-                        We've sent a 6-digit code to
+                        {t('weSentCodeTo')}
                         <br />
                         <span className="font-semibold text-white">{email}</span>
                       </>
                     ) : (
-                      'Enter your email and verification code'
+                      t('enterEmailAndCode')
                     )}
                   </p>
                 </div>
@@ -271,7 +251,7 @@ export const EmailVerification: React.FC = () => {
                     required
                   />
                   <p className="mt-2 text-xs text-white/70 text-center">
-                    Enter the 6-digit code from your email
+                    {t('enterSixDigitCode')}
                   </p>
                 </div>
 
@@ -284,10 +264,10 @@ export const EmailVerification: React.FC = () => {
                   {loading ? (
                     <>
                       <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      Verifying...
+                      {t('verifying')}
                     </>
                   ) : (
-                    'Verify Email'
+                    t('verifyEmail')
                   )}
                 </button>
 
@@ -300,7 +280,7 @@ export const EmailVerification: React.FC = () => {
                     className="inline-flex items-center text-sm font-medium text-white hover:text-white/80 disabled:opacity-50"
                   >
                     <RefreshCw className={`h-4 w-4 mr-1 ${resending ? 'animate-spin' : ''}`} />
-                    {resending ? 'Sending...' : 'Resend Code'}
+                    {resending ? t('sending') : t('resendCode')}
                   </button>
                 </div>
 
@@ -312,7 +292,7 @@ export const EmailVerification: React.FC = () => {
                     className="inline-flex items-center text-sm font-medium text-white hover:text-white/80"
                   >
                     <ArrowLeft className="h-4 w-4 mr-1" />
-                    Back to Login
+                    {t('backToLogin')}
                   </button>
                 </div>
               </form>
@@ -320,11 +300,11 @@ export const EmailVerification: React.FC = () => {
               {/* Help Text */}
               <div className="mt-6 mx-auto" style={{ width: '60%' }}>
                 <div className="bg-blue-500/20 border border-blue-400/30 rounded-2xl p-4">
-                  <h3 className="text-sm font-medium text-blue-200 mb-2">Didn't receive the email?</h3>
+                  <h3 className="text-sm font-medium text-blue-200 mb-2">{t('didntReceiveEmail')}</h3>
                   <ul className="text-xs text-blue-100/80 space-y-1">
-                    <li>• Check your spam/junk folder</li>
-                    <li>• Make sure the email address is correct</li>
-                    <li>• Wait a few minutes and try resending</li>
+                    <li>• {t('checkSpamFolder')}</li>
+                    <li>• {t('makeSureEmailCorrect')}</li>
+                    <li>• {t('waitAndTryResending')}</li>
                   </ul>
                 </div>
               </div>

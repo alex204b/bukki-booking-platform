@@ -39,6 +39,8 @@ const InfoPage: React.FC = () => {
   const [feedback, setFeedback] = useState('');
   const [feedbackRating, setFeedbackRating] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
+  const [reportTypeOpen, setReportTypeOpen] = useState(false);
+  const [reportReasonOpen, setReportReasonOpen] = useState(false);
 
   const faqData = [
     {
@@ -223,7 +225,7 @@ const InfoPage: React.FC = () => {
 
   return (
     <>
-      <div className="space-y-0 w-full pt-4">
+      <div className="space-y-0 w-full pt-4 overflow-x-hidden">
       {/* Hero Section */}
       <div className="bg-[#330007] p-4 sm:p-5 md:p-6 text-white relative overflow-hidden shadow-2xl rounded-xl sm:rounded-2xl md:rounded-3xl mx-2 sm:mx-4 lg:mx-6">
         <div className="relative z-10">
@@ -529,63 +531,105 @@ const InfoPage: React.FC = () => {
               <h3 className="text-lg font-bold">{t('reportIssue')}</h3>
             </div>
 
-            <div className="p-4 space-y-3">
+            <div className="p-5 space-y-4">
+              {/* Report Type custom dropdown */}
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5">
                   {t('reportType')}
                 </label>
-                <select
-                  value={reportType}
-                  onChange={(e) => setReportType(e.target.value as 'user' | 'business')}
-                  className="w-full p-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#E7001E] focus:border-[#E7001E]"
-                >
-                  <option value="user">{t('reportUser')}</option>
-                  <option value="business">{t('reportBusiness')}</option>
-                </select>
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => { setReportTypeOpen(o => !o); setReportReasonOpen(false); }}
+                    className="w-full flex items-center justify-between px-3 py-2.5 text-sm border-2 border-[#E7001E] rounded-lg bg-white text-gray-800 focus:outline-none hover:border-[#330007] transition-colors"
+                  >
+                    <span>{reportType === 'user' ? t('reportUser') : t('reportBusiness')}</span>
+                    <ChevronDown className={`h-4 w-4 text-[#E7001E] transition-transform ${reportTypeOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {reportTypeOpen && (
+                    <div className="absolute z-10 mt-1 w-full bg-white border-2 border-[#E7001E] rounded-lg shadow-lg overflow-hidden">
+                      {[{ value: 'user', label: t('reportUser') }, { value: 'business', label: t('reportBusiness') }].map(opt => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => { setReportType(opt.value as 'user' | 'business'); setReportTypeOpen(false); }}
+                          className={`w-full text-left px-4 py-2.5 text-sm hover:bg-[#330007] hover:text-white transition-colors ${reportType === opt.value ? 'bg-[#E7001E] text-white font-medium' : 'text-gray-800'}`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
 
+              {/* Report Reason custom dropdown */}
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5">
                   {t('reportReason')}
                 </label>
-                <select
-                  value={reportReason}
-                  onChange={(e) => setReportReason(e.target.value)}
-                  className="w-full p-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#E7001E] focus:border-[#E7001E]"
-                >
-                  <option value="">{t('selectReason')}</option>
-                  <option value="no-show">{t('noShow')}</option>
-                  <option value="false-info">{t('falseInformation')}</option>
-                  <option value="inappropriate">{t('inappropriateBehavior')}</option>
-                  <option value="spam">{t('spam')}</option>
-                  <option value="other">{t('other')}</option>
-                </select>
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => { setReportReasonOpen(o => !o); setReportTypeOpen(false); }}
+                    className="w-full flex items-center justify-between px-3 py-2.5 text-sm border-2 border-[#E7001E] rounded-lg bg-white focus:outline-none hover:border-[#330007] transition-colors"
+                  >
+                    <span className={reportReason ? 'text-gray-800' : 'text-gray-400'}>{reportReason ? {
+                      'no-show': t('noShow'),
+                      'false-info': t('falseInformation'),
+                      'inappropriate': t('inappropriateBehavior'),
+                      'spam': t('spam'),
+                      'other': t('other'),
+                    }[reportReason] : t('selectReason')}</span>
+                    <ChevronDown className={`h-4 w-4 text-[#E7001E] transition-transform ${reportReasonOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {reportReasonOpen && (
+                    <div className="absolute z-10 mt-1 w-full bg-white border-2 border-[#E7001E] rounded-lg shadow-lg overflow-hidden">
+                      {[
+                        { value: 'no-show', label: t('noShow') },
+                        { value: 'false-info', label: t('falseInformation') },
+                        { value: 'inappropriate', label: t('inappropriateBehavior') },
+                        { value: 'spam', label: t('spam') },
+                        { value: 'other', label: t('other') },
+                      ].map(opt => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => { setReportReason(opt.value); setReportReasonOpen(false); }}
+                          className={`w-full text-left px-4 py-2.5 text-sm hover:bg-[#330007] hover:text-white transition-colors ${reportReason === opt.value ? 'bg-[#E7001E] text-white font-medium' : 'text-gray-800'}`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5">
                   {t('reportDetails')}
                 </label>
                 <textarea
                   value={reportDetails}
                   onChange={(e) => setReportDetails(e.target.value)}
                   placeholder={t('describeIssue')}
-                  className="w-full p-2 text-sm border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-[#E7001E] focus:border-[#E7001E]"
+                  className="w-full px-3 py-2.5 text-sm border-2 border-[#E7001E] rounded-lg resize-none focus:outline-none focus:border-[#330007] bg-white"
                   rows={3}
                 />
               </div>
 
-              <div className="flex space-x-2">
+              <div className="flex gap-2 pt-1">
                 <button
                   onClick={() => setReportModal(false)}
-                  className="flex-1 text-sm py-1.5 px-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                  className="flex-1 text-sm py-2 px-3 border-2 border-gray-300 rounded-lg hover:bg-gray-50 transition-colors font-medium text-gray-700"
                 >
                   {t('cancel')}
                 </button>
                 <button
                   onClick={handleReport}
                   disabled={!reportReason || !reportDetails.trim()}
-                  className="flex-1 text-sm bg-red-600 text-white py-1.5 px-3 rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className="flex-1 text-sm bg-[#E7001E] text-white py-2 px-3 rounded-lg hover:bg-[#330007] disabled:opacity-40 disabled:cursor-not-allowed transition-colors font-semibold"
                 >
                   {t('submitReport')}
                 </button>
@@ -661,7 +705,7 @@ const InfoPage: React.FC = () => {
       </div>
 
       {/* Footer - Outside main container for full width */}
-      <footer className="bg-gradient-to-br from-[#330007] via-[#220005] to-[#110003] text-white mt-8" style={{ width: '100vw', marginLeft: 'calc(50% - 50vw)', marginRight: 'calc(50% - 50vw)' }}>
+      <footer className="bg-gradient-to-br from-[#330007] via-[#220005] to-[#110003] text-white mt-8 w-full">
         <div className="py-8 px-3 sm:px-4 lg:px-6">
           <div className="max-w-6xl mx-auto">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">

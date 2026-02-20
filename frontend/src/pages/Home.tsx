@@ -15,6 +15,14 @@ import { Motif } from '../components/Motif';
 import { MapView } from '../components/MapView';
 import toast from 'react-hot-toast';
 
+function getDistanceKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 export const Home: React.FC = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -32,6 +40,7 @@ export const Home: React.FC = () => {
   };
 
   // Search state
+  const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedLocation, setSelectedLocation] = useState('');
@@ -76,6 +85,12 @@ export const Home: React.FC = () => {
   const [touchStart, setTouchStart] = useState<{ x: number; y: number } | null>(null);
   const [touchEnd, setTouchEnd] = useState<{ x: number; y: number } | null>(null);
 
+  // Debounce search input → searchQuery (300ms)
+  useEffect(() => {
+    const timer = setTimeout(() => setSearchQuery(searchInput), 300);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
   const isBusinessOwner = user?.role === 'business_owner';
   const isEmployee = user?.role === 'employee';
 
@@ -101,12 +116,24 @@ export const Home: React.FC = () => {
   // Fetch businesses
   const { data: businesses, isLoading: businessesLoading, error: businessesError, refetch: refetchBusinesses } = useQuery(
     ['businesses', searchQuery, selectedCategory, selectedLocation, userLocation, radius, availableNow],
-    () => {
+    async () => {
+      // If user has a search query, always use the search API (it supports contains matching)
+      if (searchQuery || selectedCategory || selectedLocation) {
+        const result = await businessService.search(searchQuery, selectedCategory, selectedLocation);
+        // If user also has location, filter by distance client-side
+        if (userLocation && result.data) {
+          const businesses = Array.isArray(result.data) ? result.data : (result.data.data || []);
+          const filtered = businesses.filter((b: any) => {
+            if (!b.latitude || !b.longitude) return true;
+            const dist = getDistanceKm(userLocation.lat, userLocation.lng, b.latitude, b.longitude);
+            return dist <= (radius || 50);
+          });
+          return { data: filtered };
+        }
+        return result;
+      }
       if (userLocation) {
         return businessService.getNearby(userLocation.lat, userLocation.lng, radius, availableNow);
-      }
-      if (searchQuery || selectedCategory || selectedLocation) {
-        return businessService.search(searchQuery, selectedCategory, selectedLocation);
       }
       return businessService.getAll();
     },
@@ -427,12 +454,22 @@ export const Home: React.FC = () => {
             <div className="relative flex-1">
               <input
                 type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                placeholder={t('searchPlaceholder')}
                 className="w-full px-4 py-2.5 text-base border-2 border-[#E7001E] rounded-lg focus:outline-none focus:border-[#E7001E] transition-colors pr-10"
               />
-              <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+              {searchInput ? (
+                <button
+                  type="button"
+                  onClick={() => setSearchInput('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 rounded-full hover:bg-gray-200 transition-colors"
+                >
+                  <X className="h-4 w-4 text-gray-500" />
+                </button>
+              ) : (
+                <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+              )}
             </div>
             <button
               onClick={() => setMenuOpen(!menuOpen)}
@@ -622,8 +659,8 @@ export const Home: React.FC = () => {
                     </div>
                   ) : listData.length === 0 ? (
                     <div className="w-full px-4">
-                      <EmptyBusinesses onSearch={() => {
-                        setSearchQuery('');
+                      <EmptyBusinesses searchQuery={searchInput} onSearch={() => {
+                        setSearchInput('');
                         setSelectedCategory('');
                         setSelectedLocation('');
                         setUserLocation(null);
@@ -665,8 +702,8 @@ export const Home: React.FC = () => {
                     <ListSkeleton count={10} />
                   ) : businessesByCategory.length === 0 ? (
                     <div className="px-4">
-                      <EmptyBusinesses onSearch={() => {
-                        setSearchQuery('');
+                      <EmptyBusinesses searchQuery={searchInput} onSearch={() => {
+                        setSearchInput('');
                         setSelectedCategory('');
                         setSelectedLocation('');
                         setUserLocation(null);
@@ -791,8 +828,8 @@ export const Home: React.FC = () => {
                     </div>
                   ) : listData.length === 0 ? (
                     <div className="px-4">
-                      <EmptyBusinesses onSearch={() => {
-                        setSearchQuery('');
+                      <EmptyBusinesses searchQuery={searchInput} onSearch={() => {
+                        setSearchInput('');
                         setSelectedCategory('');
                         setSelectedLocation('');
                         setUserLocation(null);

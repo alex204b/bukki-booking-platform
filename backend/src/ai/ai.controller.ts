@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, UseGuards, Request } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { AIService } from './ai.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -13,10 +13,10 @@ export class AIController {
   @Post('parse-query')
   @ApiOperation({ summary: 'Parse user query using AI to extract services and intent' })
   @ApiResponse({ status: 200, description: 'Query parsed successfully' })
-  async parseQuery(@Body() body: { query: string }, @Request() req) {
+  async parseQuery(@Body() body: { query: string; language?: string }, @Request() req) {
     try {
       console.log('[AIController] Received query:', { query: body.query, userId: req.user?.id });
-      
+
       if (!body || !body.query || !body.query.trim()) {
         console.warn('[AIController] Empty query received');
         return {
@@ -27,12 +27,10 @@ export class AIController {
           userId: req.user?.id,
         };
       }
-      
-      // Call AI service (no fallback - we removed all hardcoded logic)
-      const result = await this.aiService.parseQuery(body.query.trim());
+
+      const result = await this.aiService.parseQuery(body.query.trim(), body.language || 'en');
       console.log('[AIController] Parsing result:', result);
-      
-      // Ensure result has required fields
+
       const response = {
         services: Array.isArray(result.services) ? result.services : [],
         timePreference: result.timePreference || 'soon',
@@ -56,8 +54,7 @@ export class AIController {
         stack: error.stack,
         name: error.name,
       });
-      
-      // Return error response - no fallback since we removed all hardcoded logic
+
       return {
         error: error.message || 'AI service failed. Please check your API keys and try again.',
         services: [],
@@ -65,6 +62,95 @@ export class AIController {
         intent: body?.query || '',
         isMultiStep: false,
         userId: req.user?.id,
+      };
+    }
+  }
+
+  @Get('smart-slots/:serviceId')
+  @ApiOperation({ summary: 'Get smart time slot suggestions for a service' })
+  @ApiResponse({ status: 200, description: 'Smart slots returned' })
+  async getSmartSlots(
+    @Param('serviceId') serviceId: string,
+    @Query('days') days?: string,
+  ) {
+    try {
+      return await this.aiService.getSmartSlots(serviceId, days ? parseInt(days) : 7);
+    } catch (error: any) {
+      return { bestTimes: [], error: error.message };
+    }
+  }
+
+  @Get('review-summary/:businessId')
+  @ApiOperation({ summary: 'Get AI-generated review summary for a business' })
+  @ApiResponse({ status: 200, description: 'Review summary returned' })
+  async getReviewSummary(
+    @Param('businessId') businessId: string,
+    @Query('language') language?: string,
+  ) {
+    try {
+      return await this.aiService.summarizeReviews(businessId, language || 'en');
+    } catch (error: any) {
+      return { summary: '', avgRating: 0, totalReviews: 0, error: error.message };
+    }
+  }
+
+  @Get('similar/:businessId')
+  @ApiOperation({ summary: 'Get similar business recommendations' })
+  @ApiResponse({ status: 200, description: 'Similar businesses returned' })
+  async getSimilarBusinesses(
+    @Param('businessId') businessId: string,
+    @Query('limit') limit?: string,
+  ) {
+    try {
+      const businesses = await this.aiService.findSimilarBusinesses(
+        businessId,
+        limit ? parseInt(limit) : 3,
+      );
+      return { businesses };
+    } catch (error: any) {
+      return { businesses: [], error: error.message };
+    }
+  }
+
+  @Get('personalized')
+  @ApiOperation({ summary: 'Get personalized business recommendations' })
+  @ApiResponse({ status: 200, description: 'Personalized recommendations returned' })
+  async getPersonalized(
+    @Request() req,
+    @Query('category') category?: string,
+    @Query('limit') limit?: string,
+  ) {
+    try {
+      const businesses = await this.aiService.getPersonalizedRecommendations(
+        req.user.id,
+        category,
+        limit ? parseInt(limit) : 5,
+      );
+      return { businesses };
+    } catch (error: any) {
+      return { businesses: [], error: error.message };
+    }
+  }
+
+  @Post('chat')
+  @ApiOperation({ summary: 'Conversational booking assistant' })
+  @ApiResponse({ status: 200, description: 'Chat response returned' })
+  async chat(
+    @Body() body: { message: string; conversationState?: any; language?: string },
+    @Request() req,
+  ) {
+    try {
+      return await this.aiService.chat(
+        req.user.id,
+        body.message,
+        body.conversationState || {},
+        body.language || 'en',
+      );
+    } catch (error: any) {
+      return {
+        response: 'Sorry, something went wrong. Please try again.',
+        conversationState: { step: 'initial' },
+        error: error.message,
       };
     }
   }
@@ -81,4 +167,3 @@ export class AIController {
     };
   }
 }
-

@@ -783,9 +783,10 @@ export class BusinessesService {
       .andWhere('business.isActive = :isActive', { isActive: true });
 
     if (query) {
-      qb.andWhere('(business.name ILIKE :query OR business.description ILIKE :query)', {
-        query: `%${query}%`,
-      });
+      qb.andWhere(
+        '(business.name ILIKE :query OR business.description ILIKE :query OR service.name ILIKE :query OR business.city ILIKE :query OR business.address ILIKE :query)',
+        { query: `%${query}%` },
+      );
     }
 
     if (category) {

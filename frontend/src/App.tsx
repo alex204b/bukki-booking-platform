@@ -8,6 +8,7 @@ import { CurrencyProvider } from './contexts/CurrencyContext';
 import { SocketProvider } from './contexts/SocketContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import MotifBackground from './components/MotifBackground';
+import { CookieConsent } from './components/CookieConsent';
 import DecorativeBackground from './components/DecorativeBackground';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { Layout } from './components/Layout';
@@ -35,10 +36,28 @@ import { Favorites } from './pages/Favorites';
 import { Offers } from './pages/Offers';
 import { CreateOffer } from './pages/CreateOffer';
 import InfoPage from './pages/InfoPage';
+import LandingPage from './pages/LandingPage';
 import { TermsOfService } from './pages/TermsOfService';
 import { PrivacyPolicy } from './pages/PrivacyPolicy';
 import ResponsiveExample from './components/ResponsiveExample';
 import { AndroidBackHandler } from './components/AndroidBackHandler';
+import { useAuth } from './contexts/AuthContext';
+
+// Smart root: landing page for guests, home for logged-in users
+const RootRoute: React.FC = () => {
+  const { isAuthenticated, loading } = useAuth();
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-[#E7001E]" />
+      </div>
+    );
+  }
+  if (isAuthenticated) {
+    return <Layout><Home /></Layout>;
+  }
+  return <LandingPage />;
+};
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -142,14 +161,8 @@ function App() {
                 </ProtectedRoute>
               } />
 
-              {/* Protected Routes */}
-              <Route path="/" element={
-                <ProtectedRoute>
-                  <Layout>
-                    <Home />
-                  </Layout>
-                </ProtectedRoute>
-              } />
+              {/* Root: landing for guests, home for authenticated */}
+              <Route path="/" element={<RootRoute />} />
               
               <Route path="/businesses/:id" element={
                 <ProtectedRoute>
@@ -327,6 +340,7 @@ function App() {
             />
           </div>
               </Router>
+              <CookieConsent />
             </SocketProvider>
           </AuthProvider>
           </CurrencyProvider>

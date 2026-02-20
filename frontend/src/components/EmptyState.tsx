@@ -1,5 +1,6 @@
 import React from 'react';
 import { LucideIcon } from 'lucide-react';
+import { useI18n } from '../contexts/I18nContext';
 
 interface EmptyStateProps {
   icon: LucideIcon;
@@ -51,17 +52,20 @@ export const EmptyBookings: React.FC<{ onCreateBooking?: () => void }> = ({ onCr
   />
 );
 
-export const EmptyBusinesses: React.FC<{ onSearch?: () => void }> = ({ onSearch }) => (
-  <EmptyState
-    icon={require('lucide-react').Search}
-    title="No Businesses Found"
-    description="We couldn't find any businesses matching your search. Try adjusting your filters or search terms."
-    action={onSearch ? {
-      label: "Clear Filters",
-      onClick: onSearch,
-    } : undefined}
-  />
-);
+export const EmptyBusinesses: React.FC<{ onSearch?: () => void; searchQuery?: string }> = ({ onSearch, searchQuery }) => {
+  const { t } = useI18n();
+  return (
+    <EmptyState
+      icon={require('lucide-react').Search}
+      title={searchQuery ? `${t('noResultsFor')} "${searchQuery}"` : t('noBusinesses')}
+      description={searchQuery ? t('tryDifferentSearch') : t('adjustSearch')}
+      action={onSearch ? {
+        label: t('clearFilters'),
+        onClick: onSearch,
+      } : undefined}
+    />
+  );
+};
 
 export const EmptyServices: React.FC = () => (
   <EmptyState
